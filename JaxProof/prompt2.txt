@@ -1,0 +1,16 @@
+Actually, `MyExpr` has more constructors.
+```Lean
+inductive MyExpr (argType : List Type) : Type → Type 1 where
+  | arg (i : Fin argType.length) : MyExpr argType argType[i]
+  | const {exprType : Type} : exprType → MyExpr argType exprType
+deriving DecidableEq
+```
+How to write the projection function then? Also, the alternative is not suitable since I want the
+following `evaluation` function, which requires the type to be definitional equal
+```Lean
+def MyExpr.eval {argType : List Type} {exprType : Type} (expr : MyExpr argType exprType):
+    (∀ i : Fin argType.length, argType[i]) → exprType :=
+  match expr with
+  | MyExpr.arg i => fun x => x i
+  | MyExpr.const x => fun _ => x
+```
