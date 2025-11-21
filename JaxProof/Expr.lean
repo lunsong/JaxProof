@@ -31,7 +31,7 @@ inductive Expr : ℕ → Type where
   /-- repeat an array, `jax.numpy.repeat` -/
   | rep {n : ℕ} : String → ℕ → Expr n → Expr n
   /-- jax.lax.fori_loop -/
-  | fori_loop {n : ℕ} : String → ℕ → Expr n → Expr (n + 2) → Expr n
+  | fori_loop {n : ℕ} : String → Expr n → Expr n → Expr (n + 2) → Expr n
 deriving DecidableEq
 
 def Expr.name {n : ℕ} : Expr n → String
@@ -59,59 +59,6 @@ def Expr.succ {n : ℕ} : Expr n → Expr (n + 1)
   | div name x y => div name x.succ y.succ
   | rep name n x => rep name n x.succ
   | fori_loop name n x f => fori_loop name n x.succ f.succ
-
-theorem Expr.succ.inj {n : ℕ} : Function.Injective (@Expr.succ n) := fun x y h => by
-  induction x with
-  | arg _ i =>
-    cases y
-    any_goals cases h
-    unfold succ at h
-    injection h with h₁ h₂ h₃
-    rw [Fin.succ_inj] at h₃
-    rw [h₂, h₃]
-  | const_int name x
-  | const_float name x =>
-    cases y
-    any_goals cases h
-    rfl
-  | idx name x i hx hi => 
-    cases y
-    any_goals cases h
-    unfold succ at h
-    injection h with h₁ h₂ h₃ h₄
-    rw [hx _ h₃, hi _ h₄, h₂]
-  | setIdx name x i y hx hi hy =>
-    cases y
-    any_goals cases h
-    unfold succ at h
-    injection h with h₁ h₂ h₃ h₄ h₅
-    rw [h₂, hx _ h₃, hi _ h₄, hy _ h₅]
-  | add name x y hx hy
-  | sub name x y hx hy 
-  | mul name x y hx hy
-  | div name x y hx hy =>
-    cases y
-    any_goals cases h
-    unfold succ at h
-    injection h with h₁ h₂ h₃ h₄
-    rw [h₂, hx _ h₃, hy _ h₄]
-  | rep name n x hx =>
-    cases y
-    any_goals cases h
-    unfold succ at h
-    injection h with h₁ h₂ h₃ h₄
-    rw [h₂, h₃, hx _ h₄]
-  | fori_loop name n x f hx hf =>
-    cases y
-    any_goals cases h
-    unfold succ at h
-    injection h with h₁ h₂ h₃ h₄ h₅
-    rw [h₂, h₃, hx _ h₄, hf _ h₅]
-
-
-def Expr.succ_emb {n : ℕ} : Expr n ↪ Expr (n + 1) where
-  toFun := Expr.succ
-  inj' := Expr.succ.inj
 
 structure CodeGenCtx (n : ℕ) where
   args : Fin n → String

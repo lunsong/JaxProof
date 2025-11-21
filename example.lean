@@ -1,4 +1,5 @@
-import SecondQuantization.JAX
+import Mathlib.Tactic.NormNum
+import JaxProof
 
 open JAX
 
