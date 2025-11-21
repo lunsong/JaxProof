@@ -127,9 +127,12 @@ noncomputable def Expr.eval {n : ℕ} : Expr n →  (Fin n → Array) → Array
   | div _ a b, x => (a.eval x).div (b.eval x)
   | rep _ n a, x => (a.eval x).rep n
   | fori_loop _ n a f, x =>
-    open Fin in
-    let body_fun (i : ℕ) (c : Array) : Array := f.eval (cons (Array.int [i]) (cons c x))
-    Nat.rec (a.eval x) body_fun n
+    match (n.eval x) with
+    | .int [m] =>
+      open Fin in
+      let body_fun (i : ℕ) (c : Array) : Array := f.eval (cons (Array.int [i]) (cons c x))
+      Nat.rec (a.eval x) body_fun m.natAbs
+    | _ => .error
 
 def curryType : ℕ → Type
   | 0 => Array

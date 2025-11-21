@@ -1,15 +1,65 @@
-# Second Quantization in Lean4
+# JAX-Lean: Verified JAX Code Generation
 
-This project is a formalization of the method of [second quantization](https://lean-lang.org/) in [Lean4](https://lean-lang.org/). The documentation is at [here](http://8.148.4.14/lean/SecondQuantization/Basic.html)
+This project generates JAX Python code from Lean 4 expressions, enabling formal verification of numerical computations.
 
-## 🎯 Aim of the project
+## Purpose
 
-The primary goal of this project is to build a rigorous, formalized mathematical framework for second quantization. This will serve as a foundational library for researchers at the intersection of artificial intelligence, theoretical chemistry, and condensed matter physics. By providing a trustworthy and verifiable codebase, we hope to enable new avenues of research and discovery, particularly in the application of AI to complex quantum systems.
+Write mathematical expressions in Lean 4, prove properties about them, and generate executable JAX code. The `Expr n` type represents JAX computations with `n` arguments, tracking type safety at compile time.
 
-## 🚩 TODOs
+### Example: Repeated Squaring
 
-- [x] creation and annihilation operators and their basic properties
-- [x] vacuum expectation and its properties
-- [ ] Hatree-Fock method
-- [ ] FCI method
-- [ ] CCSD method
+**Lean definition:**
+
+```Lean
+import JaxProof
+
+open JAX
+
+namespace test_fun
+
+-- define the JAX Expr
+def n : Expr 2 := .arg "n" 0
+def x : Expr 2 := .arg "x" 1
+def loop_fun_carrier : Expr 4 := .arg "a" 1
+def loop_fun : Expr 4 := .mul "b" loop_fun_carrier loop_fun_carrier
+def y : Expr 2 := .fori_loop "y" n x loop_fun
+
+end test_fun
+
+-- generate python code
+#eval IO.println (test_fun.y.code "f")
+
+-- prove properties about this function
+example (n : ℕ) (x : List ℝ) :
+    test_fun.y.eval' (.int [n]) (.float x) = .float (x.map (· ^ (2 ^ n))) := by
+  simp[test_fun.y, test_fun.n, test_fun.x, test_fun.loop_fun, test_fun.loop_fun_carrier,
+    Expr.eval', curry, Expr.eval]
+  induction n with
+  | zero => simp
+  | succ n ih =>
+    simp[ih]
+    generalize hx' : (List.map (fun x ↦ x ^ 2 ^ n) x) = x'
+    generalize hx'' : (List.map (fun x ↦ x ^ 2 ^ (n + 1)) x) = x''
+    simp[Array.mul]
+    congr
+    refine List.ext_get ?_ ?_
+    · simp[← hx', ← hx'']
+    · intro m h₁ h₂
+      simp[← hx', ← hx'']
+      conv_rhs =>
+        conv =>
+          arg 2
+          rw [pow_add, pow_one, mul_two]
+        rw [pow_add]
+```
+
+Generated JAX code:
+
+```
+def f(n, x):
+  def b(__unused_i, a):
+    b = a * a
+    return b
+  y = fori_loop(0, n[0], b, x)
+  return y
+```

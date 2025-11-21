@@ -3,26 +3,43 @@ import JaxProof
 
 open JAX
 
-def x : Expr 1 := .arg "x" 1
+namespace test_fun
 
-def loop_fun_carrier : Expr 3 := .arg "a" 1
+def n : Expr 2 := .arg "n" 0
 
-def loop_fun : Expr 3 := .add "b" loop_fun_carrier loop_fun_carrier
+def x : Expr 2 := .arg "x" 1
 
-def y : Expr 1 := .fori_loop "y" 3 x loop_fun
+def loop_fun_carrier : Expr 4 := .arg "a" 1
 
-#eval IO.println (y.code "f")
+def loop_fun : Expr 4 := .mul "b" loop_fun_carrier loop_fun_carrier
 
-example (x : List ℝ) : y.eval' (.float x) = .float (x.map (8 * ·)) := by
-  let a := (Array.float x).add (Array.float x)
-  let b := a.add a
-  let c := b.add b
-  change c = .float (x.map (8 * ·))
-  simp[c,b,a,Array.add]
-  refine List.ext_get ?_ ?_
-  · simp
-  · intro n h₁ h₂
-    simp[←mul_two]
-    simp only [mul_assoc]
-    nth_rw 1 [mul_comm]
-    norm_num
+def y : Expr 2 := .fori_loop "y" n x loop_fun
+
+end test_fun
+
+#eval IO.println (test_fun.y.code "f")
+
+example (n : ℕ) (x : List ℝ) :
+    test_fun.y.eval' (.int [n]) (.float x) = .float (x.map (· ^ (2 ^ n))) := by
+  simp[test_fun.y, test_fun.n, test_fun.x, test_fun.loop_fun, test_fun.loop_fun_carrier,
+    Expr.eval', curry, Expr.eval]
+  induction n with
+  | zero => simp
+  | succ n ih =>
+    simp[ih]
+    generalize hx' : (List.map (fun x ↦ x ^ 2 ^ n) x) = x'
+    generalize hx'' : (List.map (fun x ↦ x ^ 2 ^ (n + 1)) x) = x''
+    simp[Array.mul]
+    congr
+    refine List.ext_get ?_ ?_
+    · simp[← hx', ← hx'']
+    · intro m h₁ h₂
+      simp[← hx', ← hx'']
+      conv_rhs =>
+        conv =>
+          arg 2
+          rw [pow_add, pow_one, mul_two]
+        rw [pow_add]
+
+  
+

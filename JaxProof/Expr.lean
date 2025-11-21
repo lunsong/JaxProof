@@ -58,7 +58,7 @@ def Expr.succ {n : ℕ} : Expr n → Expr (n + 1)
   | mul name x y => mul name x.succ y.succ
   | div name x y => div name x.succ y.succ
   | rep name n x => rep name n x.succ
-  | fori_loop name n x f => fori_loop name n x.succ f.succ
+  | fori_loop name n x f => fori_loop name n.succ x.succ f.succ
 
 structure CodeGenCtx (n : ℕ) where
   args : Fin n → String
@@ -117,6 +117,7 @@ def Expr.genCode {n : ℕ} (expr : Expr n) : EStateM String (CodeGenCtx n) Unit 
       x.genCode
       insertLine expr s!"{name} = {x.name}.repeat({n})"
     | fori_loop name m init f =>
+      m.genCode
       init.genCode
       match vars f.name with
       | .some x =>
@@ -130,12 +131,12 @@ def Expr.genCode {n : ℕ} (expr : Expr n) : EStateM String (CodeGenCtx n) Unit 
           Fin.cons "__unused_i" (Fin.cons "__unused_carrier" args : Fin (n + 1) → String)
         match f.genCode.run ⟨args', vars', []⟩ with
         | .ok _ ⟨args'', _ , code'⟩ =>
-          insertLine f s!"def _fun_{f.name}({args'' 0}, {args'' 1}):"
+          insertLine f s!"def {f.name}({args'' 0}, {args'' 1}):"
           let code'' := code'.map ("  " ++ ·)
           modify (fun ⟨args, vars, code⟩ =>
             ⟨args, vars, s!"  return {f.name}" :: code'' ++ code⟩)
         | .error msg _ => throw msg
-      insertLine expr s!"{name} = fori_loop(0, {m}, _fun_{f.name}, {init.name})"
+      insertLine expr s!"{name} = fori_loop(0, {m.name}[0], {f.name}, {init.name})"
 
 def Expr.code {n : ℕ} (expr : Expr n) (name : String) : String :=
   let result := expr.genCode.run ⟨fun i ↦ s!"__unused_{i}", fun _ => .none, []⟩
