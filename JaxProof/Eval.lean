@@ -28,7 +28,7 @@ def Array.setIdx : Array → Array → Array → Array
   | float x, int i, float y =>
     if h₀ : x.length = 0 then error else
     let : NeZero x.length := ⟨h₀⟩
-    let i' : List (Fin x.length) := i
+    let i' : List (Fin x.length) := i.map Int.cast
     have h₂ : i'.length = i.length := by simp[i']
     if ¬ i'.Nodup then error else
     if h₁ : y.length = i.length then
@@ -40,7 +40,7 @@ def Array.setIdx : Array → Array → Array → Array
   | int x, int i, int y =>
     if h₀ : x.length = 0 then error else
     let : NeZero x.length := ⟨h₀⟩
-    let i' : List (Fin x.length) := i
+    let i' : List (Fin x.length) := i.map Int.cast
     have h₂ : i'.length = i.length := by simp[i']
     if ¬ i'.Nodup then error else
     if h₁ : y.length = i.length then
@@ -118,7 +118,7 @@ def Array.rep (n : ℕ) : Array → Array
 noncomputable def Expr.eval {n : ℕ} : Expr n →  (Fin n → Array) → Array 
   | arg _ i, x => x i
   | const_int _ a, _ => Array.int a
-  | const_float _ a, _ => Array.float a
+  | const_float _ a, _ => Array.float (a.map Rat.cast)
   | idx _ a i, x => (a.eval x).idx (i.eval x)
   | setIdx _ a i b, x => (a.eval x).setIdx (i.eval x) (b.eval x)
   | add _ a b, x => (a.eval x).add (b.eval x)
