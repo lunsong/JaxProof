@@ -41,41 +41,7 @@ inductive Expr where
   | exp : Expr → Expr
   | log : Expr → Expr
   | einsum : String → List Expr → Expr
-
-/-- Custom BEq instance for Expr -/
-instance : BEq Expr where
-  beq := fun a b =>
-    match a, b with
-    | arg i, arg j => i == j
-    | func n x, func m y => n == m && x == y
-    | idx x i, idx y j => x == y && i == j
-    | setIdx x i y, setIdx a b c => x == a && i == b && y == c
-    | add x y, add a b => x == a && y == b
-    | sub x y, sub a b => x == a && y == b
-    | mul x y, mul a b => x == a && y == b
-    | div x y, div a b => x == a && y == b
-    | mod x y, mod a b => x == a && y == b
-    | divInt x y, divInt a b => x == a && y == b
-    | rep n x, rep m y => n == m && x == y
-    | fori_loop n x f, fori_loop m y g => n == m && x == y && f == g
-    | eq x y, eq a b => x == a && y == b
-    | lt x y, lt a b => x == a && y == b
-    | select c x y, select a b d => c == a && x == b && y == d
-    | toFloat x, toFloat y => x == y
-    | addIdx x i y, addIdx a b c => x == a && i == b && y == c
-    | sin x, sin y => x == y
-    | cos x, cos y => x == y
-    | exp x, exp y => x == y
-    | log x, log y => x == y
-    | einsum s xs, einsum t ys => s == t && xs == ys
-    | _, _ => false
-
-/-- Custom DecidableEq instance for Expr -/
-instance : DecidableEq Expr := fun a b =>
-  if h : a == b then
-    isTrue (by simp [h])
-  else
-    isFalse (by simp [BEq.beq] at h; cases a <;> cases b <;> try { contradiction } <;> simp [h] <;> contradiction)
+deriving BEq
 
 def Expr.succ : Expr → Expr
   | arg i => arg i.succ
