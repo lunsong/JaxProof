@@ -229,7 +229,7 @@ theorem multiDimIdx_inbound {shape idx : List ℕ} (h : valid_idx (idx.zip shape
         _ ≤ (H' + 1) * B := by rw[add_mul, one_mul]; gcongr; rwa[Nat.succ_le_iff]
         _ ≤ _ := by gcongr; rw[Nat.succ_le_iff]; exact h.1
 
-theorem multiDimIdx_eq_prod {shape idx : List ℕ} (h : ∀ n ∈ shape, n ≠ 0) :
+theorem multiDimIdx_le_prod {shape idx : List ℕ} (h : ∀ n ∈ shape, n ≠ 0) :
     (multiDimIdx shape idx).2 ≤ shape.prod := by
   revert idx
   induction shape with
@@ -254,50 +254,53 @@ theorem multiDimIdx_eq_prod {shape idx : List ℕ} (h : ∀ n ∈ shape, n ≠ 0
       specialize @ih h.2 T'
       gcongr
 
-def multiDimIdx' (shape : List ℕ) (idx : (i : Fin shape.length) → Fin (shape.get i))
-  (hshape : ∀ n ∈ shape, n ≠ 0) : Fin shape.prod :=
-  Fin.mk (multiDimIdx shape (List.ofFn (idx ·))).1 <| by
-    refine lt_of_lt_of_le (multiDimIdx_inbound ?_) (multiDimIdx_eq_prod hshape)
-    intro ⟨a, b⟩ h
-    rw [List.mem_iff_get] at h
-    obtain ⟨n, h⟩ := h
-    simp at h
-    simp[←h.1, ←h.2]
 
 def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
   (is : ∀ i : Fin σ.length, Fin (σ.get i)) : Option ℝ :=
-  match xs with
-  | [] => some 1
-  | ⟨x, ns⟩ :: xs =>
-    match x with
-    | .float x => 
-      if h₀ : x.length = (ns.map σ.get).prod then
-        match preEinsum σ xs is with
-        | none => none
-        | some v =>
-          let i₀ : List ℕ := ns.map (is ·)
-          let n₀ : List ℕ := ns.map σ.get
-          have h' : n₀.length = ns.length := by simp[n₀]
-          if h₁ : ∀ n ∈ n₀, n ≠ 0 then
-            let i : Fin x.length := (
-              multiDimIdx' (List.ofFn fun (i : Fin ns.length) ↦ σ.get (ns.get i))
-                (fun i ↦ (is (ns.get (i.cast <| by simp))).cast <| by simp) <| by
-                simp[n₀] at h₁
-                simp
-                intro a
-                apply h₁ ns[a]
-                simp).cast <| by
-                  simp [h₀]
-                  congr
-                  apply List.ext_get
-                  · simp
-                  intro n h'' h'''
-                  simp
-            some (v * x.get i)
+  process xs 1.0
+  where process (remaining : List (Array × List (Fin σ.length))) (product : ℝ) : Option ℝ :=
+    match remaining with
+    | [] => 
+        -- Base case: all arrays processed, return the accumulated product
+        some product
+    | ⟨.float values, indices⟩ :: rest =>
+        -- Extract dimensions from indices
+        let dims := indices.map σ.get
+        
+        -- Validate array has correct shape
+        if h₀ : values.length = dims.prod then
+          -- Validate all dimensions are non-zero
+          if h₁ : ∀ d ∈ dims, d ≠ 0 then
+            -- Map symbolic indices to concrete values using the index mapping
+            let idxVals := indices.map (fun i => (is i).val)
+            
+            -- Compute linear index into flattened array
+            -- Prove that index values are valid (each < its dimension)
+            have h_valid : valid_idx (idxVals.zip dims) := by
+              simp [valid_idx]
+              intro a b h
+              rw [List.mem_iff_get] at h
+              obtain ⟨n, hn⟩ := h
+              simp at hn
+              simp [←hn.1, ←hn.2, idxVals, dims]
+            
+            -- Prove the linear index is within bounds
+            have h_bound : (multiDimIdx dims idxVals).1 < values.length := 
+              h₀ ▸ (lt_of_lt_of_le (multiDimIdx_inbound h_valid) (multiDimIdx_le_prod h₁))
+
+
+            let idx : Fin values.length := ⟨(multiDimIdx dims idxVals).1, h_bound⟩
+            
+            -- Recurse with updated product
+            process rest (product * values.get idx)
           else
-            none
-      else none
-    | _ => none
+            none  -- Invalid: zero dimension found
+        else
+          none  -- Invalid: shape mismatch
+    | _ :: _ => 
+        none  -- Invalid: not a float array
+  
+  -- Start processing with initial product = 1.0
 
 end Einsum
 
