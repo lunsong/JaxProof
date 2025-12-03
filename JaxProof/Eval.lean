@@ -260,22 +260,12 @@ def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
   process xs 1.0
   where process (remaining : List (Array × List (Fin σ.length))) (product : ℝ) : Option ℝ :=
     match remaining with
-    | [] => 
-        -- Base case: all arrays processed, return the accumulated product
-        some product
+    | [] => some product
     | ⟨.float values, indices⟩ :: rest =>
-        -- Extract dimensions from indices
         let dims := indices.map σ.get
-        
-        -- Validate array has correct shape
         if h₀ : values.length = dims.prod then
-          -- Validate all dimensions are non-zero
           if h₁ : ∀ d ∈ dims, d ≠ 0 then
-            -- Map symbolic indices to concrete values using the index mapping
             let idxVals := indices.map (fun i => (is i).val)
-            
-            -- Compute linear index into flattened array
-            -- Prove that index values are valid (each < its dimension)
             have h_valid : valid_idx (idxVals.zip dims) := by
               simp [valid_idx]
               intro a b h
@@ -283,15 +273,9 @@ def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
               obtain ⟨n, hn⟩ := h
               simp at hn
               simp [←hn.1, ←hn.2, idxVals, dims]
-            
-            -- Prove the linear index is within bounds
             have h_bound : (multiDimIdx dims idxVals).1 < values.length := 
               h₀ ▸ (lt_of_lt_of_le (multiDimIdx_inbound h_valid) (multiDimIdx_le_prod h₁))
-
-
             let idx : Fin values.length := ⟨(multiDimIdx dims idxVals).1, h_bound⟩
-            
-            -- Recurse with updated product
             process rest (product * values.get idx)
           else
             none  -- Invalid: zero dimension found
@@ -299,8 +283,6 @@ def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
           none  -- Invalid: shape mismatch
     | _ :: _ => 
         none  -- Invalid: not a float array
-  
-  -- Start processing with initial product = 1.0
 
 end Einsum
 
