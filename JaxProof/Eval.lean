@@ -284,6 +284,12 @@ def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
     | _ :: _ => 
         none  -- Invalid: not a float array
 
+def sum {σ : List ℕ} (x : ((i : Fin σ.length) → (Fin (σ.get i))) → ℝ) (i : List (Fin σ.length))
+  (j : (k : Fin i.length) → Fin (σ.get (i.get k))) : ℝ :=
+  let S : Finset ((i : Fin σ.length) → (Fin (σ.get i))) :=
+    {m | ∀ q : Fin i.length, j q = m (i.get q)}
+  ∑ m ∈ S, x m
+
 end Einsum
 
 noncomputable def Expr.eval : Expr → List Array → Array 
