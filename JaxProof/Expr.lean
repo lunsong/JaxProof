@@ -6,35 +6,37 @@ This file contains the inductive type `JAX.Expr`, which represents a jaxpr, and 
 which generates the python code.
 -/
 
-namespace JAX
+namespace Jax
 
 /--
 The representation of JAX expressions. `Expr n` is an expression with n variables.
 Each constructor's first argument is the name of the expression, which is used during code
 generation
 -/
-inductive Expr : ℕ → Type where
+inductive Expr where
   /-- `arg i` is the i'th argument -/
-  | arg {n : ℕ} : String → Fin n → Expr n
+  | arg : String → ℕ → Expr
   /-- constant float array -/
-  | const_float {n : ℕ} : String → List ℚ → Expr n
+  | const_float : String → List ℚ → Expr
   /-- constant integer array -/
-  | const_int {n : ℕ} : String → List ℤ → Expr n
+  | const_int : String → List ℤ → Expr
   /-- indexing an array, a = b[i] -/
-  | idx {n : ℕ} : String → Expr n → Expr n → Expr n
+  | idx : String → Expr → Expr → Expr
   /-- set items of an array, a = b.set[i].set(c) -/
-  | setIdx {n : ℕ} : String → Expr n → Expr n → Expr n → Expr n
-  | add {n : ℕ} : String → Expr n → Expr n → Expr n
-  | sub {n : ℕ} : String → Expr n → Expr n → Expr n
-  | mul {n : ℕ} : String → Expr n → Expr n → Expr n
-  | div {n : ℕ} : String → Expr n → Expr n → Expr n
+  | setIdx : String → Expr → Expr → Expr → Expr
+  | add : String → Expr → Expr → Expr
+  | sub : String → Expr → Expr → Expr
+  | mul : String → Expr → Expr → Expr
+  | div : String → Expr → Expr → Expr
   /-- repeat an array, `jax.numpy.repeat` -/
-  | rep {n : ℕ} : String → ℕ → Expr n → Expr n
+  | rep : String → ℕ → Expr → Expr
   /-- jax.lax.fori_loop -/
-  | fori_loop {n : ℕ} : String → Expr n → Expr n → Expr (n + 2) → Expr n
+  | fori_loop : String → Expr → Expr → Expr → Expr
+  /-- sub functions -/
+  | func : String → ℕ → Expr → Expr
 deriving DecidableEq
 
-def Expr.name {n : ℕ} : Expr n → String
+def Expr.name : Expr → String
   | arg name _ => name
   | const_int name _ => name
   | const_float name _ => name
@@ -46,8 +48,9 @@ def Expr.name {n : ℕ} : Expr n → String
   | div name _ _ => name
   | rep name _ _ => name
   | fori_loop name _ _ _ => name
+  | func name _ _ => name
 
-def Expr.succ {n : ℕ} : Expr n → Expr (n + 1)
+def Expr.succ : Expr → Expr
   | arg name i => arg name i.succ
   | const_int name x => const_int name x
   | const_float name x => const_float name x
@@ -59,17 +62,18 @@ def Expr.succ {n : ℕ} : Expr n → Expr (n + 1)
   | div name x y => div name x.succ y.succ
   | rep name n x => rep name n x.succ
   | fori_loop name n x f => fori_loop name n.succ x.succ f.succ
+  | func name n f => func name n f.succ
 
-structure CodeGenCtx (n : ℕ) where
-  args : Fin n → String
-  vars : String → Option ((m : ℕ) × Expr m)
+structure CodeGenCtx where
+  nargs : ℕ
+  args : ℕ → Option String
+  vars : String → Option Expr
   code : List String
 
-def Expr.insertLine {n m : ℕ} (expr : Expr m) (line : String) :
-    EStateM String (CodeGenCtx n) Unit := do
-  let ⟨args, vars, code⟩ ← get
-  let new_vars := Function.update vars expr.name (.some ⟨m, expr⟩)
-  set (CodeGenCtx.mk args new_vars (line :: code))
+def Expr.insertLine (expr : Expr) (line : String) : EStateM String CodeGenCtx Unit := do
+  let ⟨n, args, vars, code⟩ ← get
+  let new_vars := Function.update vars expr.name (.some expr)
+  set (CodeGenCtx.mk n args new_vars (line :: code))
 
 def writeLine {n : ℕ} (s : String) : EStateM String (CodeGenCtx n) Unit := do
   let ⟨args, vars, code⟩ ← get
