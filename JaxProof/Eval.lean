@@ -198,6 +198,18 @@ nonrec def Array.addIdx : Array → Array → Array → Array
     | none => error
   | _, _, _ => error
 
+namespace Einsum
+
+def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
+  (is : ∀ i : Fin σ.length, Fin (σ.get i)) : Option ℝ :=
+  let valid_shape (x : Array) (ns : List (Fin σ.length)) : Prop :=
+    match x with
+    | .float y => y.length = (ns.map σ.get).prod 
+    | _ => False
+  if xs.Forall fun ⟨x, ns⟩ ↦ valid_shape x ns then none else none
+
+end Einsum
+
 noncomputable def Expr.eval : Expr → List Array → Array 
   | arg i, x =>
     match x[i]? with
