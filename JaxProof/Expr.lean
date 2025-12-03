@@ -15,140 +15,258 @@ generation
 -/
 inductive Expr where
   /-- `arg i` is the i'th argument -/
-  | arg : String → ℕ → Expr
-  /-- constant float array -/
-  | const_float : String → List ℚ → Expr
-  /-- constant integer array -/
-  | const_int : String → List ℤ → Expr
+  | arg : ℕ → Expr
+  | func : ℕ → Expr → Expr
   /-- indexing an array, a = b[i] -/
-  | idx : String → Expr → Expr → Expr
+  | idx : Expr → Expr → Expr
   /-- set items of an array, a = b.set[i].set(c) -/
-  | setIdx : String → Expr → Expr → Expr → Expr
-  | add : String → Expr → Expr → Expr
-  | sub : String → Expr → Expr → Expr
-  | mul : String → Expr → Expr → Expr
-  | div : String → Expr → Expr → Expr
+  | setIdx : Expr → Expr → Expr → Expr
+  | add : Expr → Expr → Expr
+  | sub : Expr → Expr → Expr
+  | mul : Expr → Expr → Expr
+  | div : Expr → Expr → Expr
+  | mod : Expr → Expr → Expr
+  | divInt : Expr → Expr → Expr
   /-- repeat an array, `jax.numpy.repeat` -/
-  | rep : String → ℕ → Expr → Expr
+  | rep : ℕ → Expr → Expr
   /-- jax.lax.fori_loop -/
-  | fori_loop : String → Expr → Expr → Expr → Expr
-  /-- sub functions -/
-  | func : String → ℕ → Expr → Expr
-deriving DecidableEq
+  | fori_loop : Expr → Expr → Expr → Expr
+  | eq : Expr → Expr → Expr
+  | lt : Expr → Expr → Expr
+  | select : Expr → Expr → Expr → Expr
+  | toFloat : Expr → Expr
+  | addIdx : Expr → Expr → Expr → Expr
+  | sin : Expr → Expr
+  | cos : Expr → Expr
+  | exp : Expr → Expr
+  | log : Expr → Expr
+  | einsum : String → List Expr → Expr
 
-def Expr.name : Expr → String
-  | arg name _ => name
-  | const_int name _ => name
-  | const_float name _ => name
-  | idx name _ _ => name
-  | setIdx name _ _ _ => name
-  | add name _ _ => name
-  | sub name _ _ => name
-  | mul name _ _ => name
-  | div name _ _ => name
-  | rep name _ _ => name
-  | fori_loop name _ _ _ => name
-  | func name _ _ => name
+/-- Custom BEq instance for Expr -/
+instance : BEq Expr where
+  beq := fun a b =>
+    match a, b with
+    | arg i, arg j => i == j
+    | func n x, func m y => n == m && x == y
+    | idx x i, idx y j => x == y && i == j
+    | setIdx x i y, setIdx a b c => x == a && i == b && y == c
+    | add x y, add a b => x == a && y == b
+    | sub x y, sub a b => x == a && y == b
+    | mul x y, mul a b => x == a && y == b
+    | div x y, div a b => x == a && y == b
+    | mod x y, mod a b => x == a && y == b
+    | divInt x y, divInt a b => x == a && y == b
+    | rep n x, rep m y => n == m && x == y
+    | fori_loop n x f, fori_loop m y g => n == m && x == y && f == g
+    | eq x y, eq a b => x == a && y == b
+    | lt x y, lt a b => x == a && y == b
+    | select c x y, select a b d => c == a && x == b && y == d
+    | toFloat x, toFloat y => x == y
+    | addIdx x i y, addIdx a b c => x == a && i == b && y == c
+    | sin x, sin y => x == y
+    | cos x, cos y => x == y
+    | exp x, exp y => x == y
+    | log x, log y => x == y
+    | einsum s xs, einsum t ys => s == t && xs == ys
+    | _, _ => false
+
+/-- Custom DecidableEq instance for Expr -/
+instance : DecidableEq Expr := fun a b =>
+  if h : a == b then
+    isTrue (by simp [h])
+  else
+    isFalse (by simp [BEq.beq] at h; cases a <;> cases b <;> try { contradiction } <;> simp [h] <;> contradiction)
 
 def Expr.succ : Expr → Expr
-  | arg name i => arg name i.succ
-  | const_int name x => const_int name x
-  | const_float name x => const_float name x
-  | idx name x i => idx name x.succ i.succ
-  | setIdx name x i y => setIdx name x.succ i.succ y.succ
-  | add name x y => add name x.succ y.succ
-  | sub name x y => sub name x.succ y.succ
-  | mul name x y => mul name x.succ y.succ
-  | div name x y => div name x.succ y.succ
-  | rep name n x => rep name n x.succ
-  | fori_loop name n x f => fori_loop name n.succ x.succ f.succ
-  | func name n f => func name n f.succ
+  | arg i => arg i.succ
+  | func n x => func n x.succ
+  | idx x i => idx x.succ i.succ
+  | setIdx x i y => setIdx x.succ i.succ y.succ
+  | add x y => add x.succ y.succ
+  | sub x y => sub x.succ y.succ
+  | mul x y => mul x.succ y.succ
+  | div x y => div x.succ y.succ
+  | divInt x y => divInt x.succ y.succ
+  | mod x y => mod x.succ y.succ
+  | rep n x => rep n x.succ
+  | fori_loop n x f => fori_loop n.succ x.succ f.succ
+  | eq x y => eq x.succ y.succ
+  | lt x y => lt x.succ y.succ
+  | select c x y => select c.succ x.succ y.succ
+  | toFloat x => toFloat x.succ
+  | addIdx x i y => addIdx x.succ i.succ y.succ
+  | sin x => sin x.succ
+  | cos x => cos x.succ
+  | exp x => exp x.succ
+  | log x => log x.succ
+  | einsum s xs => einsum s (xs.map Expr.succ)
 
 structure CodeGenCtx where
-  nargs : ℕ
-  args : ℕ → Option String
-  vars : String → Option Expr
+  vars : List Expr
   code : List String
 
-def Expr.insertLine (expr : Expr) (line : String) : EStateM String CodeGenCtx Unit := do
-  let ⟨n, args, vars, code⟩ ← get
-  let new_vars := Function.update vars expr.name (.some expr)
-  set (CodeGenCtx.mk n args new_vars (line :: code))
+def addExpr (expr : Expr) : StateM CodeGenCtx String := do
+  let ⟨vars, code⟩ ← get
+  let name := s!"x{vars.length}"
+  set (CodeGenCtx.mk (vars.concat expr) code)
+  return name
 
-def writeLine {n : ℕ} (s : String) : EStateM String (CodeGenCtx n) Unit := do
-  let ⟨args, vars, code⟩ ← get
-  set (CodeGenCtx.mk args vars (s :: code))
+def writeLines (lines : List String) : StateM CodeGenCtx Unit := do
+  let ⟨vars, code⟩ ← get
+  set (CodeGenCtx.mk vars (code ++ lines))
 
-def Expr.genCode {n : ℕ} (expr : Expr n) : EStateM String (CodeGenCtx n) Unit := do
-  if expr.name.startsWith "__" then throw s!"invalid Expr name {expr.name}"
-  let ⟨args, vars, code⟩ ← get
-  match vars expr.name with
-  | .some expr' =>
-    if ⟨n, expr⟩ ≠ expr' then throw s!"different variable use same name {expr.name}"
+def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
+  let ⟨vars, _⟩ ← get
+  match vars.idxOf? expr with
+  | .some i => return s!"x{i}"
   | .none =>
     match expr with
-    | arg name i =>
-      let new_vars := Function.update vars expr.name (.some ⟨n, expr⟩)
-      set (CodeGenCtx.mk (Function.update args i name) new_vars code)
-    | const_float name x => insertLine expr s!"{name} = array({x}, dtype=float)"
-    | const_int name x => insertLine expr s!"{name} = array({x})"
-    | idx name x i =>
-      x.genCode
-      i.genCode
-      insertLine expr s!"{name} = {x.name}[{i.name}]"
-    | setIdx name x i y =>
-      x.genCode
-      i.genCode
-      y.genCode
-      insertLine expr s!"{name} = {x.name}.at[{i.name}].set({y.name})"
-    | add name x y =>
-      x.genCode
-      y.genCode
-      insertLine expr s!"{name} = {x.name} + {y.name}"
-    | sub name x y =>
-      x.genCode
-      y.genCode
-      insertLine expr s!"{name} = {x.name} - {y.name}"
-    | mul name x y =>
-      x.genCode
-      y.genCode
-      insertLine expr s!"{name} = {x.name} * {y.name}"
-    | div name x y =>
-      x.genCode
-      y.genCode
-      insertLine expr s!"{name} = {x.name} / {y.name}"
-    | rep name n x =>
-      x.genCode
-      insertLine expr s!"{name} = {x.name}.repeat({n})"
-    | fori_loop name m init f =>
-      m.genCode
-      init.genCode
-      match vars f.name with
-      | .some x =>
-        if x ≠ ⟨n + 2, f⟩ then throw s!"different variables have same name {f.name}"
-      | .none =>
-        let vars' (name : String) : Option ((l : ℕ) × Expr l) :=
-          match vars name with
-          | .none => .none
-          | .some ⟨l, e⟩ => .some ⟨l + 2, e.succ.succ⟩
-        let args' : Fin (n + 2) → String :=
-          Fin.cons "__unused_i" (Fin.cons "__unused_carrier" args : Fin (n + 1) → String)
-        match f.genCode.run ⟨args', vars', []⟩ with
-        | .ok _ ⟨args'', _ , code'⟩ =>
-          insertLine f s!"def {f.name}({args'' 0}, {args'' 1}):"
-          let code'' := code'.map ("  " ++ ·)
-          modify (fun ⟨args, vars, code⟩ =>
-            ⟨args, vars, s!"  return {f.name}" :: code'' ++ code⟩)
-        | .error msg _ => throw msg
-      insertLine expr s!"{name} = fori_loop(0, {m.name}[0], {f.name}, {init.name})"
+    | .arg _ =>  addExpr expr
+    | .func n x =>
+      let fname ← addExpr x
+      let ⟨vars, _⟩ ← get
+      let ctx : CodeGenCtx := ⟨vars.map (Nat.repeat Expr.succ n), []⟩
+      let (name, ⟨sub_vars, sub_code⟩) := x.genCode ctx
+      let body : List String := (sub_code.concat s!"return {name}").map ("  " ++ ·)
+      let argnames : List String := (List.range n).map fun i ↦
+        match sub_vars.idxOf? (Expr.arg i) with
+        | .some j => s!"x{j}"
+        | .none => s!"_x{i}"
+      let head : String := s!"def {fname}(" ++ ", ".intercalate argnames ++ "):"
+      writeLines (head :: body)
+      return fname
+    | .add x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} + {yname}"]
+      return name
+    | .sub x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} - {yname}"]
+      return name
+    | .div x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} / {yname}"]
+      return name
+    | .divInt x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} // {yname}"]
+      return name
+    | .mul x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} * {yname}"]
+      return name
+    | .mod x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} % {yname}"]
+      return name
+    | .idx x i =>
+      let xname ← x.genCode
+      let iname ← i.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname}[{iname}]"]
+      return name
+    | .setIdx x i y =>
+      let xname ← x.genCode
+      let iname ← i.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname}.at[{iname}].set({yname})"]
+      return name
+    | .rep n x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname}.repeat({n})"]
+      return name
+    | .fori_loop n x f =>
+      let xname ← x.genCode
+      let nname ← n.genCode
+      let fname ← f.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.lax.fori_loop(0, {nname}[0], {fname}, {xname})"]
+      return name
+    | .eq x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} == {yname}"]
+      return name
+    | .lt x y =>
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname} < {yname}"]
+      return name
+    | .select c x y =>
+      let cname ← c.genCode
+      let xname ← x.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.lax.select({cname}, {xname}, {yname})"]
+      return name
+    | .toFloat x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname}.astype(float)"]
+      return name
+    | .addIdx x i y =>
+      let xname ← x.genCode
+      let iname ← i.genCode
+      let yname ← y.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname}.at[{iname}].add({yname})"]
+      return name
+    | .sin x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.numpy.sin({xname})"]
+      return name
+    | .cos x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.numpy.cos({xname})"]
+      return name
+    | .exp x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.numpy.exp({xname})"]
+      return name
+    | .log x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.numpy.log({xname})"]
+      return name
+    | .einsum s xs =>
+      let xnames ← xs.mapM Expr.genCode
+      let name ← addExpr expr
+      let args := ", ".intercalate xnames
+      writeLines [s!"{name} = jax.numpy.einsum('{s}', {args})"]
+      return name
 
-def Expr.code {n : ℕ} (expr : Expr n) (name : String) : String :=
-  let result := expr.genCode.run ⟨fun i ↦ s!"__unused_{i}", fun _ => .none, []⟩
-  match result with
-  | .ok _ ⟨args, _, code⟩ =>
-    let body : String := "\n  ".intercalate code.reverse
-    let argnames_list := ", ".intercalate (List.ofFn args)
-    s!"def {name}({argnames_list}):\n  {body}\n  return {expr.name}"
-  | .error err_msg _ => s!"# error: {err_msg}"
 
-end JAX
+def Expr.code (expr : Expr) : String := "\n".intercalate (expr.genCode ⟨[], []⟩).2.2
+
+/-
+`def fn : Expr :=
+  let x := Expr.arg 0
+  let y := Expr.arg 1
+  let z := Expr.arg 2
+  let a := Expr.mul (Expr.sin x) y
+  let b := Expr.add a z
+  Expr.func 3 b
+
+#eval IO.println fn.code`
+-/
+
+end Jax
