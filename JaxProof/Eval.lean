@@ -200,13 +200,104 @@ nonrec def Array.addIdx : Array → Array → Array → Array
 
 namespace Einsum
 
+def multiDimIdx (shape idx : List ℕ) : ℕ × ℕ:=
+  (idx.zip shape).foldr (fun a b ↦ (a.1 * b.2 + b.1, a.2 * b.2)) (0, 1)
+
+def valid_idx : List (ℕ × ℕ) → Prop := fun l ↦ ∀ x ∈ l, x.1 < x.2
+
+theorem multiDimIdx_inbound {shape idx : List ℕ} (h : valid_idx (idx.zip shape)) :
+    (multiDimIdx shape idx).1 < (multiDimIdx shape idx).2 := by
+  revert idx
+  induction shape with
+  | nil => simp [multiDimIdx]
+  | cons H T ih =>
+    intro idx
+    simp [multiDimIdx]
+    match idx with
+    | [] => simp
+    | H' :: T' =>
+      simp
+      rw[←multiDimIdx]
+      intro h
+      simp[valid_idx] at h
+      have : valid_idx (T'.zip T) := by simpa[valid_idx] using h.2
+      specialize ih this
+      generalize (multiDimIdx T T').1 = A at *
+      generalize (multiDimIdx T T').2 = B at *
+      rw[← Nat.succ_le_iff, Nat.succ_eq_add_one, add_assoc]
+      calc
+        _ ≤ (H' + 1) * B := by rw[add_mul, one_mul]; gcongr; rwa[Nat.succ_le_iff]
+        _ ≤ _ := by gcongr; rw[Nat.succ_le_iff]; exact h.1
+
+theorem multiDimIdx_eq_prod {shape idx : List ℕ} (h : ∀ n ∈ shape, n ≠ 0) :
+    (multiDimIdx shape idx).2 ≤ shape.prod := by
+  revert idx
+  induction shape with
+  | nil => simp [multiDimIdx]
+  | cons H T ih =>
+    simp[multiDimIdx]
+    intro idx
+    match idx with
+    | [] =>
+      simp at h ⊢
+      have : T.prod ≠ 0 := List.prod_ne_zero <| fun hc ↦ h.2 0 hc rfl
+      generalize T.prod = t at *
+      have h' : H ≠ 0 := h.1
+      by_contra! hc
+      have h'' : H * t = 0 := by omega
+      simp at h''
+      exact h''.elim h' this
+    | H' :: T' =>
+      simp
+      rw[← multiDimIdx]
+      simp at h
+      specialize @ih h.2 T'
+      gcongr
+
+def multiDimIdx' (shape : List ℕ) (idx : (i : Fin shape.length) → Fin (shape.get i))
+  (hshape : ∀ n ∈ shape, n ≠ 0) : Fin shape.prod :=
+  Fin.mk (multiDimIdx shape (List.ofFn (idx ·))).1 <| by
+    refine lt_of_lt_of_le (multiDimIdx_inbound ?_) (multiDimIdx_eq_prod hshape)
+    intro ⟨a, b⟩ h
+    rw [List.mem_iff_get] at h
+    obtain ⟨n, h⟩ := h
+    simp at h
+    simp[←h.1, ←h.2]
+
 def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
   (is : ∀ i : Fin σ.length, Fin (σ.get i)) : Option ℝ :=
-  let valid_shape (x : Array) (ns : List (Fin σ.length)) : Prop :=
+  match xs with
+  | [] => some 1
+  | ⟨x, ns⟩ :: xs =>
     match x with
-    | .float y => y.length = (ns.map σ.get).prod 
-    | _ => False
-  if xs.Forall fun ⟨x, ns⟩ ↦ valid_shape x ns then none else none
+    | .float x => 
+      if h₀ : x.length = (ns.map σ.get).prod then
+        match preEinsum σ xs is with
+        | none => none
+        | some v =>
+          let i₀ : List ℕ := ns.map (is ·)
+          let n₀ : List ℕ := ns.map σ.get
+          have h' : n₀.length = ns.length := by simp[n₀]
+          if h₁ : ∀ n ∈ n₀, n ≠ 0 then
+            let i : Fin x.length := (
+              multiDimIdx' (List.ofFn fun (i : Fin ns.length) ↦ σ.get (ns.get i))
+                (fun i ↦ (is (ns.get (i.cast <| by simp))).cast <| by simp) <| by
+                simp[n₀] at h₁
+                simp
+                intro a
+                apply h₁ ns[a]
+                simp).cast <| by
+                  simp [h₀]
+                  congr
+                  apply List.ext_get
+                  · simp
+                  intro n h'' h'''
+                  simp
+            some (v * x.get i)
+          else
+            none
+      else none
+    | _ => none
 
 end Einsum
 
@@ -249,5 +340,6 @@ noncomputable def Expr.eval : Expr → List Array → Array
   | log a, x => match a.eval x with
     | .float y => .float <| y.map Real.log
     | _ => .error
+  | einsum _ _, _ => .error  -- TODO: Implement einsum evaluation
 
 end Jax
