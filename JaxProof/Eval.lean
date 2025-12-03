@@ -284,11 +284,29 @@ def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
     | _ :: _ => 
         none  -- Invalid: not a float array
 
-def sum {σ : List ℕ} (x : ((i : Fin σ.length) → (Fin (σ.get i))) → ℝ) (i : List (Fin σ.length))
-  (j : (k : Fin i.length) → Fin (σ.get (i.get k))) : ℝ :=
-  let S : Finset ((i : Fin σ.length) → (Fin (σ.get i))) :=
-    {m | ∀ q : Fin i.length, j q = m (i.get q)}
-  ∑ m ∈ S, x m
+/-- Computes the sum over all index functions that satisfy the constraint that
+for fixed positions, the index function must equal the provided values.
+
+This is the core operation for einsum: summing over dimensions while keeping
+some indices fixed.
+
+Parameters:
+- x: Function that computes a value given an index function over all dimensions
+- fixedIndices: List of index positions that are held fixed  
+- fixedValues: Function providing the values at the fixed index positions
+
+Returns: Sum of x over all index functions satisfying the constraints -/
+def sum {σ : List ℕ} (x : ((i : Fin σ.length) → (Fin (σ.get i))) → ℝ)
+    (fixedIndices : List (Fin σ.length))
+    (fixedValues : (k : Fin fixedIndices.length) → Fin (σ.get (fixedIndices.get k))) : ℝ :=
+  
+  -- Define the set of all index functions that satisfy the fixity constraints
+  let feasibleIndices : Finset ((i : Fin σ.length) → (Fin (σ.get i))) :=
+    { indexFn | ∀ position : Fin fixedIndices.length, 
+                fixedValues position = indexFn (fixedIndices.get position) }
+  
+  -- Sum x over all feasible index functions
+  ∑ indexFn ∈ feasibleIndices, x indexFn
 
 end Einsum
 
