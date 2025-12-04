@@ -200,115 +200,210 @@ nonrec def Array.addIdx : Array → Array → Array → Array
 
 namespace Einsum
 
-def multiDimIdx (shape idx : List ℕ) : ℕ × ℕ:=
-  (idx.zip shape).foldr (fun a b ↦ (a.1 * b.2 + b.1, a.2 * b.2)) (0, 1)
+def ValidShape : Type := Subtype fun (s : List ℕ) ↦ ∀ n ∈ s, n ≠ 0
 
-def valid_idx : List (ℕ × ℕ) → Prop := fun l ↦ ∀ x ∈ l, x.1 < x.2
+def ValidIdx (s : ValidShape) : Type := ∀ i : Fin s.val.length, Fin (s.val.get i)
 
-theorem multiDimIdx_inbound {shape idx : List ℕ} (h : valid_idx (idx.zip shape)) :
-    (multiDimIdx shape idx).1 < (multiDimIdx shape idx).2 := by
-  revert idx
-  induction shape with
-  | nil => simp [multiDimIdx]
-  | cons H T ih =>
-    intro idx
-    simp [multiDimIdx]
-    match idx with
-    | [] => simp
-    | H' :: T' =>
-      simp
-      rw[←multiDimIdx]
-      intro h
-      simp[valid_idx] at h
-      have : valid_idx (T'.zip T) := by simpa[valid_idx] using h.2
-      specialize ih this
-      generalize (multiDimIdx T T').1 = A at *
-      generalize (multiDimIdx T T').2 = B at *
-      rw[← Nat.succ_le_iff, Nat.succ_eq_add_one, add_assoc]
+instance (s : ValidShape) : Fintype (ValidIdx s) :=
+  inferInstanceAs (Fintype (∀ i : Fin s.val.length, Fin (s.val.get i)))
+
+instance (s : ValidShape) : DecidableEq (ValidIdx s) :=
+  inferInstanceAs (DecidableEq (∀ i : Fin s.val.length, Fin (s.val.get i)))
+
+def ValidShape.size (s : ValidShape) : ℕ := s.val.prod
+
+@[simp]
+def subshape (s : ValidShape) (l : List (Fin s.val.length)) : ValidShape :=
+  Subtype.mk (l.map s.val.get) <| by
+    intro n hn
+    rw [List.mem_map] at hn
+    obtain ⟨i, hi⟩ := hn
+    rw [← hi.2]
+    exact s.prop (s.val.get i) (List.get_mem _ _)
+
+def flattenIdx {s : ValidShape} (idx : ValidIdx s) : Fin s.size :=
+  let ⟨sval, sprop⟩ := s
+  match sval with
+  | [] => ⟨0, by simp [ValidShape.size]⟩
+  | s₀ :: s₁ =>
+    let s' : ValidShape := ⟨s₁, by simp at sprop; exact sprop.2⟩
+    let idx' : ValidIdx s' := fun i ↦ idx i.succ
+    have i' := flattenIdx idx'
+    let i₀ := idx ⟨0, by simp⟩
+    Fin.mk (i₀ + s₀ * i') <| by
+      simp [ValidShape.size]
+      rw [← Nat.succ_le_iff, Nat.succ_eq_add_one]
       calc
-        _ ≤ (H' + 1) * B := by rw[add_mul, one_mul]; gcongr; rwa[Nat.succ_le_iff]
-        _ ≤ _ := by gcongr; rw[Nat.succ_le_iff]; exact h.1
+        _ = (i₀ + 1) + s₀ * i' := by ring
+        _ ≤ s₀ * (i' + 1) := by rw[add_comm i'.val 1, mul_add, mul_one]; gcongr; exact i₀.isLt
+        _ ≤ _ := by gcongr; rw[Nat.succ_le_iff]; exact i'.isLt
+termination_by s.val
 
-theorem multiDimIdx_le_prod {shape idx : List ℕ} (h : ∀ n ∈ shape, n ≠ 0) :
-    (multiDimIdx shape idx).2 ≤ shape.prod := by
-  revert idx
-  induction shape with
-  | nil => simp [multiDimIdx]
-  | cons H T ih =>
-    simp[multiDimIdx]
-    intro idx
-    match idx with
-    | [] =>
-      simp at h ⊢
-      have : T.prod ≠ 0 := List.prod_ne_zero <| fun hc ↦ h.2 0 hc rfl
-      generalize T.prod = t at *
-      have h' : H ≠ 0 := h.1
-      by_contra! hc
-      have h'' : H * t = 0 := by omega
-      simp at h''
-      exact h''.elim h' this
-    | H' :: T' =>
-      simp
-      rw[← multiDimIdx]
-      simp at h
-      specialize @ih h.2 T'
-      gcongr
+def unflattenIdx (s : ValidShape) (idx : Fin s.size) : ValidIdx s :=
+  let ⟨sval, sprop⟩ := s
+  match sval with
+  | [] => fun i ↦ nomatch i
+  | s₀ :: s₁ => fun i ↦
+    let idx' : Fin (s₁.prod * s₀) := idx.cast <| by simp [ValidShape.size]; rw[mul_comm]
+    if h : i = ⟨0, by simp⟩ then
+      idx'.modNat.cast <| by simp [h]
+    else
+      (unflattenIdx ⟨s₁, by grind⟩ idx'.divNat (i.pred h)).cast <| by
+        simp [List.getElem_cons]
+        intro hc
+        exact (h hc).elim
+termination_by s.val
 
+def flattenEuiv (s : ValidShape) : ValidIdx s ≃ Fin s.size where
+  toFun := flattenIdx
+  invFun := unflattenIdx s
+  left_inv := by
+    let ⟨sval, sprop⟩ := s
+    induction sval with
+    | nil => intro x; simp[ValidIdx]; ext i; nomatch i
+    | cons s₀ s₁ ih =>
+      have : NeZero (s₀ :: s₁).length := ⟨by simp⟩
+      intro x
+      simp[flattenIdx, unflattenIdx, ValidIdx]
+      ext i
+      split_ifs with h
+      · simp only [Fin.coe_cast, Fin.coe_modNat, Nat.add_mul_mod_self_left]
+        rw[h]
+        exact Nat.mod_eq_of_lt (x 0).isLt
+      simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at sprop
+      specialize ih sprop.2 (fun i ↦ x i.succ)
+      simp only [Fin.divNat, Fin.coe_cast]
+      conv =>
+        lhs; arg 1; arg 2; arg 1
+        rw[Nat.add_div_of_dvd_left (by simp), 
+          show (x 0).val / s₀ = 0 from Nat.div_eq_zero_iff.mpr (Or.inr (x 0).isLt), zero_add]
+        rw[mul_comm, Nat.mul_div_cancel _ (by omega)]
+      simp only [Fin.eta, ih]
+      let g (j : Fin (s₁.length + 1)) : ℕ := x i
+      have : x (i.pred h).succ = g (i.pred h).succ := by congr; all_goals simp
+      rw[this]
+  right_inv := by
+    let ⟨sval, sprop⟩ := s
+    induction sval with
+    | nil =>
+      intro x
+      simp[flattenIdx]
+      simp[ValidShape.size] at x
+      rw[←Fin.val_eq_val, Fin.val_zero]
+      omega
+    | cons s₀ s₁ ih =>
+      intro x
+      simp[unflattenIdx, flattenIdx]
+      rw [← Fin.val_eq_val]
+      push_cast
+      conv_rhs =>
+        rw [← Nat.mod_add_div x.val s₀]
+      congr
+      simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at sprop
+      have ih := ih sprop.2
+        (x.cast (by simp[ValidShape.size, mul_comm]) : Fin (s₁.prod * s₀)).divNat
+      simp [Fin.divNat, ← Fin.val_eq_val] at ih
+      rw[← ih]
+      congr
 
-def preEinsum (σ : List ℕ) (xs : List (Array × List (Fin σ.length)))
-  (is : ∀ i : Fin σ.length, Fin (σ.get i)) : Option ℝ :=
-  process xs 1.0
-  where process (remaining : List (Array × List (Fin σ.length))) (product : ℝ) : Option ℝ :=
-    match remaining with
-    | [] => some product
-    | ⟨.float values, indices⟩ :: rest =>
-        let dims := indices.map σ.get
-        if h₀ : values.length = dims.prod then
-          if h₁ : ∀ d ∈ dims, d ≠ 0 then
-            let idxVals := indices.map (fun i => (is i).val)
-            have h_valid : valid_idx (idxVals.zip dims) := by
-              simp [valid_idx]
-              intro a b h
-              rw [List.mem_iff_get] at h
-              obtain ⟨n, hn⟩ := h
-              simp at hn
-              simp [←hn.1, ←hn.2, idxVals, dims]
-            have h_bound : (multiDimIdx dims idxVals).1 < values.length := 
-              h₀ ▸ (lt_of_lt_of_le (multiDimIdx_inbound h_valid) (multiDimIdx_le_prod h₁))
-            let idx : Fin values.length := ⟨(multiDimIdx dims idxVals).1, h_bound⟩
-            process rest (product * values.get idx)
-          else
-            none  -- Invalid: zero dimension found
-        else
-          none  -- Invalid: shape mismatch
-    | _ :: _ => 
-        none  -- Invalid: not a float array
+def einProd {α : Type} [Mul α] [One α] (s : ValidShape)
+  (xs : List ((List α) × List (Fin s.val.length))) : Option (ValidIdx s → α) :=
+  process xs 1
+where process (xs : List ((List α) × List (Fin s.val.length))) (acc : ValidIdx s → α) : 
+  Option (ValidIdx s → α) :=
+  match xs with
+  | [] => some acc
+  | ⟨x, indices⟩ :: xs =>
+    let s' := subshape s indices
+    if h₀ : x.length = s'.size then
+      process xs fun idx ↦
+        let idx' : ValidIdx s' := fun i ↦ 
+          let i' : Fin indices.length := i.cast <| by simp [s', subshape]
+          Fin.mk (idx (indices.get i')) <| by
+            simp [s', subshape]
+            exact (idx indices[i']).isLt
+        acc idx * x[flattenIdx idx']
+    else
+      none  -- Invalid: shape mismatch
 
-/-- Computes the sum over all index functions that satisfy the constraint that
-for fixed positions, the index function must equal the provided values.
+def einSum {α : Type} [AddCommMonoid α] [Monoid α] (s : List ℕ)
+  (xs : List ((List α) × List (Fin s.length))) (out : List (Fin s.length)) : Option (List α) :=
+  if h : ∀ n ∈ s, n ≠ 0 then
+    let s' : ValidShape := ⟨s, h⟩
+    match einProd s' xs with
+    | none => .none
+    | some x => .some <| List.ofFn fun j ↦
+      let idx := unflattenIdx (subshape s' out) j
+      let sumIdx : Finset (ValidIdx s') :=
+        {idx' | ∀ i : Fin out.length,
+          idx' (out.get i) = (idx (i.cast (by simp))).cast (by simp[s'])} 
+      ∑ idx' ∈ sumIdx, x idx'
+  else
+    .none
 
-This is the core operation for einsum: summing over dimensions while keeping
-some indices fixed.
+def shape : ValidShape := ⟨[2,2], by decide⟩
+def idx : ValidIdx shape := fun x ↦
+  if h : x = ⟨0, by decide⟩ then
+    ⟨1, by rw[h]; decide⟩
+  else
+    Fin.mk 1 <| by
+      have : x.val = 1 := by
+        simp [← Fin.val_eq_val] at h
+        have := x.isLt
+        conv at this =>
+          arg 2
+          rw[show shape.val.length = 2 by decide]
+        omega
+      simp [List.get_eq_getElem, this]
+      decide +revert
+        
 
-Parameters:
-- x: Function that computes a value given an index function over all dimensions
-- fixedIndices: List of index positions that are held fixed  
-- fixedValues: Function providing the values at the fixed index positions
+#eval flattenIdx idx
+#eval idx = unflattenIdx shape ⟨3, by decide⟩
 
-Returns: Sum of x over all index functions satisfying the constraints -/
-def sum {σ : List ℕ} (x : ((i : Fin σ.length) → (Fin (σ.get i))) → ℝ)
-    (fixedIndices : List (Fin σ.length))
-    (fixedValues : (k : Fin fixedIndices.length) → Fin (σ.get (fixedIndices.get k))) : ℝ :=
-  
-  -- Define the set of all index functions that satisfy the fixity constraints
-  let feasibleIndices : Finset ((i : Fin σ.length) → (Fin (σ.get i))) :=
-    { indexFn | ∀ position : Fin fixedIndices.length, 
-                fixedValues position = indexFn (fixedIndices.get position) }
-  
-  -- Sum x over all feasible index functions
-  ∑ indexFn ∈ feasibleIndices, x indexFn
+instance : _root_.Repr Array where
+  reprPrec x n := match x with
+  | .error => "error"
+  | .int x => toString x
+  | .float x => "float"
+
+instance : _root_.ToString (Option (ValidIdx shape → ℕ)) where
+  toString x := match x with
+  | none => "none"
+  | some x => s!"some"
+
+abbrev x := Array.int [1,2,3,4]
+
+instance : NeZero [2,2].length := ⟨by decide⟩
+
+#eval einSum [2,2] [([1,2,3,4],[0,1])] [1,0]
+
+/-- Represents a parsed einsum string like "ij,jk->ik" -/
+structure EinsumExpr where
+  inputs : List (List Char)   -- Input index labels for each array
+  output : List Char          -- Output index labels
+
+/-- Parse an einsum string - supports both explicit "ij,jk->ik" and implicit "ij,jk" forms -/
+def parseEinsumString (s : String) : Option EinsumExpr :=
+  match s.splitOn "->" with
+  | [inputs, outputs] =>
+    some ⟨(inputs.splitOn ",").map String.toList, outputs.toList⟩
+  | _ => none
+
+def EinsumExpr.all_chars (e : EinsumExpr) : List Char := e.inputs.flatten.dedup
+
+/-- Convert character indices to Fin indices based on dimension mapping -/
+def indicesFromChars (σ : List ℕ) (chars : List Char) : Option (List (Fin σ.length)) :=
+  chars.mapM (fun c =>
+    let pos := c.toNat - 'a'.toNat
+    if h : pos < σ.length then
+      some (Fin.mk pos h)
+    else
+      none
+  )
 
 end Einsum
+
 
 noncomputable def Expr.eval : Expr → List Array → Array 
   | arg i, x =>
@@ -349,6 +444,12 @@ noncomputable def Expr.eval : Expr → List Array → Array
   | log a, x => match a.eval x with
     | .float y => .float <| y.map Real.log
     | _ => .error
-  | einsum _ _, _ => .error  -- TODO: Implement einsum evaluation
+  | einsum s inputs, x =>
+      -- For now, return error. Full implementation would:
+      -- 1. Parse the einsum string
+      -- 2. Extract shapes from input arrays  
+      -- 3. Map indices to dimensions
+      -- 4. Use preEinsum infrastructure for computation
+      .error  -- Placeholder: complete implementation needs shape inference
 
 end Jax
