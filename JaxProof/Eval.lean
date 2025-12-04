@@ -327,54 +327,26 @@ where process (xs : List ((List α) × List (Fin s.val.length))) (acc : ValidIdx
       none  -- Invalid: shape mismatch
 
 def einSum {α : Type} [AddCommMonoid α] [Monoid α] (s : List ℕ)
-  (xs : List ((List α) × List (Fin s.length))) (out : List (Fin s.length)) : Option (List α) :=
+  (xs : List ((List α) × List ℤ)) (out : List ℤ) : Option (List α) :=
+  if hs : s.length = 0 then
+    .none
+  else
+    have : NeZero s.length := ⟨hs⟩
+  let xs' : List ((List α) × List (Fin s.length)) :=
+    xs.map fun ⟨x, indices⟩ ↦ ⟨x, indices.map Int.cast⟩
+  let out' : List (Fin s.length) := out.map Int.cast
   if h : ∀ n ∈ s, n ≠ 0 then
     let s' : ValidShape := ⟨s, h⟩
-    match einProd s' xs with
+    match einProd s' xs' with
     | none => .none
     | some x => .some <| List.ofFn fun j ↦
-      let idx := unflattenIdx (subshape s' out) j
+      let idx := unflattenIdx (subshape s' out') j
       let sumIdx : Finset (ValidIdx s') :=
-        {idx' | ∀ i : Fin out.length,
-          idx' (out.get i) = (idx (i.cast (by simp))).cast (by simp[s'])} 
+        {idx' | ∀ i : Fin out'.length,
+          idx' (out'.get i) = (idx (i.cast (by simp))).cast (by simp[s'])} 
       ∑ idx' ∈ sumIdx, x idx'
   else
     .none
-
-def shape : ValidShape := ⟨[2,2], by decide⟩
-def idx : ValidIdx shape := fun x ↦
-  if h : x = ⟨0, by decide⟩ then
-    ⟨1, by rw[h]; decide⟩
-  else
-    Fin.mk 1 <| by
-      have : x.val = 1 := by
-        simp [← Fin.val_eq_val] at h
-        have := x.isLt
-        conv at this =>
-          arg 2
-          rw[show shape.val.length = 2 by decide]
-        omega
-      simp [List.get_eq_getElem, this]
-      decide +revert
-        
-
-#eval flattenIdx idx
-#eval idx = unflattenIdx shape ⟨3, by decide⟩
-
-instance : _root_.Repr Array where
-  reprPrec x n := match x with
-  | .error => "error"
-  | .int x => toString x
-  | .float x => "float"
-
-instance : _root_.ToString (Option (ValidIdx shape → ℕ)) where
-  toString x := match x with
-  | none => "none"
-  | some x => s!"some"
-
-abbrev x := Array.int [1,2,3,4]
-
-instance : NeZero [2,2].length := ⟨by decide⟩
 
 #eval einSum [2,2] [([1,2,3,4],[0,1])] [1,0]
 
