@@ -348,31 +348,7 @@ def einSum {α : Type} [AddCommMonoid α] [Monoid α] (s : List ℕ)
   else
     .none
 
-#eval einSum [2,2] [([1,2,3,4],[0,1])] [1,0]
-
-/-- Represents a parsed einsum string like "ij,jk->ik" -/
-structure EinsumExpr where
-  inputs : List (List Char)   -- Input index labels for each array
-  output : List Char          -- Output index labels
-
-/-- Parse an einsum string - supports both explicit "ij,jk->ik" and implicit "ij,jk" forms -/
-def parseEinsumString (s : String) : Option EinsumExpr :=
-  match s.splitOn "->" with
-  | [inputs, outputs] =>
-    some ⟨(inputs.splitOn ",").map String.toList, outputs.toList⟩
-  | _ => none
-
-def EinsumExpr.all_chars (e : EinsumExpr) : List Char := e.inputs.flatten.dedup
-
-/-- Convert character indices to Fin indices based on dimension mapping -/
-def indicesFromChars (σ : List ℕ) (chars : List Char) : Option (List (Fin σ.length)) :=
-  chars.mapM (fun c =>
-    let pos := c.toNat - 'a'.toNat
-    if h : pos < σ.length then
-      some (Fin.mk pos h)
-    else
-      none
-  )
+#eval einSum [2,2,2] [([1,2,3,4],[0,1]), ([5,6,7,8],[1,2])] [0,2]
 
 end Einsum
 
