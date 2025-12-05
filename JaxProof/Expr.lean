@@ -242,14 +242,4 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
 
 def Expr.code (expr : Expr) : String := "\n".intercalate (expr.genCode ⟨[], []⟩).2.2
 
-def fn : Expr :=
-  let x := Expr.arg 0
-  let y := Expr.arg 1
-  let z := Expr.arg 2
-  let a := Expr.mul (Expr.sin x) y
-  let b := Expr.add a z
-  Expr.func 3 b
-
-#eval IO.println fn.code
-
 end Jax
