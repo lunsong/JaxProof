@@ -1,3 +1,4 @@
+import JaxProof.MultiDimIdx
 import Mathlib.Data.Real.Basic
 import Mathlib.Data.Fin.Tuple.Basic
 
@@ -40,32 +41,10 @@ inductive Expr where
   | cos : Expr → Expr
   | exp : Expr → Expr
   | log : Expr → Expr
-  | einsum : String → List Expr → Expr
+  | einsum (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → List Expr → Expr
+  | tuple : List Expr → Expr
+  | tupleGet : ℕ → Expr → Expr
 deriving BEq
-
-def Expr.succ : Expr → Expr
-  | arg i => arg i.succ
-  | func n x => func n x.succ
-  | idx x i => idx x.succ i.succ
-  | setIdx x i y => setIdx x.succ i.succ y.succ
-  | add x y => add x.succ y.succ
-  | sub x y => sub x.succ y.succ
-  | mul x y => mul x.succ y.succ
-  | div x y => div x.succ y.succ
-  | divInt x y => divInt x.succ y.succ
-  | mod x y => mod x.succ y.succ
-  | rep n x => rep n x.succ
-  | fori_loop n x f => fori_loop n.succ x.succ f.succ
-  | eq x y => eq x.succ y.succ
-  | lt x y => lt x.succ y.succ
-  | select c x y => select c.succ x.succ y.succ
-  | toFloat x => toFloat x.succ
-  | addIdx x i y => addIdx x.succ i.succ y.succ
-  | sin x => sin x.succ
-  | cos x => cos x.succ
-  | exp x => exp x.succ
-  | log x => log x.succ
-  | einsum s xs => einsum s (xs.map Expr.succ)
 
 structure CodeGenCtx where
   vars : List Expr
@@ -81,6 +60,8 @@ def writeLines (lines : List String) : StateM CodeGenCtx Unit := do
   let ⟨vars, code⟩ ← get
   set (CodeGenCtx.mk vars (code ++ lines))
 
+def argString : List String → String := ", ".intercalate
+
 def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
   let ⟨vars, _⟩ ← get
   match vars.idxOf? expr with
@@ -91,14 +72,14 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
     | .func n x =>
       let fname ← addExpr x
       let ⟨vars, _⟩ ← get
-      let ctx : CodeGenCtx := ⟨vars.map (Nat.repeat Expr.succ n), []⟩
+      let ctx : CodeGenCtx := ⟨vars, []⟩
       let (name, ⟨sub_vars, sub_code⟩) := x.genCode ctx
       let body : List String := (sub_code.concat s!"return {name}").map ("  " ++ ·)
       let argnames : List String := (List.range n).map fun i ↦
         match sub_vars.idxOf? (Expr.arg i) with
         | .some j => s!"x{j}"
         | .none => s!"_x{i}"
-      let head : String := s!"def {fname}(" ++ ", ".intercalate argnames ++ "):"
+      let head : String := s!"def {fname}({argString argnames})"
       writeLines (head :: body)
       return fname
     | .add x y =>
@@ -213,18 +194,29 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
       let name ← addExpr expr
       writeLines [s!"{name} = jax.numpy.log({xname})"]
       return name
-    | .einsum s xs =>
+    | .einsum shape indices out xs =>
+      let xnames ← xs.mapM Expr.genCode
+      let indices_and_shapes := indices.map fun idx ↦ (idx.map Fin.val, idx.map shape.get)
+      let args := (xnames.zip indices_and_shapes).map fun ⟨name, indices, shape⟩ ↦
+        s!"{name}.reshape({argString (shape.map toString)}), ({argString (indices.map toString)})"
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.numpy.einsum({argString args}, ({argString (out.map toString)}))"]
+      return name
+    | .tuple xs =>
       let xnames ← xs.mapM Expr.genCode
       let name ← addExpr expr
-      let args := ", ".intercalate xnames
-      writeLines [s!"{name} = jax.numpy.einsum('{s}', {args})"]
+      writeLines [s!"{name} = tuple({argString xnames})"]
+      return name
+    | .tupleGet n x =>
+      let xname ← x.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = {xname}[{n}]"]
       return name
 
 
 def Expr.code (expr : Expr) : String := "\n".intercalate (expr.genCode ⟨[], []⟩).2.2
 
-/-
-`def fn : Expr :=
+def fn : Expr :=
   let x := Expr.arg 0
   let y := Expr.arg 1
   let z := Expr.arg 2
@@ -232,7 +224,6 @@ def Expr.code (expr : Expr) : String := "\n".intercalate (expr.genCode ⟨[], []
   let b := Expr.add a z
   Expr.func 3 b
 
-#eval IO.println fn.code`
--/
+#eval IO.println fn.code
 
 end Jax
