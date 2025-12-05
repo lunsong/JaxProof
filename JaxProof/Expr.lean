@@ -17,6 +17,7 @@ generation
 inductive Expr where
   /-- `arg i` is the i'th argument -/
   | arg : ℕ → Expr
+  | func : ℕ → Expr → Expr
   /-- indexing an array, a = b[i] -/
   | idx : Expr → Expr → Expr
   /-- set items of an array, a = b.set[i].set(c) -/
@@ -29,6 +30,8 @@ inductive Expr where
   | divInt : Expr → Expr → Expr
   /-- repeat an array, `jax.numpy.repeat` -/
   | rep : ℕ → Expr → Expr
+  /-- jax.lax.fori_loop -/
+  | fori_loop : Expr → Expr → Expr → Expr
   | eq : Expr → Expr → Expr
   | lt : Expr → Expr → Expr
   | select : Expr → Expr → Expr → Expr
@@ -44,8 +47,30 @@ inductive Expr where
 deriving BEq
 
 def Expr.succ : Expr → Expr
-  | arg n => arg n.succ
-  | idx x y =
+  | arg i => arg i.succ
+  | func n x => func n x.succ
+  | idx x i => idx x.succ i.succ
+  | setIdx x i y => setIdx x.succ i.succ y.succ
+  | add x y => add x.succ y.succ
+  | sub x y => sub x.succ y.succ
+  | mul x y => mul x.succ y.succ
+  | div x y => div x.succ y.succ
+  | divInt x y => divInt x.succ y.succ
+  | mod x y => mod x.succ y.succ
+  | rep n x => rep n x.succ
+  | fori_loop n x f => fori_loop n.succ x.succ f.succ
+  | eq x y => eq x.succ y.succ
+  | lt x y => lt x.succ y.succ
+  | select c x y => select c.succ x.succ y.succ
+  | toFloat x => toFloat x.succ
+  | addIdx x i y => addIdx x.succ i.succ y.succ
+  | sin x => sin x.succ
+  | cos x => cos x.succ
+  | exp x => exp x.succ
+  | log x => log x.succ
+  | einsum s i o xs => einsum s i o (xs.map Expr.succ)
+  | tuple xs => tuple (xs.map Expr.succ)
+  | tupleGet n x => tupleGet n x.succ
 
 structure CodeGenCtx where
   vars : List Expr
@@ -70,6 +95,19 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
   | .none =>
     match expr with
     | .arg _ =>  addExpr expr
+    | .func n x =>
+      let fname ← addExpr x
+      let ⟨vars, _⟩ ← get
+      let ctx : CodeGenCtx := ⟨vars.map (Nat.repeat Expr.succ n), []⟩
+      let (name, ⟨sub_vars, sub_code⟩) := x.genCode ctx
+      let body : List String := (sub_code.concat s!"return {name}").map ("  " ++ ·)
+      let argnames : List String := (List.range n).map fun i ↦
+        match sub_vars.idxOf? (Expr.arg i) with
+        | .some j => s!"x{j}"
+        | .none => s!"_x{i}"
+      let head : String := s!"def {fname}(" ++ ", ".intercalate argnames ++ "):"
+      writeLines (head :: body)
+      return fname
     | .add x y =>
       let xname ← x.genCode
       let yname ← y.genCode
@@ -123,6 +161,13 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
       let xname ← x.genCode
       let name ← addExpr expr
       writeLines [s!"{name} = {xname}.repeat({n})"]
+      return name
+    | .fori_loop n x f =>
+      let xname ← x.genCode
+      let nname ← n.genCode
+      let fname ← f.genCode
+      let name ← addExpr expr
+      writeLines [s!"{name} = jax.lax.fori_loop(0, {nname}[0], {fname}, {xname})"]
       return name
     | .eq x y =>
       let xname ← x.genCode
@@ -203,7 +248,7 @@ def fn : Expr :=
   let z := Expr.arg 2
   let a := Expr.mul (Expr.sin x) y
   let b := Expr.add a z
-  b
+  Expr.func 3 b
 
 #eval IO.println fn.code
 
