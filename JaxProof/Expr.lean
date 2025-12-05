@@ -17,7 +17,6 @@ generation
 inductive Expr where
   /-- `arg i` is the i'th argument -/
   | arg : ℕ → Expr
-  | func : ℕ → Expr → Expr
   /-- indexing an array, a = b[i] -/
   | idx : Expr → Expr → Expr
   /-- set items of an array, a = b.set[i].set(c) -/
@@ -30,8 +29,6 @@ inductive Expr where
   | divInt : Expr → Expr → Expr
   /-- repeat an array, `jax.numpy.repeat` -/
   | rep : ℕ → Expr → Expr
-  /-- jax.lax.fori_loop -/
-  | fori_loop : Expr → Expr → Expr → Expr
   | eq : Expr → Expr → Expr
   | lt : Expr → Expr → Expr
   | select : Expr → Expr → Expr → Expr
@@ -45,6 +42,10 @@ inductive Expr where
   | tuple : List Expr → Expr
   | tupleGet : ℕ → Expr → Expr
 deriving BEq
+
+def Expr.succ : Expr → Expr
+  | arg n => arg n.succ
+  | idx x y =
 
 structure CodeGenCtx where
   vars : List Expr
@@ -69,19 +70,6 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
   | .none =>
     match expr with
     | .arg _ =>  addExpr expr
-    | .func n x =>
-      let fname ← addExpr x
-      let ⟨vars, _⟩ ← get
-      let ctx : CodeGenCtx := ⟨vars, []⟩
-      let (name, ⟨sub_vars, sub_code⟩) := x.genCode ctx
-      let body : List String := (sub_code.concat s!"return {name}").map ("  " ++ ·)
-      let argnames : List String := (List.range n).map fun i ↦
-        match sub_vars.idxOf? (Expr.arg i) with
-        | .some j => s!"x{j}"
-        | .none => s!"_x{i}"
-      let head : String := s!"def {fname}({argString argnames})"
-      writeLines (head :: body)
-      return fname
     | .add x y =>
       let xname ← x.genCode
       let yname ← y.genCode
@@ -135,13 +123,6 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
       let xname ← x.genCode
       let name ← addExpr expr
       writeLines [s!"{name} = {xname}.repeat({n})"]
-      return name
-    | .fori_loop n x f =>
-      let xname ← x.genCode
-      let nname ← n.genCode
-      let fname ← f.genCode
-      let name ← addExpr expr
-      writeLines [s!"{name} = jax.lax.fori_loop(0, {nname}[0], {fname}, {xname})"]
       return name
     | .eq x y =>
       let xname ← x.genCode
@@ -222,7 +203,7 @@ def fn : Expr :=
   let z := Expr.arg 2
   let a := Expr.mul (Expr.sin x) y
   let b := Expr.add a z
-  Expr.func 3 b
+  b
 
 #eval IO.println fn.code
 
