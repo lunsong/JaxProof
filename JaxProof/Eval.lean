@@ -246,7 +246,7 @@ noncomputable def Expr.eval : Expr → List Array → Array
     match (n.eval x) with
     | .int [m] =>
       open Fin in
-      let body_fun (i : ℕ) (c : Array) : Array := f.eval (x ++ [Array.int [i], c])
+      let body_fun (i : ℕ) (c : Array) : Array := f.eval (Array.int [i] :: c :: x)
       Nat.rec (a.eval x) body_fun m.natAbs
     | _ => .error
   | eq a b, x => (a.eval x).eq (b.eval x)

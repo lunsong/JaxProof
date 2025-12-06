@@ -46,31 +46,31 @@ inductive Expr where
   | tupleGet : ℕ → Expr → Expr
 deriving BEq
 
-def Expr.succ : Expr → Expr
+def Expr.lift : Expr → Expr
   | arg i => arg i.succ
-  | func n x => func n x.succ
-  | idx x i => idx x.succ i.succ
-  | setIdx x i y => setIdx x.succ i.succ y.succ
-  | add x y => add x.succ y.succ
-  | sub x y => sub x.succ y.succ
-  | mul x y => mul x.succ y.succ
-  | div x y => div x.succ y.succ
-  | divInt x y => divInt x.succ y.succ
-  | mod x y => mod x.succ y.succ
-  | rep n x => rep n x.succ
-  | fori_loop n x f => fori_loop n.succ x.succ f.succ
-  | eq x y => eq x.succ y.succ
-  | lt x y => lt x.succ y.succ
-  | select c x y => select c.succ x.succ y.succ
-  | toFloat x => toFloat x.succ
-  | addIdx x i y => addIdx x.succ i.succ y.succ
-  | sin x => sin x.succ
-  | cos x => cos x.succ
-  | exp x => exp x.succ
-  | log x => log x.succ
-  | einsum s i o xs => einsum s i o (xs.map Expr.succ)
-  | tuple xs => tuple (xs.map Expr.succ)
-  | tupleGet n x => tupleGet n x.succ
+  | func n x => func n x.lift
+  | idx x i => idx x.lift i.lift
+  | setIdx x i y => setIdx x.lift i.lift y.lift
+  | add x y => add x.lift y.lift
+  | sub x y => sub x.lift y.lift
+  | mul x y => mul x.lift y.lift
+  | div x y => div x.lift y.lift
+  | divInt x y => divInt x.lift y.lift
+  | mod x y => mod x.lift y.lift
+  | rep n x => rep n x.lift
+  | fori_loop n x f => fori_loop n.lift x.lift f.lift
+  | eq x y => eq x.lift y.lift
+  | lt x y => lt x.lift y.lift
+  | select c x y => select c.lift x.lift y.lift
+  | toFloat x => toFloat x.lift
+  | addIdx x i y => addIdx x.lift i.lift y.lift
+  | sin x => sin x.lift
+  | cos x => cos x.lift
+  | exp x => exp x.lift
+  | log x => log x.lift
+  | einsum s i o xs => einsum s i o (xs.map Expr.lift)
+  | tuple xs => tuple (xs.map Expr.lift)
+  | tupleGet n x => tupleGet n x.lift
 
 structure CodeGenCtx where
   vars : List Expr
@@ -98,7 +98,7 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
     | .func n x =>
       let fname ← addExpr x
       let ⟨vars, _⟩ ← get
-      let ctx : CodeGenCtx := ⟨vars.map (Nat.repeat Expr.succ n), []⟩
+      let ctx : CodeGenCtx := ⟨vars.map (Nat.repeat Expr.lift n), []⟩
       let (name, ⟨sub_vars, sub_code⟩) := x.genCode ctx
       let body : List String := (sub_code.concat s!"return {name}").map ("  " ++ ·)
       let argnames : List String := (List.range n).map fun i ↦
