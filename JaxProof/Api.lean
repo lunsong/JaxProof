@@ -54,8 +54,6 @@ end Jax
 
 open Jax.Impl
 
-variable {α : ℕ → Type} [Jax.Impl α]
-
 /-
 
 I want to define a DSL supporting following syntax
@@ -71,11 +69,31 @@ which would be expanded to the following code
 
 -/
 
-def f : Jax.curryType (α 2) 2 := fun n x ↦
-  let _n_arg : ℕ := 2 -- or maybe we don't need this
-  let g : Jax.curryType (α (_n_arg + 2)) 2 := fun i a ↦
-    @id (α (_n_arg + 2)) (a * x)
-  @id (α 2) (fori_loop n x g)
+syntax (name := jax_return) "return" term : term
+syntax (name := jax_def) "jax_def" ident "(" ident,* "):" term : command
 
-#eval IO.print (Jax.trace f)
+--macro "return " t:term : term => `(@id (α _) ($t))
+
+#eval `(def a : ℕ := let b : ℕ := 1; b)
+
+macro_rules (kind := jax_return)
+  | `(return $t) => `(@id (α _) $t)
+
+macro_rules
+  | `(jax_def $name($args,*):$body) =>
+    let n := Lean.quote args.elemsAndSeps.size
+    `(def $name {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α $n) $n :=
+      fun $args* => let _narg := $n; $body)
+
+jax_
+
+--def f : Jax.curryType (α 2) 2 := fun n x ↦
+/-
+#eval `(jax_def f(n, x):
+  let g : Jax.curryType (α (_narg + 2)) 2 := fun i a ↦
+    return a * x
+  return fori_loop n x g)
+-/
+
+
 

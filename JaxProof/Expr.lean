@@ -88,6 +88,10 @@ def writeLines (lines : List String) : StateM CodeGenCtx Unit := do
 
 def argString : List String → String := ", ".intercalate
 
+/-
+TODO: In a subfunction, some expressions that does not depend on the newly introduced args
+can be evaluated outside.
+-/
 def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
   let ⟨vars, _⟩ ← get
   match vars.idxOf? expr with
