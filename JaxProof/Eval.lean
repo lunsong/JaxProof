@@ -227,6 +227,7 @@ def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : List (Fin 
   else
     .error
 
+/-
 noncomputable def Expr.eval : Expr → List Array → Array 
   | arg i, x =>
     match x[i]? with
@@ -274,5 +275,6 @@ noncomputable def Expr.eval : Expr → List Array → Array
         a.get ⟨i, h⟩
       else .error
     | _ => .error
+-/
 
 end Jax

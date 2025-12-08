@@ -6,6 +6,7 @@ namespace Jax
 class Impl (α : ℕ → Type) where
   protected mul {n : ℕ} : α n → α n → α n
   protected cast {n m : ℕ} : α n → n = m → α m
+  ofRat {n : ℕ} : List ℚ → α n
   lift {n : ℕ} (m : ℕ) : α n → α (n + m)
   fori_loop {n : ℕ} : α n → α n → (α (n + 2) → α (n + 2) → α (n + 2)) → α n
 
@@ -24,22 +25,23 @@ structure Tracer (n : ℕ) where
   expr : Expr
 
 instance ImplTracer : Impl Tracer where
-  mul x y := ⟨x.expr.mul y.expr⟩
-  lift m x := ⟨Nat.repeat Expr.lift m x.expr⟩
+  mul x y := ⟨.binop .mul x.expr y.expr⟩
+  lift m x := ⟨x.expr.lift m⟩
   cast x _ := ⟨x.expr⟩
-  fori_loop n x f := ⟨Expr.fori_loop n.expr x.expr (.func 2 (f ⟨Expr.arg 0⟩ ⟨Expr.arg 1⟩).expr)⟩
+  ofRat x := ⟨.nullop (.const_float x)⟩
+  fori_loop n x f := ⟨.triop .fori_loop n.expr x.expr (.fn 2 (f ⟨Expr.arg 0⟩ ⟨Expr.arg 1⟩).expr)⟩
 
-def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) : String :=
+def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) : Expr :=
   let α := Tracer n
   let rec feed {m : ℕ} (f : curryType α m) : α :=
     match m with
     | 0 => f
     | m + 1 => feed (f ⟨.arg (n - m - 1)⟩)
-  let expr := Expr.func n (feed f).expr
-  expr.code
+  .fn n (feed f).expr
 
 instance ImplArray : Impl (fun _ ↦ Array) where
   mul := Array.mul
+  ofRat x := .float (x.map Rat.cast)
   lift _ := id
   cast x _ := x
   fori_loop n x f := match n with
@@ -54,11 +56,13 @@ end Jax
 
 open Jax.Impl
 
-def f {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α 2) 2 := fun n x ↦
-  let g (i a : α 4) : α 4 := (x * x) * a
-  @id (α _) (fori_loop n x g)
+def f (m : ℕ) {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α 2) 2 := fun n x ↦
+  let one : α 2 := ofRat <| List.ofFn fun (i : Fin m) ↦ 1
+  let iota : α 4 := ofRat <| List.ofFn fun (i : Fin m) ↦ i
+  let g (i a : α 4) : α 4 := (x * x) * a * iota
+  @id (α _) (fori_loop n one g)
 
-#eval IO.println (Jax.trace f)
+#eval IO.println (Jax.trace (f 2)).outward.code
 
 attribute [simp] Jax.Impl.fori_loop
 
