@@ -91,36 +91,4 @@ open Lean in macro_rules
         fun $args* => $parsed)
 end Jax
 
-open Jax.Impl
-
---def f (m : ℕ) {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α 2) 2 := fun n x ↦
---  let one : α 2 := ofRat <| List.ofFn fun (_ : Fin m) ↦ 1
---  let g (_ a : α 4) : α 4 := (x * x) * a
---  @id (α _) (fori_loop n one g)
-
-jax_def f(n, x):
-  def g(i, a):
-    return a * a
-  return fori_loop n x g
-
-
-
-#eval IO.println (Jax.trace f).outward.code
-
-example (n m : ℕ) (x : List ℝ) (h : x.length = m) :
-    (Jax.native (f m)) (.int [n]) (.float x) = .float (x.map (· ^ (2 * n))) := by
-  simp[f]
-  induction n with
-  | zero => simp[h]
-  | succ n ih =>
-    simp [ih]
-    simp [HMul.hMul, Jax.Array.pairwise, Jax.Array.mul]
-    congr
-    apply List.ext_get
-    · simp
-    simp
-    intro i _ _
-    change (x[i] * x[i]) * (x[i] ^ (2 * n)) = x[i] ^ (2 * (n + 1))
-    rw [mul_add, mul_one, pow_add _ _ 2, mul_comm _ (x[i] ^2), pow_two]
-
 

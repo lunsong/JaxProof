@@ -11,55 +11,45 @@ Write mathematical expressions in Lean 4, prove properties about them, and gener
 **Lean definition:**
 
 ```Lean
-import JaxProof
+import JaxProof.Api
 
-open JAX
+open Jax.Impl
 
-namespace test_fun
+-- define the jax function
+jax_def f(n, x):
+  def g(i, a):
+    return a * a
+  return fori_loop n x g
 
--- define the JAX Expr
-def n : Expr 2 := .arg "n" 0
-def x : Expr 2 := .arg "x" 1
-def loop_fun_carrier : Expr 4 := .arg "a" 1
-def loop_fun : Expr 4 := .mul "b" loop_fun_carrier loop_fun_carrier
-def y : Expr 2 := .fori_loop "y" n x loop_fun
+-- extract python code
+#eval IO.println (Jax.trace f).code
 
-end test_fun
-
--- generate python code
-#eval IO.println (test_fun.y.code "f")
-
--- prove properties about this function
+-- prove mathematical properties
 example (n : ℕ) (x : List ℝ) :
-    test_fun.y.eval' (.int [n]) (.float x) = .float (x.map (· ^ (2 ^ n))) := by
-  simp[test_fun.y, test_fun.n, test_fun.x, test_fun.loop_fun, test_fun.loop_fun_carrier,
-    Expr.eval', curry, Expr.eval]
+    (Jax.native f) (.int [n]) (.float x) = .float (x.map (· ^ (2 ^ n))) := by
+  simp[f]
   induction n with
   | zero => simp
   | succ n ih =>
-    simp[ih]
-    generalize hx' : (List.map (fun x ↦ x ^ 2 ^ n) x) = x'
-    generalize hx'' : (List.map (fun x ↦ x ^ 2 ^ (n + 1)) x) = x''
-    simp[Array.mul]
+    simp [ih]
+    simp [HMul.hMul, Jax.Array.pairwise, Jax.Array.mul]
     congr
-    refine List.ext_get ?_ ?_
-    · simp[← hx', ← hx'']
-    · intro m h₁ h₂
-      simp[← hx', ← hx'']
-      conv_rhs =>
-        conv =>
-          arg 2
-          rw [pow_add, pow_one, mul_two]
-        rw [pow_add]
+    apply List.ext_get
+    · simp
+    simp
+    intro i _ _
+    conv_lhs =>
+      change (x[i] ^ 2 ^ n) * (x[i] ^ 2 ^ n)
+    rw [pow_add, pow_one, pow_mul, pow_two]
 ```
 
 Generated JAX code:
 
 ```
-def f(n, x):
-  def b(__unused_i, a):
-    b = a * a
-    return b
-  y = fori_loop(0, n[0], b, x)
-  return y
+def x0(x1, x2):
+  def x3(_x0, x4):
+    x5 = x4 * x4
+    return x5
+  x4 = jax.lax.fori_loop(0, x1[0], x3, x2)
+  return x4
 ```
