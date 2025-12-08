@@ -36,7 +36,7 @@ inductive Op : (ℕ∞ → Type) where
   | tuple : Op none
   | tupleGet : ℕ → Op (some 1)
   | anonTuple : Op none
-  deriving DecidableEq
+  deriving BEq
 
 def Op.reprType : ℕ∞ → Type
   | none => List String → String
@@ -94,163 +94,6 @@ inductive Expr where
   | fn : ℕ → Expr → Expr
   deriving BEq
 
--- The manual instance definition
-def Expr.decEq (a b : Expr) : Decidable (a = b) :=
-  match a, b with
-  -- 1. Handle matching constructors
-  | nullop o1, nullop o2 =>
-    if h : o1 = o2 then isTrue (congrArg nullop h)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  | unop o1 e1, unop o2 e2 =>
-    if h_op : o1 = o2 then
-      match Expr.decEq e1 e2 with
-      | isTrue h_e => isTrue (by rw [h_op, h_e])
-      | isFalse h_e => isFalse (fun h_eq => by injection h_eq; contradiction)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  | binop o1 e1 f1, binop o2 e2 f2 =>
-    if h_op : o1 = o2 then
-      match Expr.decEq e1 e2 with
-      | isTrue h_e =>
-        match Expr.decEq f1 f2 with
-        | isTrue h_f => isTrue (by rw [h_op, h_e, h_f])
-        | isFalse h_f => isFalse (fun h_eq => by injection h_eq; contradiction)
-      | isFalse h_e => isFalse (fun h_eq => by injection h_eq; contradiction)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  | triop o1 e1 f1 g1, triop o2 e2 f2 g2 =>
-    if h_op : o1 = o2 then
-      match Expr.decEq e1 e2 with
-      | isTrue h_e =>
-        match Expr.decEq f1 f2 with
-        | isTrue h_f =>
-          match Expr.decEq g1 g2 with
-          | isTrue h_g => isTrue (by rw [h_op, h_e, h_f, h_g])
-          | isFalse h_g => isFalse (fun h_eq => by injection h_eq; contradiction)
-        | isFalse h_f => isFalse (fun h_eq => by injection h_eq; contradiction)
-      | isFalse h_e => isFalse (fun h_eq => by injection h_eq; contradiction)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  | quadop o1 e1 f1 g1 h1, quadop o2 e2 f2 g2 h2 =>
-    if h_op : o1 = o2 then
-      match Expr.decEq e1 e2 with
-      | isTrue h_e =>
-        match Expr.decEq f1 f2 with
-        | isTrue h_f =>
-          match Expr.decEq g1 g2 with
-          | isTrue h_g =>
-            match Expr.decEq h1 h2 with
-            | isTrue h_h => isTrue (by rw [h_op, h_e, h_f, h_g, h_h])
-            | isFalse h_h => isFalse (fun h_eq => by injection h_eq; contradiction)
-          | isFalse h_g => isFalse (fun h_eq => by injection h_eq; contradiction)
-        | isFalse h_f => isFalse (fun h_eq => by injection h_eq; contradiction)
-      | isFalse h_e => isFalse (fun h_eq => by injection h_eq; contradiction)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  -- This is the tricky case: we use the helper `decEqList` defined below
-  | varop o1 l1, varop o2 l2 =>
-    if h_op : o1 = o2 then
-      match decEqList l1 l2 with
-      | isTrue h_l => isTrue (by rw [h_op, h_l])
-      | isFalse h_l => isFalse (fun h_eq => by injection h_eq; contradiction)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  | arg n1, arg n2 =>
-    if h : n1 = n2 then isTrue (congrArg arg h)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  | fn n1 e1, fn n2 e2 =>
-    if h_n : n1 = n2 then
-      match Expr.decEq e1 e2 with
-      | isTrue h_e => isTrue (by rw [h_n, h_e])
-      | isFalse h_e => isFalse (fun h_eq => by injection h_eq; contradiction)
-    else isFalse (fun h_eq => by injection h_eq; contradiction)
-
-  -- 2. Handle mismatched constructors
-  -- (We can group these using wildcards for brevity)
-  | nullop _, unop _ _ 
-  | nullop _, binop _ _ _ 
-  | nullop _, triop _ _ _ _ 
-  | nullop _, quadop _ _ _ _ _ 
-  | nullop _, varop _ _ 
-  | nullop _, arg _ 
-  | nullop _, fn _ _ 
-
-  | unop _ _, nullop _ 
-  | unop _ _, binop _ _ _ 
-  | unop _ _, triop _ _ _ _ 
-  | unop _ _, quadop _ _ _ _ _ 
-  | unop _ _, varop _ _ 
-  | unop _ _, arg _ 
-  | unop _ _, fn _ _ 
-
-  | binop _ _ _, nullop _ 
-  | binop _ _ _, unop _ _ 
-  | binop _ _ _, triop _ _ _ _ 
-  | binop _ _ _, quadop _ _ _ _ _ 
-  | binop _ _ _, varop _ _ 
-  | binop _ _ _, arg _ 
-  | binop _ _ _, fn _ _ 
-
-  | triop _ _ _ _, nullop _ 
-  | triop _ _ _ _, unop _ _ 
-  | triop _ _ _ _, binop _ _ _ 
-  | triop _ _ _ _, quadop _ _ _ _ _ 
-  | triop _ _ _ _, varop _ _ 
-  | triop _ _ _ _, arg _ 
-  | triop _ _ _ _, fn _ _ 
-
-  | quadop _ _ _ _ _, nullop _ 
-  | quadop _ _ _ _ _, unop _ _ 
-  | quadop _ _ _ _ _, binop _ _ _ 
-  | quadop _ _ _ _ _, triop _ _ _ _ 
-  | quadop _ _ _ _ _, varop _ _ 
-  | quadop _ _ _ _ _, arg _ 
-  | quadop _ _ _ _ _, fn _ _ 
-
-  | varop _ _, nullop _ 
-  | varop _ _, unop _ _ 
-  | varop _ _, binop _ _ _ 
-  | varop _ _, triop _ _ _ _ 
-  | varop _ _, quadop _ _ _ _ _ 
-  | varop _ _, arg _ 
-  | varop _ _, fn _ _ 
-
-  | arg _, nullop _ 
-  | arg _, unop _ _ 
-  | arg _, binop _ _ _ 
-  | arg _, triop _ _ _ _ 
-  | arg _, quadop _ _ _ _ _ 
-  | arg _, varop _ _ 
-  | arg _, fn _ _ 
-
-  | fn _ _, nullop _ 
-  | fn _ _, unop _ _ 
-  | fn _ _, binop _ _ _ 
-  | fn _ _, triop _ _ _ _ 
-  | fn _ _, quadop _ _ _ _ _ 
-  | fn _ _, varop _ _ 
-  | fn _ _, arg _ => isFalse Expr.noConfusion
-
-where
-  -- Helper: Compares two lists of Exprs by recursively calling Expr.decEq
-  decEqList (l1 l2 : List Expr) : Decidable (l1 = l2) :=
-    match l1, l2 with
-    | [], [] => isTrue rfl
-    | [], _::_ => isFalse List.noConfusion
-    | _::_, [] => isFalse List.noConfusion
-    | h1::t1, h2::t2 =>
-      match Expr.decEq h1 h2 with
-      | isFalse h => isFalse (fun h_eq => by injection h_eq; contradiction)
-      | isTrue h_head =>
-        match decEqList t1 t2 with
-        | isFalse h => isFalse (fun h_eq => by injection h_eq; contradiction)
-        | isTrue h_tail => isTrue (List.cons_eq_cons.mpr ⟨h_head, h_tail⟩)
-
--- Register the instance
-instance : DecidableEq Expr := Expr.decEq
-
 def Expr.lift (n : ℕ) (e : Expr) : Expr :=
   go 0 e
 where go (m : ℕ) : Expr → Expr
@@ -297,10 +140,10 @@ def Expr.lowerable (n : ℕ) (e : Expr) : List Expr :=
   | some e => [e]
   | none => match e with
     | unop _ x => x.lowerable n
-    | binop _ x y => (x.lowerable n ++ y.lowerable n).dedup
-    | triop _ x y z => (x.lowerable n ++ y.lowerable n ++ z.lowerable n).dedup
-    | quadop _ x y z w => (x.lowerable n ++ y.lowerable n ++ z.lowerable n ++ w.lowerable n).dedup
-    | varop _ xs => (xs.foldr (fun x l ↦ x.lowerable n ++ l) []).dedup
+    | binop _ x y => x.lowerable n ++ y.lowerable n
+    | triop _ x y z => x.lowerable n ++ y.lowerable n ++ z.lowerable n
+    | quadop _ x y z w => x.lowerable n ++ y.lowerable n ++ z.lowerable n ++ w.lowerable n
+    | varop _ xs => xs.foldr (fun x l ↦ x.lowerable n ++ l) []
     | _ => []
 
 def Expr.outward : Expr → Expr
