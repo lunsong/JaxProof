@@ -6,6 +6,11 @@ import Batteries.Data.Fin.Lemmas
 
 namespace Jax
 
+def curryType (α : Type) : Nat → Type
+  | 0 => α
+  | n + 1 => α → curryType α n
+
+
 def ValidShape : Type := Subtype fun (s : List ℕ) ↦ ∀ n ∈ s, n ≠ 0
 
 def ValidIdx (s : ValidShape) : Type := ∀ i : Fin s.val.length, Fin (s.val.get i)

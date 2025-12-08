@@ -3,10 +3,6 @@ import JaxProof.Eval
 
 namespace Jax
 
-def curryType (α : Type) : Nat → Type
-  | 0 => α
-  | n + 1 => α → curryType α n
-
 class Impl (α : ℕ → Type) where
   protected mul {n : ℕ} : α n → α n → α n
   protected cast {n m : ℕ} : α n → n = m → α m
@@ -50,50 +46,38 @@ instance ImplArray : Impl (fun _ ↦ Array) where
     | .int [n] => Nat.rec x (fun i a ↦ f (.int [i]) a) n.natAbs
     | _ => .error
 
+@[simp]
+def native {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) : curryType Array n :=
+  @f (fun _ ↦ Array) ImplArray
+
 end Jax
 
 open Jax.Impl
 
-/-
+def f {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α 2) 2 := fun n x ↦
+  let g (i a : α 4) : α 4 := (x * x) * a
+  @id (α _) (fori_loop n x g)
 
-I want to define a DSL supporting following syntax
+#eval IO.println (Jax.trace f)
 
-```
-jax_def f(n, x):
-  jax_def g(i, a):
-    return a * x
-  return fori_loop n x g
-```
+attribute [simp] Jax.Impl.fori_loop
 
-which would be expanded to the following code
-
--/
-
-syntax (name := jax_return) "return" term : term
-syntax (name := jax_def) "jax_def" ident "(" ident,* "):" term : command
-
---macro "return " t:term : term => `(@id (α _) ($t))
-
-#eval `(def a : ℕ := let b : ℕ := 1; b)
-
-macro_rules (kind := jax_return)
-  | `(return $t) => `(@id (α _) $t)
-
-macro_rules
-  | `(jax_def $name($args,*):$body) =>
-    let n := Lean.quote args.elemsAndSeps.size
-    `(def $name {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α $n) $n :=
-      fun $args* => let _narg := $n; $body)
-
-jax_
-
---def f : Jax.curryType (α 2) 2 := fun n x ↦
-/-
-#eval `(jax_def f(n, x):
-  let g : Jax.curryType (α (_narg + 2)) 2 := fun i a ↦
-    return a * x
-  return fori_loop n x g)
--/
-
+example (n : ℕ) (x : List ℝ) :
+    (Jax.native f) (.int [n]) (.float x) = .float (x.map (· ^ (2 * n + 1))) := by
+  simp[f]
+  induction n with
+  | zero => simp
+  | succ n ih =>
+    simp [ih]
+    simp [HMul.hMul, Jax.Impl.cast, Jax.Impl.mul, Jax.Array.pairwise,
+      Jax.Impl.lift, Jax.Array.mul]
+    congr
+    apply List.ext_get
+    · simp
+    simp
+    intro i _ _
+    change (x[i] * x[i]) * (x[i] ^ (2 * n + 1)) = x[i] ^ (2 * (n + 1) + 1)
+    rw [mul_add, mul_one, add_assoc, add_comm 2, ← add_assoc, pow_add _ _ 2,
+      mul_comm _ (x[i] ^2), pow_two]
 
 
