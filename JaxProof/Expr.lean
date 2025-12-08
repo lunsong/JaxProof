@@ -13,6 +13,7 @@ namespace Jax
 inductive Op : (ℕ∞ → Type) where
   | const_float : List ℚ → Op (some 0)
   | const_int : List ℤ → Op (some 0)
+  | iota : ℕ → Op (some 0)
   | idx : Op (some 2)
   | setIdx : Op (some 3)
   | add : Op (some 2)
@@ -48,6 +49,7 @@ def argString {α : Type} [ToString α] (xs : List α) : String :=
 def Op.repr {n : ℕ∞} : Op n → Op.reprType n
   | const_float x
   | const_int x => toString x
+  | iota n => s!"jax.numpy.arange({n})"
   | idx => fun x i ↦ s!"{x}[{i}]"
   | setIdx => fun x i y ↦ s!"{x}.at[{i}].set({y})"
   | add => fun x y ↦ s!"{x} + {y}"
@@ -88,22 +90,31 @@ inductive Expr where
   | unop   : Op (some 1) → Expr → Expr
   | binop  : Op (some 2) → Expr → Expr → Expr
   | triop  : Op (some 3) → Expr → Expr → Expr → Expr
-  | quadop : Op (some 4) → Expr → Expr → Expr → Expr → Expr
   | varop  : Op none → List Expr → Expr
   | arg : ℕ → Expr
   | fn : ℕ → Expr → Expr
   deriving BEq
 
+def Expr.toString : Expr → String
+  | nullop op => op.repr
+  | unop op x => op.repr x.toString
+  | binop op x y => op.repr x.toString y.toString
+  | triop op x y z => op.repr x.toString y.toString z.toString
+  | varop op xs => op.repr (xs.map Expr.toString)
+  | arg n => s!"(arg {n})"
+  | fn n x => s!"(fn {n} {x.toString})"
+
+instance : ToString Expr where toString := Expr.toString
+
 def Expr.lift (n : ℕ) (e : Expr) : Expr :=
   go 0 e
 where go (m : ℕ) : Expr → Expr
   | arg l => if l < m then arg l else arg (l + n)
-  | fn l f => fn m (go (m + l) f)
+  | fn l f => fn l (go (m + l) f)
   | nullop op => nullop op
   | unop op x => unop op (go m x)
   | binop op x y => binop op (go m x) (go m y)
   | triop op x y z => triop op (go m x) (go m y) (go m z)
-  | quadop op x y z w => quadop op (go m x) (go m y) (go m z) (go m w)
   | varop op xs => varop op (xs.map (go m))
 
 def Expr.lower (n : ℕ) (e : Expr) : Option Expr :=
@@ -123,9 +134,6 @@ where go (m : ℕ) : Expr → Option Expr
   | triop op x y z => match go m x, go m y, go m z with
     | some x, some y, some z => triop op x y z
     | _, _, _ => none
-  | quadop op x y z w => match go m x, go m y, go m z, go m w with
-    | some x, some y, some z, some w => quadop op x y z w
-    | _, _, _, _ => none
   | varop op xs =>
     let rec go' (done : List Expr) : List (Option Expr) → Option (List Expr)
     | [] => done
@@ -142,7 +150,6 @@ def Expr.lowerable (n : ℕ) (e : Expr) : List Expr :=
     | unop _ x => x.lowerable n
     | binop _ x y => x.lowerable n ++ y.lowerable n
     | triop _ x y z => x.lowerable n ++ y.lowerable n ++ z.lowerable n
-    | quadop _ x y z w => x.lowerable n ++ y.lowerable n ++ z.lowerable n ++ w.lowerable n
     | varop _ xs => xs.foldr (fun x l ↦ x.lowerable n ++ l) []
     | _ => []
 
@@ -150,7 +157,6 @@ def Expr.outward : Expr → Expr
   | unop op x => unop op x.outward
   | binop op x y => binop op x.outward y.outward
   | triop op x y z => triop op x.outward y.outward z.outward
-  | quadop op x y z w => quadop op x.outward y.outward z.outward w.outward
   | varop op xs => varop op (xs.map Expr.outward)
   | fn n f =>
     let f' := f.outward
@@ -185,10 +191,10 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
     match expr with
     | arg _ =>  addExpr expr
     | unop (.tupleGet 0) (varop .tuple (x :: xs)) =>
-      let xs ← xs.mapM Expr.genCode
+      let _ ← xs.mapM Expr.genCode
       x.genCode
     | fn n x =>
-      let fname ← addExpr x
+      let fname ← addExpr expr
       let ⟨vars, _⟩ ← get
       let ctx : CodeGenCtx := ⟨vars.map (Expr.lift n), []⟩
       let (name, ⟨sub_vars, sub_code⟩) := x.genCode ctx
@@ -221,14 +227,6 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
       let zname ← z.genCode
       let name ← addExpr expr
       writeLines [s!"{name} = {@id String (op.repr xname yname zname)}"]
-      return name
-    | quadop op x y z w =>
-      let xname ← x.genCode
-      let yname ← y.genCode
-      let zname ← z.genCode
-      let wname ← w.genCode
-      let name ← addExpr expr
-      writeLines [s!"{name} = {@id String (op.repr xname yname zname wname)}"]
       return name
     | varop op xs =>
       let xnames ← xs.mapM Expr.genCode
