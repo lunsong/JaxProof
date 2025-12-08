@@ -52,36 +52,75 @@ instance ImplArray : Impl (fun _ ↦ Array) where
 def native {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) : curryType Array n :=
   @f (fun _ ↦ Array) ImplArray
 
+
+attribute [simp] Impl.fori_loop Impl.ofRat Impl.cast Impl.mul Impl.lift
+
+/-
+macro "jax_def" name:ident ":" body:term : command => do
+  `(def $name : ℕ := let c : ℕ := 0; $body)
+
+jax_def f:
+  c
+-/
+
+declare_syntax_cat jax_term
+
+syntax "jax_def" ident "(" ident,* "):" ppLine jax_term : command
+syntax "return" term : jax_term
+syntax ident "=" term ppLine jax_term : jax_term
+syntax "def" ident "(" ident,* "):" ppLine jax_term ppLine jax_term : jax_term
+
+open Lean in macro_rules
+  | `(jax_def $name ($args,*): $body) => do
+    let narg := (args.elemsAndSeps.size + 1) / 2
+    let rec parse (narg : ℕ) : TSyntax `jax_term → MacroM (TSyntax `term)
+    | `(jax_term|return $t:term) => `(term|@id (α _) $t)
+    | `(jax_term|$assign:ident = $value:term $t:jax_term) => do
+      let parsed ← parse narg t
+      `(term|let $assign : α $(quote narg) := $value; $parsed)
+    | `(jax_term|def $name:ident ( $args:ident,* ): $value:jax_term $t:jax_term) => do
+      let new_arg : ℕ := (args.elemsAndSeps.size + 1) / 2
+      let narg' := narg + new_arg
+      let content ← parse narg' value
+      let parsed ←  parse narg t
+      `(let $name : curryType (α $(quote narg')) $(quote new_arg) := fun $args* => $content;
+        $parsed)
+    | _ => Macro.throwUnsupported
+    let parsed ← parse narg body
+    `(def $name {α : ℕ → Type} [Impl α] : curryType (α $(quote narg)) $(quote narg) :=
+        fun $args* => $parsed)
 end Jax
 
 open Jax.Impl
 
-def f (m : ℕ) {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α 2) 2 := fun n x ↦
-  let one : α 2 := ofRat <| List.ofFn fun (i : Fin m) ↦ 1
-  let iota : α 4 := ofRat <| List.ofFn fun (i : Fin m) ↦ i
-  let g (i a : α 4) : α 4 := (x * x) * a * iota
-  @id (α _) (fori_loop n one g)
+--def f (m : ℕ) {α : ℕ → Type} [Jax.Impl α] : Jax.curryType (α 2) 2 := fun n x ↦
+--  let one : α 2 := ofRat <| List.ofFn fun (_ : Fin m) ↦ 1
+--  let g (_ a : α 4) : α 4 := (x * x) * a
+--  @id (α _) (fori_loop n one g)
 
-#eval IO.println (Jax.trace (f 2)).outward.code
+jax_def f(n, x):
+  def g(i, a):
+    return a * a
+  return fori_loop n x g
 
-attribute [simp] Jax.Impl.fori_loop
 
-example (n : ℕ) (x : List ℝ) :
-    (Jax.native f) (.int [n]) (.float x) = .float (x.map (· ^ (2 * n + 1))) := by
+
+#eval IO.println (Jax.trace f).outward.code
+
+example (n m : ℕ) (x : List ℝ) (h : x.length = m) :
+    (Jax.native (f m)) (.int [n]) (.float x) = .float (x.map (· ^ (2 * n))) := by
   simp[f]
   induction n with
-  | zero => simp
+  | zero => simp[h]
   | succ n ih =>
     simp [ih]
-    simp [HMul.hMul, Jax.Impl.cast, Jax.Impl.mul, Jax.Array.pairwise,
-      Jax.Impl.lift, Jax.Array.mul]
+    simp [HMul.hMul, Jax.Array.pairwise, Jax.Array.mul]
     congr
     apply List.ext_get
     · simp
     simp
     intro i _ _
-    change (x[i] * x[i]) * (x[i] ^ (2 * n + 1)) = x[i] ^ (2 * (n + 1) + 1)
-    rw [mul_add, mul_one, add_assoc, add_comm 2, ← add_assoc, pow_add _ _ 2,
-      mul_comm _ (x[i] ^2), pow_two]
+    change (x[i] * x[i]) * (x[i] ^ (2 * n)) = x[i] ^ (2 * (n + 1))
+    rw [mul_add, mul_one, pow_add _ _ 2, mul_comm _ (x[i] ^2), pow_two]
 
 
