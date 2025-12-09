@@ -14,6 +14,8 @@ inductive Op : (ℕ∞ → Type) where
   | const_float : List ℚ → Op (some 0)
   | const_int : List ℤ → Op (some 0)
   | iota : ℕ → Op (some 0)
+  | fill_int : ℕ → ℤ → Op (some 0)
+  | fill_float : ℕ → ℚ → Op (some 0)
   | idx : Op (some 2)
   | setIdx : Op (some 3)
   | add : Op (some 2)
@@ -33,6 +35,7 @@ inductive Op : (ℕ∞ → Type) where
   | cos : Op (some 1)
   | exp : Op (some 1)
   | log : Op (some 1)
+  | sqrt : Op (some 1)
   | einsum (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → Op none
   | tuple : Op none
   | tupleGet : ℕ → Op (some 1)
@@ -50,6 +53,8 @@ def Op.repr {n : ℕ∞} : Op n → Op.reprType n
   | const_float x
   | const_int x => toString x
   | iota n => s!"jax.numpy.arange({n})"
+  | fill_int n x => s!"jax.numpy.zeros({n}, dtype=int) + {x}"
+  | fill_float n x => s!"jax.numpy.zeros({n}, dtype=float) + {x}"
   | idx => fun x i ↦ s!"{x}[{i}]"
   | setIdx => fun x i y ↦ s!"{x}.at[{i}].set({y})"
   | add => fun x y ↦ s!"{x} + {y}"
@@ -70,6 +75,7 @@ def Op.repr {n : ℕ∞} : Op n → Op.reprType n
   | cos => fun x ↦ s!"jax.numpy.cos({x})"
   | exp => fun x ↦ s!"jax.numpy.exp({x})"
   | log => fun x ↦ s!"jax.numpy.log({x})"
+  | sqrt => fun x ↦ s!"jax.numpy.sqrt({x})"
   | einsum s i o => fun xs ↦
     let s' := i.map (List.map s.get)
     let xs' := xs.zip (s'.zip i)

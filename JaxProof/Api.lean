@@ -15,11 +15,14 @@ class Impl (α : ℕ → Type) where
   protected idx {n : ℕ} : α n → α n → α n
   protected setIdx {n : ℕ} : α n → α n  → α n → α n
   protected select {n : ℕ} : α n → α n → α n → α n
-  protected eq {n : ℕ} : α n → α n → α n
-  protected lt {n : ℕ} : α n → α n → α n
+  eq {n : ℕ} : α n → α n → α n
+  lt {n : ℕ} : α n → α n → α n
+  sqrt {n : ℕ} : α n → α n
   rep {n : ℕ} : ℕ → α n → α n
   ofRat {n : ℕ} : List ℚ → α n
   ofInt {n : ℕ} : List ℤ → α n
+  fillRat {n : ℕ} : ℕ → ℚ → α n
+  fillInt {n : ℕ} : ℕ → ℤ → α n
   iota {n : ℕ} : ℕ → α n
   fori_loop {n : ℕ} : α n → α n → (α (n + 2) → α (n + 2) → α (n + 2)) → α n
   einsum {n : ℕ} (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → List (α n) → α n
@@ -93,6 +96,8 @@ instance ImplTracer : Impl Tracer where
   cast x _ := ⟨x.expr⟩
   ofInt x := ⟨.nullop (.const_int x)⟩
   ofRat x := ⟨.nullop (.const_float x)⟩
+  fillInt n x := ⟨.nullop (.fill_int n x)⟩
+  fillRat n x := ⟨.nullop (.fill_float n x)⟩
   fori_loop n x f := ⟨.triop .fori_loop n.expr x.expr (.fn 2 (f ⟨Expr.arg 0⟩ ⟨Expr.arg 1⟩).expr)⟩
   einsum s i o x := ⟨.varop (.einsum s i o) (x.map Tracer.expr)⟩
   iota n := ⟨.nullop (.iota n)⟩
@@ -100,6 +105,7 @@ instance ImplTracer : Impl Tracer where
   select c x y := ⟨.triop .select c.expr x.expr y.expr⟩
   eq x y := ⟨.binop .eq x.expr y.expr⟩
   lt x y := ⟨.binop .lt x.expr y.expr⟩
+  sqrt x := ⟨.unop .sqrt x.expr⟩
 
 def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α 0) n) : Expr :=
   let α := Tracer 0
@@ -121,6 +127,8 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
   einsum := Array.einsum
   ofInt := Array.int
   ofRat := Array.float ∘ (List.map Rat.cast)
+  fillInt n x := Array.int (List.replicate n x)
+  fillRat n x := Array.float (List.replicate n x)
   lift _ := id
   cast x _ := x
   iota n := Array.int <| List.ofFn fun (i : Fin n) ↦ i
@@ -131,6 +139,9 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
   select := Array.select
   eq := Array.eq
   lt := Array.lt
+  sqrt x := match x with
+    | .float x => .float <| x.map Real.sqrt
+    | _ => .error
 
 
 @[simp]
