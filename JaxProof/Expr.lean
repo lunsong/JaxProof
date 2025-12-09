@@ -59,7 +59,8 @@ def Op.repr {n : ℕ∞} : Op n → Op.reprType n
   | mod => fun x y ↦ s!"{x} % {y}"
   | divInt => fun x y ↦ s!"{x} // {y}"
   | rep n => fun x ↦ s!"{x}.repeat({n})"
-  | fori_loop => fun n x f ↦ s!"jax.lax.fori_loop(0, {n}[0], {f}, {x})"
+  | fori_loop => fun n x f ↦
+    s!"jax.lax.fori_loop(0, {n}[0], (lambda i, c: {f}(jax.numpy.array([i]), c)), {x})"
   | eq => fun x y ↦ s!"{x} == {y}"
   | lt => fun x y ↦ s!"{x} < {y}"
   | select => fun c x y ↦ s!"jax.lax.select({c}, {x}, {y})"
