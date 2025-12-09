@@ -14,16 +14,24 @@ class Impl (α : ℕ → Type) where
   protected divInt {n : ℕ} : α n → α n → α n
   protected idx {n : ℕ} : α n → α n → α n
   protected setIdx {n : ℕ} : α n → α n  → α n → α n
+  protected select {n : ℕ} : α n → α n → α n → α n
+  protected eq {n : ℕ} : α n → α n → α n
+  protected lt {n : ℕ} : α n → α n → α n
+  rep {n : ℕ} : ℕ → α n → α n
   ofRat {n : ℕ} : List ℚ → α n
+  ofInt {n : ℕ} : List ℤ → α n
+  iota {n : ℕ} : ℕ → α n
   fori_loop {n : ℕ} : α n → α n → (α (n + 2) → α (n + 2) → α (n + 2)) → α n
   einsum {n : ℕ} (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → List (α n) → α n
 
+@[simp]
 def withLift₂ (α : ℕ → Type) [Impl α] (f : {n : ℕ} → α n → α n → α n)
   {n m : ℕ} (x : α n) (y : α m) : α (max n m) :=
   let x' : α (max n m) := Impl.cast (Impl.lift (m - n) x) add_tsub_eq_max
   let y' : α (max n m) := Impl.cast (Impl.lift (n - m) y) (max_comm n m ▸ add_tsub_eq_max)
   f x' y'
 
+@[simp]
 def withLift₃ (α : ℕ → Type) [Impl α] (f : {n : ℕ} → α n → α n → α n → α n)
   {n m l : ℕ} (x : α n) (y : α m) (z : α l) : α (max (max n m) l) :=
   let x' : α (max n m) := Impl.cast (Impl.lift (m - n) x) add_tsub_eq_max
@@ -38,6 +46,8 @@ def withLift₃ (α : ℕ → Type) [Impl α] (f : {n : ℕ} → α n → α n �
 section
 
 variable {α : ℕ → Type} [Impl α] {n m l : ℕ}
+
+def select : α n → α m → α l → α (max (max n m) l) := withLift₃ α Impl.select
 
 instance : HAdd (α n) (α m) (α (max n m)) where
   hAdd := withLift₂ α Impl.add
@@ -81,11 +91,17 @@ instance ImplTracer : Impl Tracer where
   setIdx x i y := ⟨.triop .setIdx x.expr i.expr y.expr⟩
   lift m x := ⟨x.expr.lift m⟩
   cast x _ := ⟨x.expr⟩
+  ofInt x := ⟨.nullop (.const_int x)⟩
   ofRat x := ⟨.nullop (.const_float x)⟩
   fori_loop n x f := ⟨.triop .fori_loop n.expr x.expr (.fn 2 (f ⟨Expr.arg 0⟩ ⟨Expr.arg 1⟩).expr)⟩
   einsum s i o x := ⟨.varop (.einsum s i o) (x.map Tracer.expr)⟩
+  iota n := ⟨.nullop (.iota n)⟩
+  rep n x := ⟨.unop (.rep n) x.expr⟩
+  select c x y := ⟨.triop .select c.expr x.expr y.expr⟩
+  eq x y := ⟨.binop .eq x.expr y.expr⟩
+  lt x y := ⟨.binop .lt x.expr y.expr⟩
 
-def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) : Expr :=
+def trace {n : ℕ} (f : {m : ℕ} → {α : ℕ → Type} → [Impl α] → curryType (α m) n) : Expr :=
   let α := Tracer n
   let rec feed {m : ℕ} (f : curryType α m) : α :=
     match m with
@@ -103,12 +119,19 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
   idx := Array.idx
   setIdx := Array.setIdx
   einsum := Array.einsum
-  ofRat x := .float (x.map Rat.cast)
+  ofInt := Array.int
+  ofRat := Array.float ∘ (List.map Rat.cast)
   lift _ := id
   cast x _ := x
+  iota n := Array.int <| List.ofFn fun (i : Fin n) ↦ i
+  rep := Array.rep
   fori_loop n x f := match n with
     | .int [n] => Nat.rec x (fun i a ↦ f (.int [i]) a) n.natAbs
     | _ => .error
+  select := Array.select
+  eq := Array.eq
+  lt := Array.lt
+
 
 @[simp]
 noncomputable def native {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) :
@@ -119,30 +142,32 @@ attribute [simp] Impl.fori_loop Impl.ofRat Impl.cast Impl.mul Impl.lift
 
 declare_syntax_cat jax_term
 
-syntax "jax_def" ident "(" ident,* "):" ppLine jax_term : command
+syntax "jax_def" ("(" ident ":" term")")* ident "(" ident,* "):" ppLine jax_term : command
 syntax "return" term : jax_term
-syntax ident "=" term ppLine jax_term : jax_term
+syntax ident "="  term ";" ppLine jax_term : jax_term
 syntax "def" ident "(" ident,* "):" ppLine jax_term ppLine jax_term : jax_term
 
 open Lean in macro_rules
-  | `(jax_def $name ($args,*): $body) => do
+  | `(jax_def $[($spec_n : $spec_t)]* $name ($args,*): $body) => do
     let narg := (args.elemsAndSeps.size + 1) / 2
     let rec parse (narg : ℕ) : TSyntax `jax_term → MacroM (TSyntax `term)
-    | `(jax_term|return $t:term) => `(@id (α _) $t)
-    | `(jax_term|$assign:ident = $value:term $t:jax_term) => do
+    | `(jax_term|return $t:term) =>
+      `(Impl.cast (α := α) $t (by simp))
+    | `(jax_term|$assign:ident = $value:term ; $t:jax_term) => do
       let parsed ← parse narg t
-      `(let $assign : α $(quote narg) := $value; $parsed)
+      `(let $assign : α (m + $(quote narg)) := Impl.cast $value (by simp);
+        $parsed)
     | `(jax_term|def $name:ident ( $args:ident,* ): $value:jax_term $t:jax_term) => do
       let new_arg : ℕ := (args.elemsAndSeps.size + 1) / 2
       let narg' := narg + new_arg
       let content ← parse narg' value
       let parsed ←  parse narg t
-      `(let $name : curryType (α $(quote narg')) $(quote new_arg) := fun $args* => $content;
+      `(let $name : curryType (α (m + $(quote narg'))) $(quote new_arg) := fun $args* => $content;
         $parsed)
     | _ => Macro.throwUnsupported
-    let parsed ← parse narg body
-    `(def $name {α : ℕ → Type} [Impl α] : curryType (α $(quote narg)) $(quote narg) :=
-        fun $args* => $parsed)
+    let parsed ← parse 0 body
+    `(def $name $[($spec_n : $spec_t)]* {m : ℕ} {α : ℕ → Type} [Impl α] :
+      curryType (α m) $(quote narg) := fun $args* => $parsed)
 end Jax
 
 
