@@ -101,8 +101,8 @@ instance ImplTracer : Impl Tracer where
   eq x y := ⟨.binop .eq x.expr y.expr⟩
   lt x y := ⟨.binop .lt x.expr y.expr⟩
 
-def trace {n : ℕ} (f : {m : ℕ} → {α : ℕ → Type} → [Impl α] → curryType (α m) n) : Expr :=
-  let α := Tracer n
+def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α 0) n) : Expr :=
+  let α := Tracer 0
   let rec feed {m : ℕ} (f : curryType α m) : α :=
     match m with
     | 0 => f
@@ -134,7 +134,7 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
 
 
 @[simp]
-noncomputable def native {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α n) n) :
+noncomputable def native {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α 0) n) :
   curryType Array n := @f (fun _ ↦ Array) ImplArray
 
 
@@ -151,23 +151,22 @@ open Lean in macro_rules
   | `(jax_def $[($spec_n : $spec_t)]* $name ($args,*): $body) => do
     let narg := (args.elemsAndSeps.size + 1) / 2
     let rec parse (narg : ℕ) : TSyntax `jax_term → MacroM (TSyntax `term)
-    | `(jax_term|return $t:term) =>
-      `(Impl.cast (α := α) $t (by simp))
+    | `(jax_term|return $t:term) => `(@id (α _) $t)
     | `(jax_term|$assign:ident = $value:term ; $t:jax_term) => do
       let parsed ← parse narg t
-      `(let $assign : α (m + $(quote narg)) := Impl.cast $value (by simp);
+      `(let $assign : α $(quote narg) := $value
         $parsed)
     | `(jax_term|def $name:ident ( $args:ident,* ): $value:jax_term $t:jax_term) => do
       let new_arg : ℕ := (args.elemsAndSeps.size + 1) / 2
       let narg' := narg + new_arg
       let content ← parse narg' value
       let parsed ←  parse narg t
-      `(let $name : curryType (α (m + $(quote narg'))) $(quote new_arg) := fun $args* => $content;
+      `(let $name : curryType (α $(quote narg')) $(quote new_arg) := fun $args* => $content;
         $parsed)
     | _ => Macro.throwUnsupported
     let parsed ← parse 0 body
-    `(def $name $[($spec_n : $spec_t)]* {m : ℕ} {α : ℕ → Type} [Impl α] :
-      curryType (α m) $(quote narg) := fun $args* => $parsed)
+    `(def $name $[($spec_n : $spec_t)]* {α : ℕ → Type} [Impl α] :
+      curryType (α 0) $(quote narg) := fun $args* => $parsed)
 end Jax
 
 
