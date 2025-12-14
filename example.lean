@@ -55,12 +55,10 @@ example (n : ℕ) (x : List ℝ) (h : x.length = n) :
   · simp [h]
   · simp
 
-def Jax.Array.ofMatrix {n : ℕ} : Matrix (Fin n) (Fin n) ℝ → Array := fun x ↦
-  .float <| List.ofFn fun (i : Fin (n * n)) ↦ x i.modNat i.divNat
+def ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Jax.Array := fun x ↦
+  .float <| List.ofFn fun (i : Fin (m * n)) ↦ x i.modNat i.divNat
 
-syntax "#" num : term
-macro_rules
-  | `(term|# $n) => `(⟨$n, by simp⟩)
+macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
 
 jax_def (n : ℕ) sum(A):
     return einsum [n] [[#0]] [] [A]
@@ -72,21 +70,15 @@ theorem sum_def (n : ℕ) (x : List ℝ) (hx : x.length = n) (hn : n ≠ 0) :
       Jax.Einsum.prod.go, hx, Jax.ValidShape.size]
   congr
   let shape : Jax.ValidShape := ⟨[n], by simp [hn]⟩
-  let idx' (idx : Jax.ValidIdx shape) : ∀ i : Fin 1, Fin [n][i.val] :=
-    fun i ↦ Fin.mk (idx [(0 : Fin 1)][i.val]).val <| by
-      have := (idx [(0 : Fin 1)][i.val]).isLt
-      simpa
-  have h_idx' (idx : Jax.ValidIdx shape) : idx' idx = idx := by
-    ext i
-    have : i = 0 := by omega
-    rw[this]
-    simp [idx']
-  simp [idx'] at h_idx'
   conv =>
-    lhs; arg 2; intro idx
-    conv =>
-      arg 2
-      rw[h_idx' idx]
+    lhs; arg 2; intro idx; arg 2
+    equals Jax.flattenIdx idx =>
+      congr
+      funext i
+      have : i = 0 := by omega
+      simp [← Fin.val_eq_val]
+      rw[this]
+      congr
   have h_sum : x.sum = ∑ i : Fin x.length, x[i] := Eq.symm (Fin.sum_univ_getElem x)
   rw [h_sum]
   refine Function.Bijective.sum_comp ?_ x.get
@@ -129,6 +121,141 @@ theorem normalized_def (n : ℕ) (x : List ℝ) (hn : x.length = n) (hn' : n ≠
     rhs; arg 2; arg 2; arg 2
     rw [h₁, h₃]
   simp [Jax.Array.rep, HDiv.hDiv, hn, hn', Jax.Array.div] at h_out
+-/
+
+jax_def (n : ℕ) (m : ℕ) (l : ℕ) matmul(X, Y):
+    return einsum [n, m, l] [[#0, #1], [#1, #2]] [#0, #2] [X, Y]
+
+theorem matmul_def (n m l : ℕ) (h : n ≠ 0 ∧ m ≠ 0 ∧ l ≠ 0)
+  (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
+    Jax.native (matmul n m l) (ofMatrix x) (ofMatrix y) = ofMatrix (x * y) := by
+  simp[matmul, Jax.Array.einsum, h, Jax.allFloat, Jax.allFloat.go, ofMatrix, Jax.Einsum.sum,
+    Jax.Einsum.prod, Jax.Einsum.prod.go, Jax.ValidShape.size, mul_comm m n, mul_comm l m]
+  congr 1
+  apply List.ext_get
+  · simp; exact mul_comm n l
+  simp [Jax.unflattenIdx, List.getElem_ofFn]
+  intro a ha ha'
+  let i : Fin n := Fin.modNat ⟨a, ha'⟩
+  let j : Fin l := Fin.divNat ⟨a, ha'⟩
+  let idx_shape : Jax.ValidShape := ⟨[n,m,l], by simp[h]⟩
+  have : NeZero idx_shape.val.length := ⟨by simp[idx_shape]⟩
+  conv =>
+    lhs
+    conv =>
+      arg 1; arg 1; intro idx
+      conv =>
+        arg 1
+        change idx 0 = i
+      arg 2
+      rw [← Fin.val_eq_val]
+      simp
+      rw [Nat.mod_eq_of_lt (Nat.div_lt_of_lt_mul ha)]
+      change (idx 2).val = j.val
+      rw [Fin.val_eq_val]
+    arg 2; intro idx
+    conv =>
+      arg 1
+      simp only [GetElem.getElem, List.get_ofFn, Fin.modNat, Fin.divNat]
+      unfold Jax.flattenIdx
+      simp
+      unfold Jax.flattenIdx
+      simp
+      conv =>
+        arg 1
+        equals idx 0 =>
+          rw [← Fin.val_eq_val]
+          simp
+          exact Nat.mod_eq_of_lt (idx 0).isLt
+      arg 2
+      equals idx 1 =>
+        rw [← Fin.val_eq_val]
+        simp
+        have h₁ : idx 0 < n := (idx 0).isLt
+        have h₂ : idx 1 < m := (idx 1).isLt
+        rw [Nat.add_div (by omega), Nat.mul_div_cancel_left _ (by omega),
+          Nat.div_eq_zero_iff.mpr (.inr h₁), zero_add]
+        simp
+        exact (Nat.mod_lt _ (by omega))
+    arg 2
+    simp only [GetElem.getElem, List.get_ofFn, Fin.modNat, Fin.divNat]
+    unfold Jax.flattenIdx
+    simp
+    unfold Jax.flattenIdx
+    simp
+    conv =>
+      arg 1
+      equals idx 1 =>
+        rw [← Fin.val_eq_val]
+        simp
+        exact Nat.mod_eq_of_lt (idx 1).isLt
+    arg 2
+    equals idx 2 =>
+      rw [← Fin.val_eq_val]
+      simp
+      have h₁ : idx 0 < n := (idx 0).isLt
+      have h₂ : idx 1 < m := (idx 1).isLt
+      rw [Nat.add_div (by omega), Nat.mul_div_cancel_left _ (by omega),
+        Nat.div_eq_zero_iff.mpr (.inr h₂), zero_add]
+      simp
+      exact (Nat.mod_lt _ (by omega))
+  conv_rhs =>
+    change (x * y) i j
+  rw [Matrix.mul_apply]
+  apply Finset.sum_nbij (fun idx ↦ idx 1) 
+  · simp
+  · intro x hx y hy h
+    simp at hx hy h
+    simp [Jax.ValidIdx] at x y
+    funext k
+    fin_cases k
+    · exact hx.1.trans hy.1.symm
+    · exact h
+    · exact hx.2.trans hy.2.symm
+  · intro x hx
+    simp
+    let x' : Jax.ValidIdx idx_shape := fun a ↦
+      if h₁ : a = 0 then 
+        i.cast <| by simp[idx_shape, h₁]
+      else if h₂ : a = 1 then
+        x.cast <| by simp[idx_shape, h₂]
+      else
+        j.cast <| by
+          have := a.isLt
+          simp only [List.length_cons, List.length_nil, Nat.reduceAdd, zero_add, idx_shape] at this
+          have : a = 2 := by
+            rw [← Fin.val_eq_val] at h₁ h₂ ⊢
+            simp[idx_shape, -Fin.val_eq_zero_iff] at h₁ h₂ ⊢; 
+            generalize a.val = a' at h₁ h₂ this ⊢
+            omega
+          simp[this, idx_shape]
+    use x'
+    simp +decide [x',show (2 : Fin 3) ≠ 0 by decide, show (2 : Fin 3) ≠ 1 by decide]
+  simp +contextual
+
+
+
+
+
+
+
+
+        /-
+      tactic =>
+        have : (⟨(idx 0).val % n, Nat.mod_lt _ (by omega)⟩ : Fin n) = idx 0 := by
+      rw[this]
+      -/
+
+                                
+                              
+      
+
+
+
+
+
+
+
 
 
 /-
