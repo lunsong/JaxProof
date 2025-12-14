@@ -3,10 +3,11 @@ import Mathlib.Data.Matrix.Mul
 
 open Jax.Impl
 
+jax_def bodyfn(i, a):
+  return a * a
+
 -- define the jax function
 jax_def f(n, x):
-  def bodyfn(i, a):
-    return a * a
   return fori_loop n x bodyfn
 
 -- extract python code
@@ -25,12 +26,12 @@ def x1(x2, x3):
 -- prove mathematical properties
 example (n : ℕ) (x : List ℝ) :
     (Jax.native f) (.int [n]) (.float x) = .float (x.map (· ^ (2 ^ n))) := by
-  simp[f]
+  simp[f, bodyfn]
   induction n with
   | zero => simp
   | succ n ih =>
     simp [ih]
-    simp [HMul.hMul, Jax.withLift₂, Jax.Array.pairwise, Jax.Array.mul]
+    simp [HMul.hMul, Jax.Array.pairwise, Jax.Array.mul]
     congr
     apply List.ext_get
     · simp
@@ -61,6 +62,77 @@ syntax "#" num : term
 macro_rules
   | `(term|# $n) => `(⟨$n, by simp⟩)
 
+jax_def (n : ℕ) sum(A):
+    return einsum [n] [[#0]] [] [A]
+
+theorem sum_def (n : ℕ) (x : List ℝ) (hx : x.length = n) (hn : n ≠ 0) :
+    (Jax.native (sum n)) (.float x) = .float [x.sum] := by
+
+  simp [sum, Jax.Array.einsum, hn, Jax.allFloat, Jax.allFloat.go, Jax.Einsum.sum, Jax.Einsum.prod,
+      Jax.Einsum.prod.go, hx, Jax.ValidShape.size]
+  congr
+  let shape : Jax.ValidShape := ⟨[n], by simp [hn]⟩
+  let idx' (idx : Jax.ValidIdx shape) : ∀ i : Fin 1, Fin [n][i.val] :=
+    fun i ↦ Fin.mk (idx [(0 : Fin 1)][i.val]).val <| by
+      have := (idx [(0 : Fin 1)][i.val]).isLt
+      simpa
+  have h_idx' (idx : Jax.ValidIdx shape) : idx' idx = idx := by
+    ext i
+    have : i = 0 := by omega
+    rw[this]
+    simp [idx']
+  simp [idx'] at h_idx'
+  conv =>
+    lhs; arg 2; intro idx
+    conv =>
+      arg 2
+      rw[h_idx' idx]
+  have h_sum : x.sum = ∑ i : Fin x.length, x[i] := Eq.symm (Fin.sum_univ_getElem x)
+  rw [h_sum]
+  refine Function.Bijective.sum_comp ?_ x.get
+  constructor
+  · intro i j
+    simp
+    intro h
+    rw [Fin.val_eq_val] at h
+    exact (Jax.flattenEuiv shape).injective h
+  · intro i
+    have ⟨a, ha⟩ := (Jax.flattenEuiv shape).surjective <| i.cast <| by
+      simp[shape, Jax.ValidShape.size, hx]
+    use a
+    simp
+    simpa [← Fin.val_eq_val] using ha
+
+jax_def (n : ℕ) normalize(A):
+  norm = sqrt (sum n (A * A));
+  return A / rep n norm
+  
+#eval IO.println (Jax.trace (normalize 10)).outward.code
+
+theorem normalized_def (n : ℕ) (x : List ℝ) (hn : x.length = n) (hn' : n ≠ 0) :
+  let out := (Jax.native (normalize n)) (.float x);
+  ∃ y : List ℝ,
+    y.length = n ∧ out = .float y ∧ (y.map (· ^ 2)).sum = 1
+  := by
+  intro out
+  have h_out : out = (Jax.native (normalize n)) (.float x) := rfl
+  simp [normalize, HMul.hMul] at h_out
+  have h₁ : (Jax.Array.float x).mul (Jax.Array.float x) = .float (x.map (· ^ 2)) := by
+    simp [Jax.Array.mul, Jax.Array.pairwise]
+    apply List.ext_get
+    · simp
+    · simp [pow_two]
+  have h₂ : (x.map (· ^ 2)).length = n := by simp[hn]
+  have h₃ := sum_def n _ h₂ hn' 
+  simp at h₃
+  conv at h_out =>
+    rhs; arg 2; arg 2; arg 2
+    rw [h₁, h₃]
+  simp [Jax.Array.rep, HDiv.hDiv, hn, hn', Jax.Array.div] at h_out
+
+
+/-
+
 jax_def (n : ℕ) houseHolder_for_antisymm(A):
   def body_fun(i, a):
     i' = rep n i;
@@ -73,6 +145,8 @@ jax_def (n : ℕ) houseHolder_for_antisymm(A):
     u = Jax.Impl.setIdx u (i + ofInt [1]) (u[i] - norm_u);
     du = einsum [n, n, n*n] [[#0], [#1], [#1, #2]] [#0, #1] [u, u, a];
     du = du - einsum [n, n] [[#0, #1]] [#1, #0] [du];
+    aa = fillInt n 1;
+    tmp = (by sorry);
     return (u - du - du)
   return fori_loop (ofInt [n]) A body_fun
 
@@ -120,4 +194,10 @@ example (n : ℕ) (A : Matrix (Fin n) (Fin n) ℝ) (h_A_antisymm : ∀ i j, A i 
       ∧ ∀ i j, B i j = - B j i
       ∧ ∀ i j, i.val + 1 < j.val → B i j = 0
       ∧ ∃ C : Matrix (Fin n) (Fin n) ℝ, B = C * A * C.transpose
-      := by sorry
+      := by
+  intro output
+  have h_output : output = (Jax.native (houseHolder_for_antisymm n)) (Jax.Array.ofMatrix A) := rfl
+  simp at h_output
+  unfold houseHolder_for_antisymm at h_output
+  sorry
+-/

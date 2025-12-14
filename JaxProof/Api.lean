@@ -6,6 +6,7 @@ namespace Jax
 class Impl (α : ℕ → Type) where
   lift {n : ℕ} (m : ℕ) : α n → α (n + m)
   protected cast {n m : ℕ} : α n → n = m → α m
+  unsafeCast {n m : ℕ} : α n → α m
   protected add {n : ℕ} : α n → α n → α n
   protected sub {n : ℕ} : α n → α n → α n
   protected mul {n : ℕ} : α n → α n → α n
@@ -50,30 +51,39 @@ section
 
 variable {α : ℕ → Type} [Impl α] {n m l : ℕ}
 
+@[simp]
 def select : α n → α m → α l → α (max (max n m) l) := withLift₃ α Impl.select
 
+@[simps]
 instance : HAdd (α n) (α m) (α (max n m)) where
   hAdd := withLift₂ α Impl.add
 
+@[simps]
 instance : HSub (α n) (α m) (α (max n m)) where
   hSub := withLift₂ α Impl.sub
 
+@[simps]
 instance : HMul (α n) (α m) (α (max n m)) where
   hMul := withLift₂ α Impl.mul
 
+@[simps]
 instance : HDiv (α n) (α m) (α (max n m)) where
   hDiv := withLift₂ α Impl.div
 
+@[simp]
 def divInt {α : ℕ → Type} [Impl α] {n m : ℕ} : α n → α m → α (max n m) := withLift₂ α Impl.divInt
 
 infix:50 "//" => divInt
 
+@[simps]
 instance : HMod (α n) (α m) (α (max n m)) where
   hMod := withLift₂ α Impl.mod
 
+@[simps]
 instance : GetElem (α n) (α m) (α (max n m)) (fun _  _ ↦ True) where
   getElem x i _ := withLift₂ α Impl.idx x i
 
+@[simp]
 def setIdx : α n → α m → α l → α (max (max n m) l) := withLift₃ α Impl.setIdx
 
 notation:50 a:50 ".at[" i:50 "].set(" b:50 ")" => setIdx a i b
@@ -94,6 +104,7 @@ instance ImplTracer : Impl Tracer where
   setIdx x i y := ⟨.triop .setIdx x.expr i.expr y.expr⟩
   lift m x := ⟨x.expr.lift m⟩
   cast x _ := ⟨x.expr⟩
+  unsafeCast x := ⟨x.expr⟩
   ofInt x := ⟨.nullop (.const_int x)⟩
   ofRat x := ⟨.nullop (.const_float x)⟩
   fillInt n x := ⟨.nullop (.fill_int n x)⟩
@@ -115,6 +126,7 @@ def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α 0) 
     | m + 1 => feed (f ⟨.arg (n - m - 1)⟩)
   .fn n (feed f).expr
 
+@[simps]
 noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
   mul := Array.mul
   add := Array.add
@@ -131,6 +143,7 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
   fillRat n x := Array.float (List.replicate n x)
   lift _ := id
   cast x _ := x
+  unsafeCast := id
   iota n := Array.int <| List.ofFn fun (i : Fin n) ↦ i
   rep := Array.rep
   fori_loop n x f := match n with
@@ -148,8 +161,12 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
 noncomputable def native {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α 0) n) :
   curryType Array n := @f (fun _ ↦ Array) ImplArray
 
+@[simp]
+def unsafeLift {α : ℕ → Type} [Impl α] {n m : ℕ} (f : curryType (α 0) n) : curryType (α m) n :=
+  match n with
+  | 0 => @id (α m) (Impl.unsafeCast (@id (α 0) f))
+  | _ + 1 => fun x ↦ unsafeLift (f (Impl.unsafeCast x))
 
-attribute [simp] Impl.fori_loop Impl.ofRat Impl.cast Impl.mul Impl.lift
 
 declare_syntax_cat jax_term
 
@@ -176,8 +193,8 @@ open Lean in macro_rules
         $parsed)
     | _ => Macro.throwUnsupported
     let parsed ← parse 0 body
-    `(def $name $[($spec_n : $spec_t)]* {α : ℕ → Type} [Impl α] :
-      curryType (α 0) $(quote narg) := fun $args* => $parsed)
+    `(def $name $[($spec_n : $spec_t)]* {α : ℕ → Type} [Impl α] {m : ℕ} :
+      curryType (α m) $(quote narg) := unsafeLift fun $args* => $parsed)
 end Jax
 
 
