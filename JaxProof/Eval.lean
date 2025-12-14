@@ -177,32 +177,32 @@ namespace Einsum
 
 variable {α : Type} [AddCommMonoid α] [Monoid α] 
 
-def prod (s : ValidShape) (xs : List ((List α) × List (Fin s.val.length))) :
+def prod (s : List ℕ) (xs : List ((List α) × List (Fin s.length))) :
     Option (ValidIdx s → α) :=
   go xs 1
-where go (xs : List ((List α) × List (Fin s.val.length))) (acc : ValidIdx s → α) : 
+where go (xs : List ((List α) × List (Fin s.length))) (acc : ValidIdx s → α) : 
   Option (ValidIdx s → α) :=
   match xs with
   | [] => some acc
   | ⟨x, indices⟩ :: xs =>
-    let s' := subshape s indices
-    if h₀ : x.length = s'.size then
+    let s' := indices.map s.get
+    if h₀ : x.length = s'.prod then
       go xs fun idx ↦
         let idx' : ValidIdx s' := fun i ↦ 
-          let i' : Fin indices.length := i.cast <| by simp [s', subshape]
+          let i' : Fin indices.length := i.cast <| by simp [s']
           Fin.mk (idx (indices.get i')) <| by
-            simp [s', subshape]
+            simp [s']
             exact (idx indices[i']).isLt
-        acc idx * x[flattenIdx idx']
+        acc idx * x[ValidIdx.flatten idx']
     else
       none  -- Invalid: shape mismatch
 
-def sum (s : ValidShape) (xs : List ((List α) × List (Fin s.val.length)))
-    (out : List (Fin s.val.length)) : Option (List α) :=
+def sum (s : List ℕ) (xs : List ((List α) × List (Fin s.length)))
+    (out : List (Fin s.length)) : Option (List α) :=
   match prod s xs with
   | none => .none
   | some x => .some <| .ofFn fun j ↦
-    let idx := unflattenIdx (subshape s out) j
+    let idx := ValidIdx.unflatten (out.map s.get) j
     let sumIdx : Finset (ValidIdx s) :=
       {idx' | ∀ i , idx' (out.get i) = (idx (i.cast (by simp))).cast (by simp)} 
     ∑ idx' ∈ sumIdx, x idx'
@@ -218,14 +218,11 @@ where go : List Array → List (List ℝ) → Option (List (List ℝ))
 
 def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : List (Fin s.length))
     (xs : List Array) : Array :=
-  if h : ∀ n ∈ s, n ≠ 0 then
-    match allFloat xs with
+  match allFloat xs with
+  | none => .error
+  | some xs => match Einsum.sum s (xs.zip i) o with
     | none => .error
-    | some xs => match Einsum.sum ⟨s, h⟩ (xs.zip i) o with
-      | none => .error
-      | some ys => .float ys
-  else
-    .error
+    | some ys => .float ys
 
 /-
 noncomputable def Expr.eval : Expr → List Array → Array 

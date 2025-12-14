@@ -1,5 +1,6 @@
 import Mathlib.Data.Fintype.Basic
 import Mathlib.Data.Fintype.Pi
+import Mathlib.Tactic
 import Mathlib.Algebra.Ring.Defs
 import Mathlib.Data.Nat.ModEq
 import Batteries.Data.Fin.Lemmas
@@ -11,109 +12,108 @@ def curryType (α : Type) : Nat → Type
   | n + 1 => α → curryType α n
 
 
-def ValidShape : Type := Subtype fun (s : List ℕ) ↦ ∀ n ∈ s, n ≠ 0
+def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
 
-def ValidIdx (s : ValidShape) : Type := ∀ i : Fin s.val.length, Fin (s.val.get i)
+instance (s : List ℕ) : Fintype (ValidIdx s) :=
+  inferInstanceAs (Fintype (∀ i : Fin s.length, Fin (s.get i)))
 
-instance (s : ValidShape) : Fintype (ValidIdx s) :=
-  inferInstanceAs (Fintype (∀ i : Fin s.val.length, Fin (s.val.get i)))
+instance (s : List ℕ) : DecidableEq (ValidIdx s) :=
+  inferInstanceAs (DecidableEq (∀ i : Fin s.length, Fin (s.get i)))
 
-instance (s : ValidShape) : DecidableEq (ValidIdx s) :=
-  inferInstanceAs (DecidableEq (∀ i : Fin s.val.length, Fin (s.val.get i)))
-
-def ValidShape.size (s : ValidShape) : ℕ := s.val.prod
-
-@[simp]
-def subshape (s : ValidShape) (l : List (Fin s.val.length)) : ValidShape :=
-  Subtype.mk (l.map s.val.get) <| by
-    intro n hn
-    rw [List.mem_map] at hn
-    obtain ⟨i, hi⟩ := hn
-    rw [← hi.2]
-    exact s.prop (s.val.get i) (List.get_mem _ _)
-
-def flattenIdx {s : ValidShape} (idx : ValidIdx s) : Fin s.size :=
-  let ⟨sval, sprop⟩ := s
-  match sval with
-  | [] => ⟨0, by simp [ValidShape.size]⟩
+def ValidIdx.flatten {s : List ℕ} (idx : ValidIdx s) : Fin s.prod :=
+  match s with
+  | [] => ⟨0, by simp⟩
   | s₀ :: s₁ =>
-    let s' : ValidShape := ⟨s₁, by simp at sprop; exact sprop.2⟩
-    let idx' : ValidIdx s' := fun i ↦ idx i.succ
-    have i' := flattenIdx idx'
+    let idx' : ValidIdx s₁ := fun i ↦ idx i.succ
+    have i' := idx'.flatten
     let i₀ := idx ⟨0, by simp⟩
-    Fin.mk (i₀ + s₀ * i') <| by
-      simp [ValidShape.size]
+    Fin.mk (i₀ * s₁.prod + i') <| by
+      simp
       rw [← Nat.succ_le_iff, Nat.succ_eq_add_one]
       calc
-        _ = (i₀ + 1) + s₀ * i' := by ac_nf
-        _ ≤ s₀ * (i' + 1) := by rw[add_comm i'.val 1, Nat.mul_add, mul_one]; grind
-        _ ≤ _ := by gcongr; rw[Nat.succ_le_iff]; exact i'.isLt
-termination_by s.val
+        _ ≤ (i₀.val + 1) * s₁.prod := by
+          rw [add_mul, one_mul, add_assoc]
+          gcongr
+          exact Nat.succ_le_of_lt i'.isLt
+        _ ≤ _ := by gcongr; exact Nat.succ_le_of_lt i₀.isLt
 
-def unflattenIdx (s : ValidShape) (idx : Fin s.size) : ValidIdx s :=
-  let ⟨sval, sprop⟩ := s
-  match sval with
+def ValidIdx.unflatten (s : List ℕ) (idx : Fin s.prod) : ValidIdx s :=
+  match s with
   | [] => fun i ↦ nomatch i
   | s₀ :: s₁ => fun i ↦
-    let idx' : Fin (s₁.prod * s₀) := idx.cast <| by simp [ValidShape.size]; rw[mul_comm]
     if h : i = ⟨0, _⟩ then
-      idx'.modNat.cast <| by simp [h]
+      (idx : Fin (s₀ * s₁.prod)).divNat.cast <| by simp[h]
     else
-      (unflattenIdx ⟨s₁, by grind⟩ idx'.divNat (i.pred h)).cast <| by
+      (unflatten s₁ idx.modNat (i.pred h)).cast <| by
         simp [List.getElem_cons]
         intro hc
         exact (h hc).elim
-termination_by s.val
 
-def flattenEuiv (s : ValidShape) : ValidIdx s ≃ Fin s.size where
-  toFun := flattenIdx
-  invFun := unflattenIdx s
+def ValidIdx.equiv (s : List ℕ) : ValidIdx s ≃ Fin s.prod where
+  toFun := flatten
+  invFun := unflatten s
   left_inv := by
-    let ⟨sval, sprop⟩ := s
-    induction sval with
+    induction s with
     | nil => intro x; simp[ValidIdx]; ext i; nomatch i
     | cons s₀ s₁ ih =>
       have : NeZero (s₀ :: s₁).length := ⟨by simp⟩
       intro x
-      simp[flattenIdx, unflattenIdx, ValidIdx]
+      simp[flatten, unflatten, ValidIdx]
+      have hs₁ : 0 < s₁.prod := by
+        by_contra
+        have hc : s₁.prod = 0 := by omega
+        rw [List.prod_eq_zero_iff, List.mem_iff_get] at hc
+        obtain ⟨i, hi⟩ := hc
+        have := (x i.succ).isLt
+        simp only [List.get_cons_succ', hi] at this
+        omega
       ext i
       split_ifs with h
-      · simp only [Fin.coe_cast, Fin.coe_modNat, Nat.add_mul_mod_self_left]
-        rw[h]
-        exact Nat.mod_eq_of_lt (x 0).isLt
-      simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at sprop
-      specialize ih sprop.2 (fun i ↦ x i.succ)
-      simp only [Fin.divNat, Fin.coe_cast]
+      · simp
+        set x' := flatten fun i ↦ x i.succ
+        conv_lhs =>
+          arg 2
+          change s₁.prod
+        rw [h, Nat.add_div_of_dvd_right]
+        · rw [Nat.mul_div_left _ hs₁, (Nat.div_eq_zero_iff_lt hs₁).mpr x'.isLt, add_zero]
+        · exact Nat.dvd_mul_left _ _
+      simp only [Fin.modNat, Fin.coe_cast]
+      specialize ih (fun i ↦ x i.succ)
+      have : 0 < s₀ := by
+        have := (x 0).isLt
+        simp only [List.get_cons_zero] at this
+        exact Nat.zero_lt_of_lt this
       conv =>
         lhs; arg 1; arg 2; arg 1
-        rw[Nat.add_div_of_dvd_left (by simp), 
-          show (x 0).val / s₀ = 0 from Nat.div_eq_zero_iff.mpr (Or.inr (x 0).isLt), zero_add,
-          mul_comm, Nat.mul_div_cancel _ (by omega)]
+        conv =>
+          arg 2; change s₁.prod
+        rw [Nat.add_mod]
+        rw [Nat.mul_mod_left, zero_add, Nat.mod_mod,
+          Nat.mod_eq_of_lt (flatten fun i ↦ x i.succ).isLt]
       simp only [Fin.eta, ih]
       let g (j : Fin (s₁.length + 1)) : ℕ := x i
       have : x (i.pred h).succ = g (i.pred h).succ := by congr; all_goals exact Fin.succ_pred i h
       rw[this]
   right_inv := by
-    let ⟨sval, sprop⟩ := s
-    induction sval with
+    induction s with
     | nil =>
       intro x
-      simp[flattenIdx]
-      simp[ValidShape.size] at x
+      simp[flatten]
       rw[←Fin.val_eq_val, Fin.val_zero]
       omega
     | cons s₀ s₁ ih =>
       intro x
-      simp[unflattenIdx, flattenIdx]
+      simp[unflatten, flatten]
       rw [← Fin.val_eq_val]
       push_cast
       conv_rhs =>
-        rw [← Nat.mod_add_div x.val s₀]
+        rw [← Nat.mod_add_div' x.val s₁.prod]
+      conv_lhs =>
+        arg 1; arg 1; arg 2; change s₁.prod
+      nth_rw 1 [add_comm]
       congr
-      simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at sprop
-      specialize ih sprop.2
-        (x.cast (by simp[ValidShape.size, mul_comm]) : Fin (s₁.prod * s₀)).divNat
-      simp [Fin.divNat, ← Fin.val_eq_val] at ih
+      specialize ih x.modNat
+      simp [← Fin.val_eq_val] at ih
       rw[← ih]
       congr
 
