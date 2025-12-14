@@ -56,7 +56,7 @@ example (n : ℕ) (x : List ℝ) (h : x.length = n) :
   · simp
 
 def ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Jax.Array := fun x ↦
-  .float <| List.ofFn fun (i : Fin (m * n)) ↦ x i.modNat i.divNat
+  .float <| List.ofFn fun (i : Fin (n * m)) ↦ x i.divNat i.modNat
 
 macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
 
@@ -67,12 +67,11 @@ theorem sum_def (n : ℕ) (x : List ℝ) (hx : x.length = n) (hn : n ≠ 0) :
     (Jax.native (sum n)) (.float x) = .float [x.sum] := by
 
   simp [sum, Jax.Array.einsum, hn, Jax.allFloat, Jax.allFloat.go, Jax.Einsum.sum, Jax.Einsum.prod,
-      Jax.Einsum.prod.go, hx, Jax.ValidShape.size]
+      Jax.Einsum.prod.go, hx]
   congr
-  let shape : Jax.ValidShape := ⟨[n], by simp [hn]⟩
   conv =>
     lhs; arg 2; intro idx; arg 2
-    equals Jax.flattenIdx idx =>
+    equals idx.flatten =>
       congr
       funext i
       have : i = 0 := by omega
@@ -87,28 +86,28 @@ theorem sum_def (n : ℕ) (x : List ℝ) (hx : x.length = n) (hn : n ≠ 0) :
     simp
     intro h
     rw [Fin.val_eq_val] at h
-    exact (Jax.flattenEuiv shape).injective h
+    exact (Jax.ValidIdx.equiv [n]).injective h
   · intro i
-    have ⟨a, ha⟩ := (Jax.flattenEuiv shape).surjective <| i.cast <| by
-      simp[shape, Jax.ValidShape.size, hx]
+    have ⟨a, ha⟩ := (Jax.ValidIdx.equiv [n]).surjective <| i.cast <| by simp[hx]
     use a
     simp
     simpa [← Fin.val_eq_val] using ha
 
-jax_def (n : ℕ) normalize(A):
+
+jax_def (n : ℕ) Normalize(A):
   norm = sqrt (sum n (A * A));
   return A / rep n norm
   
-#eval IO.println (Jax.trace (normalize 10)).outward.code
+#eval IO.println (Jax.trace (Normalize 10)).outward.code
 
 theorem normalized_def (n : ℕ) (x : List ℝ) (hn : x.length = n) (hn' : n ≠ 0) :
-  let out := (Jax.native (normalize n)) (.float x);
+  let out := Jax.native (Normalize n) (.float x);
   ∃ y : List ℝ,
     y.length = n ∧ out = .float y ∧ (y.map (· ^ 2)).sum = 1
   := by
   intro out
-  have h_out : out = (Jax.native (normalize n)) (.float x) := rfl
-  simp [normalize, HMul.hMul] at h_out
+  have h_out : out = Jax.native (Normalize n) (.float x) := rfl
+  simp [Normalize, HMul.hMul] at h_out
   have h₁ : (Jax.Array.float x).mul (Jax.Array.float x) = .float (x.map (· ^ 2)) := by
     simp [Jax.Array.mul, Jax.Array.pairwise]
     apply List.ext_get
@@ -121,7 +120,7 @@ theorem normalized_def (n : ℕ) (x : List ℝ) (hn : x.length = n) (hn' : n ≠
     rhs; arg 2; arg 2; arg 2
     rw [h₁, h₃]
   simp [Jax.Array.rep, HDiv.hDiv, hn, hn', Jax.Array.div] at h_out
--/
+  sorry
 
 jax_def (n : ℕ) (m : ℕ) (l : ℕ) matmul(X, Y):
     return einsum [n, m, l] [[#0, #1], [#1, #2]] [#0, #2] [X, Y]
@@ -130,73 +129,70 @@ theorem matmul_def (n m l : ℕ) (h : n ≠ 0 ∧ m ≠ 0 ∧ l ≠ 0)
   (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
     Jax.native (matmul n m l) (ofMatrix x) (ofMatrix y) = ofMatrix (x * y) := by
   simp[matmul, Jax.Array.einsum, h, Jax.allFloat, Jax.allFloat.go, ofMatrix, Jax.Einsum.sum,
-    Jax.Einsum.prod, Jax.Einsum.prod.go, Jax.ValidShape.size, mul_comm m n, mul_comm l m]
+    Jax.Einsum.prod, Jax.Einsum.prod.go]
   congr 1
   apply List.ext_get
-  · simp; exact mul_comm n l
-  simp [Jax.unflattenIdx, List.getElem_ofFn]
-  intro a ha ha'
-  let i : Fin n := Fin.modNat ⟨a, ha'⟩
-  let j : Fin l := Fin.divNat ⟨a, ha'⟩
-  let idx_shape : Jax.ValidShape := ⟨[n,m,l], by simp[h]⟩
-  have : NeZero idx_shape.val.length := ⟨by simp[idx_shape]⟩
+  · simp
+  simp [Jax.ValidIdx.unflatten, List.getElem_ofFn]
+  intro a ha _
+  let i : Fin n := Fin.divNat ⟨a, ha⟩
+  let j : Fin l := Fin.modNat ⟨a, ha⟩
+  --let idx_shape : Jax.ValidShape := ⟨[n,m,l], by simp[h]⟩
+  have : NeZero [n,m,l].length := ⟨by simp⟩
   conv =>
     lhs
     conv =>
       arg 1; arg 1; intro idx
       conv =>
         arg 1
-        change idx 0 = i
+        rw [← Fin.val_eq_val]
+        simp
+        change (idx 0).val = i.val
+        rw [Fin.val_eq_val]
       arg 2
       rw [← Fin.val_eq_val]
       simp
-      rw [Nat.mod_eq_of_lt (Nat.div_lt_of_lt_mul ha)]
       change (idx 2).val = j.val
       rw [Fin.val_eq_val]
     arg 2; intro idx
     conv =>
       arg 1
       simp only [GetElem.getElem, List.get_ofFn, Fin.modNat, Fin.divNat]
-      unfold Jax.flattenIdx
-      simp
-      unfold Jax.flattenIdx
-      simp
+      simp[Jax.ValidIdx.flatten]
       conv =>
         arg 1
         equals idx 0 =>
           rw [← Fin.val_eq_val]
+          have : 0 < m := Nat.zero_lt_of_lt (idx 1).isLt
           simp
-          exact Nat.mod_eq_of_lt (idx 0).isLt
+          rw [Nat.add_div, Nat.mul_div_cancel,
+            show (idx 1).val / m = 0 from Nat.div_eq_zero_iff.mpr (.inr (idx 1).isLt)]
+          simp
+          exact Nat.mod_lt _ this
+          exact this
+          exact this
       arg 2
-      equals idx 1 =>
-        rw [← Fin.val_eq_val]
-        simp
-        have h₁ : idx 0 < n := (idx 0).isLt
-        have h₂ : idx 1 < m := (idx 1).isLt
-        rw [Nat.add_div (by omega), Nat.mul_div_cancel_left _ (by omega),
-          Nat.div_eq_zero_iff.mpr (.inr h₁), zero_add]
-        simp
-        exact (Nat.mod_lt _ (by omega))
-    arg 2
-    simp only [GetElem.getElem, List.get_ofFn, Fin.modNat, Fin.divNat]
-    unfold Jax.flattenIdx
-    simp
-    unfold Jax.flattenIdx
-    simp
-    conv =>
-      arg 1
       equals idx 1 =>
         rw [← Fin.val_eq_val]
         simp
         exact Nat.mod_eq_of_lt (idx 1).isLt
     arg 2
-    equals idx 2 =>
+    simp only [GetElem.getElem, List.get_ofFn, Fin.modNat, Fin.divNat]
+    simp [Jax.ValidIdx.flatten]
+    conv =>
+      arg 2
+      equals idx 2 =>
+        rw [← Fin.val_eq_val]
+        simp
+        exact Nat.mod_eq_of_lt (idx 2).isLt
+    arg 1
+    equals idx 1 =>
       rw [← Fin.val_eq_val]
       simp
       have h₁ : idx 0 < n := (idx 0).isLt
       have h₂ : idx 1 < m := (idx 1).isLt
-      rw [Nat.add_div (by omega), Nat.mul_div_cancel_left _ (by omega),
-        Nat.div_eq_zero_iff.mpr (.inr h₂), zero_add]
+      rw [Nat.add_div (by omega), Nat.mul_div_cancel _ (by omega),
+        show (idx 2).val / l = 0 from Nat.div_eq_zero_iff.mpr (.inr (idx 2).isLt), add_zero]
       simp
       exact (Nat.mod_lt _ (by omega))
   conv_rhs =>
@@ -214,48 +210,24 @@ theorem matmul_def (n m l : ℕ) (h : n ≠ 0 ∧ m ≠ 0 ∧ l ≠ 0)
     · exact hx.2.trans hy.2.symm
   · intro x hx
     simp
-    let x' : Jax.ValidIdx idx_shape := fun a ↦
+    let x' : Jax.ValidIdx [n,m,l] := fun a ↦
       if h₁ : a = 0 then 
-        i.cast <| by simp[idx_shape, h₁]
+        i.cast <| by simp[ h₁]
       else if h₂ : a = 1 then
-        x.cast <| by simp[idx_shape, h₂]
+        x.cast <| by simp[ h₂]
       else
         j.cast <| by
           have := a.isLt
-          simp only [List.length_cons, List.length_nil, Nat.reduceAdd, zero_add, idx_shape] at this
+          simp only [List.length_cons, List.length_nil, Nat.reduceAdd, zero_add] at this
           have : a = 2 := by
             rw [← Fin.val_eq_val] at h₁ h₂ ⊢
-            simp[idx_shape, -Fin.val_eq_zero_iff] at h₁ h₂ ⊢; 
+            simp[-Fin.val_eq_zero_iff] at h₁ h₂ ⊢; 
             generalize a.val = a' at h₁ h₂ this ⊢
             omega
-          simp[this, idx_shape]
+          simp[this]
     use x'
     simp +decide [x',show (2 : Fin 3) ≠ 0 by decide, show (2 : Fin 3) ≠ 1 by decide]
   simp +contextual
-
-
-
-
-
-
-
-
-        /-
-      tactic =>
-        have : (⟨(idx 0).val % n, Nat.mod_lt _ (by omega)⟩ : Fin n) = idx 0 := by
-      rw[this]
-      -/
-
-                                
-                              
-      
-
-
-
-
-
-
-
 
 
 /-
