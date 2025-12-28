@@ -274,4 +274,8 @@ noncomputable def Expr.eval : Expr → List Array → Array
     | _ => .error
 -/
 
+
+def Array.ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Array := fun x ↦
+  .float <| List.ofFn fun (i : Fin (n * m)) ↦ x i.divNat i.modNat
+
 end Jax

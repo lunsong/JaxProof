@@ -19,6 +19,7 @@ class Impl (α : ℕ → Type) where
   eq {n : ℕ} : α n → α n → α n
   lt {n : ℕ} : α n → α n → α n
   sqrt {n : ℕ} : α n → α n
+  exp {n : ℕ} : α n → α n
   rep {n : ℕ} : ℕ → α n → α n
   ofRat {n : ℕ} : List ℚ → α n
   ofInt {n : ℕ} : List ℤ → α n
@@ -98,7 +99,14 @@ def lt : α n → α m → α (max n m) := withLift₂ α Impl.lt
 def sqrt : α n → α n := Impl.sqrt
 
 @[simp]
+def exp : α n → α n := Impl.exp
+
+@[simp]
 def rep : ℕ → α n → α n := Impl.rep
+
+@[simp]
+def einsum (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → List (α n) → α n :=
+  Impl.einsum s
 
 end Api
 
@@ -131,6 +139,7 @@ instance ImplTracer : Impl Tracer where
   eq x y := ⟨.binop .eq x.expr y.expr⟩
   lt x y := ⟨.binop .lt x.expr y.expr⟩
   sqrt x := ⟨.unop .sqrt x.expr⟩
+  exp x := ⟨.unop .exp x.expr⟩
 
 def trace {n : ℕ} (f : {α : ℕ → Type} → [Impl α] → curryType (α 0) n) : Expr :=
   let α := Tracer 0
@@ -168,6 +177,9 @@ noncomputable instance ImplArray : Impl (fun _ ↦ Array) where
   lt := Array.lt
   sqrt x := match x with
     | .float x => .float <| x.map Real.sqrt
+    | _ => .error
+  exp x := match x with
+    | .float x => .float <| x.map Real.exp
     | _ => .error
 
 
@@ -208,6 +220,9 @@ open Lean in macro_rules
     let parsed ← parse 0 body
     `(def $name $[($spec_n : $spec_t)]* {α : ℕ → Type} [Impl α] {m : ℕ} :
       curryType (α m) $(quote narg) := unsafeLift fun $args* => $parsed)
+
+macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
+
 end Jax
 
 

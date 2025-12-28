@@ -55,11 +55,6 @@ example (n : ℕ) (x : List ℝ) (h : x.length = n) :
   · simp [h]
   · simp
 
-def ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Jax.Array := fun x ↦
-  .float <| List.ofFn fun (i : Fin (n * m)) ↦ x i.divNat i.modNat
-
-macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
-
 jax_def (n : ℕ) sum(A):
     return einsum [n] [[#0]] [] [A]
 
