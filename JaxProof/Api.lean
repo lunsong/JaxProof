@@ -5,17 +5,17 @@ namespace Jax
 
 class Impl (α : ℕ → Type) where
   lift {n : ℕ} (m : ℕ) : α n → α (n + m)
-  protected cast {n m : ℕ} : α n → n = m → α m
+  cast {n m : ℕ} : α n → n = m → α m
   unsafeCast {n m : ℕ} : α n → α m
-  protected add {n : ℕ} : α n → α n → α n
-  protected sub {n : ℕ} : α n → α n → α n
-  protected mul {n : ℕ} : α n → α n → α n
-  protected div {n : ℕ} : α n → α n → α n
-  protected mod {n : ℕ} : α n → α n → α n
-  protected divInt {n : ℕ} : α n → α n → α n
-  protected idx {n : ℕ} : α n → α n → α n
-  protected setIdx {n : ℕ} : α n → α n  → α n → α n
-  protected select {n : ℕ} : α n → α n → α n → α n
+  add {n : ℕ} : α n → α n → α n
+  sub {n : ℕ} : α n → α n → α n
+  mul {n : ℕ} : α n → α n → α n
+  div {n : ℕ} : α n → α n → α n
+  mod {n : ℕ} : α n → α n → α n
+  divInt {n : ℕ} : α n → α n → α n
+  idx {n : ℕ} : α n → α n → α n
+  setIdx {n : ℕ} : α n → α n  → α n → α n
+  select {n : ℕ} : α n → α n → α n → α n
   eq {n : ℕ} : α n → α n → α n
   lt {n : ℕ} : α n → α n → α n
   sqrt {n : ℕ} : α n → α n
@@ -47,7 +47,7 @@ def withLift₃ (α : ℕ → Type) [Impl α] (f : {n : ℕ} → α n → α n �
     exact add_tsub_eq_max
   f x'' y'' z'
 
-section
+namespace Api
 
 variable {α : ℕ → Type} [Impl α] {n m l : ℕ}
 
@@ -88,7 +88,21 @@ def setIdx : α n → α m → α l → α (max (max n m) l) := withLift₃ α I
 
 notation:50 a:50 ".at[" i:50 "].set(" b:50 ")" => setIdx a i b
 
-end
+@[simp]
+def eq : α n → α m → α (max n m) := withLift₂ α Impl.eq
+
+@[simp]
+def lt : α n → α m → α (max n m) := withLift₂ α Impl.lt
+
+@[simp]
+def sqrt : α n → α n := Impl.sqrt
+
+@[simp]
+def rep : ℕ → α n → α n := Impl.rep
+
+end Api
+
+abbrev Template (n : ℕ) := {α : ℕ → Type} → [Impl α] → {m : ℕ} → curryType (α m) n
 
 structure Tracer (n : ℕ) where
   expr : Expr
@@ -166,7 +180,6 @@ def unsafeLift {α : ℕ → Type} [Impl α] {n m : ℕ} (f : curryType (α 0) n
   match n with
   | 0 => @id (α m) (Impl.unsafeCast (@id (α 0) f))
   | _ + 1 => fun x ↦ unsafeLift (f (Impl.unsafeCast x))
-
 
 declare_syntax_cat jax_term
 

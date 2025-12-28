@@ -93,10 +93,33 @@ theorem sum_def (n : ℕ) (x : List ℝ) (hx : x.length = n) (hn : n ≠ 0) :
     simp
     simpa [← Fin.val_eq_val] using ha
 
+jax_def (n : ℕ) normalize_raw(A):
+  ans = rep n (sqrt (sum n (A * A)));
+  return ans
+
+theorem normalize_raw_def (n : ℕ) (x : List ℝ) (h : x.length = n) (hn : n ≠ 0) :
+    Jax.native (normalize_raw n) (.float x) = (.float <| List.replicate n <| Real.sqrt <|
+      (x.map (· ^ 2)).sum) := by
+  simp [normalize_raw, HMul.hMul]
+  have h₁ : (Jax.Array.float x).mul (Jax.Array.float x) = .float (x.map (· ^ 2)) := by
+    simp [Jax.Array.mul, Jax.Array.pairwise]
+    apply List.ext_get
+    · simp
+    · simp [pow_two]
+  rw [h₁]
+  let x' := x.map (· ^ 2)
+  have := sum_def n x' (by simp[x',h]) hn
+  simp at this
+  rw [this]
+  simp [Jax.Array.rep]
+  congr
 
 jax_def (n : ℕ) Normalize(A):
-  norm = sqrt (sum n (A * A));
-  return A / rep n norm
+  norm = normalize_raw n A;
+  zero = fillRat n 0;
+  one = fillRat n 1;
+  norm = Jax.Impl.select (eq norm zero) one norm;
+  return A / norm
   
 #eval IO.println (Jax.trace (Normalize 10)).outward.code
 
@@ -107,19 +130,11 @@ theorem normalized_def (n : ℕ) (x : List ℝ) (hn : x.length = n) (hn' : n ≠
   := by
   intro out
   have h_out : out = Jax.native (Normalize n) (.float x) := rfl
-  simp [Normalize, HMul.hMul] at h_out
-  have h₁ : (Jax.Array.float x).mul (Jax.Array.float x) = .float (x.map (· ^ 2)) := by
-    simp [Jax.Array.mul, Jax.Array.pairwise]
-    apply List.ext_get
-    · simp
-    · simp [pow_two]
-  have h₂ : (x.map (· ^ 2)).length = n := by simp[hn]
-  have h₃ := sum_def n _ h₂ hn' 
-  simp at h₃
-  conv at h_out =>
-    rhs; arg 2; arg 2; arg 2
-    rw [h₁, h₃]
-  simp [Jax.Array.rep, HDiv.hDiv, hn, hn', Jax.Array.div] at h_out
+  simp [Normalize] at h_out
+  have := normalize_raw_def n x hn hn'
+  simp at this
+  rw [this] at h_out
+  simp [Jax.Array.eq] at h_out
   sorry
 
 jax_def (n : ℕ) (m : ℕ) (l : ℕ) matmul(X, Y):
