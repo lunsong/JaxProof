@@ -23,6 +23,7 @@ def x1(x2, x3):
   return x4
 -/
 
+-- f(n, x) = x ^ (2 ^ n)
 -- prove mathematical properties
 example (n : ℕ) (x : List ℝ) :
     (Jax.native f) (.int [n]) (.float x) = .float (x.map (· ^ (2 ^ n))) := by
