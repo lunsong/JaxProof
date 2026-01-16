@@ -221,8 +221,6 @@ open Lean in macro_rules
     `(def $name $[($spec_n : $spec_t)]* {α : ℕ → Type} [Impl α] {m : ℕ} :
       curryType (α m) $(quote narg) := unsafeLift fun $args* => $parsed)
 
-macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
-
 end Jax
 
 
