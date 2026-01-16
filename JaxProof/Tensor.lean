@@ -307,13 +307,63 @@ def Tensor.flatten {s : List ℕ} : Tensor R s → Fin s.prod → R :=
   | [] => fun x _ ↦ x
   | _ :: _ => fun x i ↦ flatten (x i.divNat) i.modNat
 
+macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
+
+def _root_.Fin.mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) : Fin (n * m) :=
+  Fin.mk (i.val * m + j) <| by
+    rw [← Nat.add_one_le_iff, add_assoc]
+    trans (i.val + 1) * m
+    · rw [add_mul, one_mul]
+      gcongr
+      rw [Nat.add_one_le_iff]
+      exact j.isLt
+    · gcongr
+      exact i.isLt
+
+@[simp]
+theorem _root_.Fin.divNat_mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) : (i.mulAdd j).divNat = i := by
+  simp [Fin.mulAdd, Fin.divNat, ← Fin.val_eq_val]
+  have : 0 < m := Nat.zero_lt_of_lt j.isLt
+  rw [mul_comm _ m, Nat.mul_add_div this, (Nat.div_eq_zero_iff_lt this).mpr j.isLt, add_zero]
+
+@[simp]
+theorem _root_.Fin.modNat_mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) : (i.mulAdd j).modNat = j := by
+  simp [Fin.mulAdd, Fin.modNat, ← Fin.val_eq_val]
+  exact Nat.mod_eq_of_lt j.isLt
+
+@[simp]
+theorem _root_.Fin.mulAdd_divNat_modNat {n m : ℕ} (i : Fin (n * m)) :
+    i.divNat.mulAdd i.modNat = i := by
+  simp [Fin.mulAdd, ← Fin.val_eq_val]
+  exact Nat.div_add_mod' i.val m
 
 def Tensor.unflatten (s : List ℕ) : (Fin s.prod → R) → Tensor R s :=
-  fun x ↦ Tensor.of fun i ↦ x i.flatten
+  match s with
+  | [] => fun x ↦ x (0 : Fin 1)
+  | _ :: s => fun x i ↦ Tensor.unflatten s fun j ↦ x (i.mulAdd j)
+
+@[simp]
+theorem Tensor.flatten_unflatten (s : List ℕ) (x : Fin s.prod → R) :
+    (Tensor.unflatten s x).flatten = x := by
+  induction s with
+  | nil =>
+    simp [unflatten, flatten]
+    ext i
+    fin_cases i
+    simp
+  | cons s₀ s ih =>
+    simp [unflatten, flatten, ih]
+
+@[simp]
+theorem Tensor.unflatten_flatten {s : List ℕ} (x : Tensor R s) :
+    Tensor.unflatten s x.flatten = x := by
+  induction s with
+  | nil =>
+    simp [unflatten, flatten]
+  | cons s₀ s ih =>
+    simp [unflatten, flatten, ih]
 
 attribute [simp] Tensor.einprod.filter
-
-macro "#" noWs n:num : term => `(⟨$n, by simp +decide⟩)
 
 example (n : ℕ) (A B : Matrix (Fin n) (Fin n) ℝ) :
     Tensor.einsum [n, n, n] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
