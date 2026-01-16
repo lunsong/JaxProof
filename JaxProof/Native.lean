@@ -216,6 +216,7 @@ where go : List Array → List (List ℝ) → Option (List (List ℝ))
   | .float x :: xs, ys => go xs (ys.concat x)
   | _, _ => none
 
+/-
 def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : List (Fin s.length))
     (xs : List Array) : Array :=
   match allFloat xs with
@@ -223,6 +224,9 @@ def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : List (Fin 
   | some xs => match Einsum.sum s (xs.zip i) o with
     | none => .error
     | some ys => .float ys
+-/
+
+def Array.einsum (s : List ℕ)
 
 /-
 noncomputable def Expr.eval : Expr → List Array → Array 
@@ -275,7 +279,12 @@ noncomputable def Expr.eval : Expr → List Array → Array
 -/
 
 
-def Array.ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Array := fun x ↦
-  .float <| List.ofFn fun (i : Fin (n * m)) ↦ x i.divNat i.modNat
+--def Array.ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Array := fun x ↦
+--  .float <| List.ofFn fun (i : Fin (n * m)) ↦ x i.divNat i.modNat
+
+def Array.ofTensor {s : List ℕ} : Tensor ℝ s → Array := fun x ↦
+  .float <| List.ofFn fun i ↦ x.get (ValidIdx.unflatten s i)
+
+def Array.ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Array := @Array.ofTensor [n, m]
 
 end Jax

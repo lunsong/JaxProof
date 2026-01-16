@@ -1,4 +1,4 @@
-import JaxProof.MultiDimIdx
+import JaxProof.Tensor
 import Mathlib.Data.Real.Basic
 import Mathlib.Data.Fin.Tuple.Basic
 import Mathlib.Data.ENat.Defs

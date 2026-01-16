@@ -19,7 +19,7 @@ noncomputable def softmax_def {n₁ n₂ : ℕ} (x : Matrix (Fin n₁) (Fin n₂
 theorem softmax_eq_def (n₁ n₂ : ℕ) (x : Matrix (Fin n₁) (Fin n₂) ℝ) (hn : n₁ ≠ 0 ∧ n₂ ≠ 0) :
     Jax.native (softmax n₁ n₂) (Jax.Array.ofMatrix x) = Jax.Array.ofMatrix (softmax_def x) := by
   simp [softmax, Jax.Array.ofMatrix, HDiv.hDiv, Jax.Array.div, Jax.Array.rep, Jax.Array.einsum,
-    Jax.allFloat, Jax.allFloat.go, Jax.Einsum.sum, Jax.Einsum.prod, Jax.Einsum.prod.go]
+    Jax.allFloat, Jax.allFloat.go, Jax.Einsum.sum, Jax.Einsum.prod, Jax.Einsum.prod.go, Jax.Array.ofTensor]
   conv_lhs =>
     arg 1
     equals False =>
