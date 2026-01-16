@@ -27,7 +27,7 @@ class Impl (α : ℕ → Type) where
   fillInt {n : ℕ} : ℕ → ℤ → α n
   iota {n : ℕ} : ℕ → α n
   fori_loop {n : ℕ} : α n → α n → (α (n + 2) → α (n + 2) → α (n + 2)) → α n
-  einsum {n : ℕ} (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → List (α n) → α n
+  einsum {n : ℕ} (s : List ℕ) : List (List (Fin s.length)) → ℕ → List (α n) → α n
 
 @[simp]
 def withLift₂ (α : ℕ → Type) [Impl α] (f : {n : ℕ} → α n → α n → α n)
@@ -105,7 +105,7 @@ def exp : α n → α n := Impl.exp
 def rep : ℕ → α n → α n := Impl.rep
 
 @[simp]
-def einsum (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → List (α n) → α n :=
+def einsum (s : List ℕ) : List (List (Fin s.length)) → ℕ → List (α n) → α n :=
   Impl.einsum s
 
 end Api

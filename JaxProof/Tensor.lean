@@ -11,110 +11,6 @@ def curryType (α : Type) : Nat → Type
   | 0 => α
   | n + 1 => α → curryType α n
 
-def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
-
-instance (s : List ℕ) : Fintype (ValidIdx s) :=
-  inferInstanceAs (Fintype (∀ i : Fin s.length, Fin (s.get i)))
-
-instance (s : List ℕ) : DecidableEq (ValidIdx s) :=
-  inferInstanceAs (DecidableEq (∀ i : Fin s.length, Fin (s.get i)))
-
-def ValidIdx.flatten {s : List ℕ} (idx : ValidIdx s) : Fin s.prod :=
-  match s with
-  | [] => ⟨0, by simp⟩
-  | s₀ :: s₁ =>
-    let idx' : ValidIdx s₁ := fun i ↦ idx i.succ
-    have i' := idx'.flatten
-    let i₀ := idx ⟨0, by simp⟩
-    Fin.mk (i₀ * s₁.prod + i') <| by
-      simp
-      rw [← Nat.succ_le_iff, Nat.succ_eq_add_one]
-      calc
-        _ ≤ (i₀.val + 1) * s₁.prod := by
-          rw [add_mul, one_mul, add_assoc]
-          gcongr
-          exact Nat.succ_le_of_lt i'.isLt
-        _ ≤ _ := by gcongr; exact Nat.succ_le_of_lt i₀.isLt
-
-def ValidIdx.unflatten (s : List ℕ) (idx : Fin s.prod) : ValidIdx s :=
-  match s with
-  | [] => fun i ↦ nomatch i
-  | s₀ :: s₁ => fun i ↦
-    if h : i = ⟨0, _⟩ then
-      (idx : Fin (s₀ * s₁.prod)).divNat.cast <| by simp[h]
-    else
-      (unflatten s₁ idx.modNat (i.pred h)).cast <| by
-        simp [List.getElem_cons]
-        intro hc
-        exact (h hc).elim
-
-@[simp]
-theorem ValidIdx.unflatten_flatten (s : List ℕ) (x : ValidIdx s) :
-    ValidIdx.unflatten s x.flatten = x := by
-  induction s with
-  | nil => simp only [ValidIdx, List.length_nil, List.get_eq_getElem]; ext i; nomatch i
-  | cons s₀ s₁ ih =>
-    have : NeZero (s₀ :: s₁).length := ⟨by simp⟩
-    simp[flatten, unflatten, ValidIdx]
-    have hs₁ : 0 < s₁.prod := by
-      by_contra
-      have hc : s₁.prod = 0 := by omega
-      rw [List.prod_eq_zero_iff, List.mem_iff_get] at hc
-      obtain ⟨i, hi⟩ := hc
-      have := (x i.succ).isLt
-      simp only [List.get_cons_succ', hi] at this
-      omega
-    ext i
-    split_ifs with h
-    · simp
-      set x' := flatten fun i ↦ x i.succ
-      conv_lhs =>
-        arg 2
-        change s₁.prod
-      rw [h, Nat.add_div_of_dvd_right]
-      · rw [Nat.mul_div_left _ hs₁, (Nat.div_eq_zero_iff_lt hs₁).mpr x'.isLt, add_zero]
-      · exact Nat.dvd_mul_left _ _
-    simp only [Fin.modNat, Fin.coe_cast]
-    specialize ih (fun i ↦ x i.succ)
-    have : 0 < s₀ := by
-      have := (x 0).isLt
-      simp only [List.get_cons_zero] at this
-      exact Nat.zero_lt_of_lt this
-    conv =>
-      lhs; arg 1; arg 2; arg 1
-      conv =>
-        arg 2; change s₁.prod
-      rw [Nat.add_mod]
-      rw [Nat.mul_mod_left, zero_add, Nat.mod_mod,
-        Nat.mod_eq_of_lt (flatten fun i ↦ x i.succ).isLt]
-    simp only [Fin.eta, ih]
-    let g (j : Fin (s₁.length + 1)) : ℕ := x i
-    have : x (i.pred h).succ = g (i.pred h).succ := by congr; all_goals exact Fin.succ_pred i h
-    rw[this]
-
-@[simp]
-theorem ValidIdx.flatten_unflatten (s : List ℕ) (x : Fin s.prod) :
-    (ValidIdx.unflatten s x).flatten = x := by
-  induction s with
-  | nil =>
-    simp[flatten]
-    rw[←Fin.val_eq_val, Fin.val_zero]
-    omega
-  | cons s₀ s₁ ih =>
-    simp[unflatten, flatten]
-    rw [← Fin.val_eq_val]
-    push_cast
-    conv_rhs =>
-      rw [← Nat.mod_add_div' x.val s₁.prod]
-    conv_lhs =>
-      arg 1; arg 1; arg 2; change s₁.prod
-    nth_rw 1 [add_comm]
-    congr
-    specialize ih x.modNat
-    simp [← Fin.val_eq_val] at ih
-    rw[← ih]
-    congr
-
 def Tensor (R : Type) : List ℕ → Type
   | [] => R
   | n₀ :: ns => Fin n₀ → Tensor R ns
@@ -124,67 +20,6 @@ variable {R : Type}
 @[ext]
 theorem Tensor.ext {s₀ : ℕ} {s : List ℕ} {A B : Tensor R (s₀ :: s)} : (∀ i, A i = B i) → A = B :=
   fun h => funext h
-
-def Tensor.get {s : List ℕ} : Tensor R s → Jax.ValidIdx s → R :=
-  match s with
-  | [] => fun x _ ↦ x
-  | n₀ :: ns => fun x i ↦ Tensor.get (x (i ⟨0, by simp⟩)) fun j ↦ i j.succ
-
-def Tensor.of {s : List ℕ} : (Jax.ValidIdx s → R) → Tensor R s :=
-  match s with
-  | [] => fun x ↦ x (fun i ↦ nomatch i)
-  | n₀ :: ns => fun x i₀ ↦
-    let x' : Jax.ValidIdx ns → R := fun is ↦
-      let i : Jax.ValidIdx (n₀ :: ns) := fun r ↦
-        if h : r = ⟨0, by simp⟩ then
-          i₀.cast <| by simp [h]
-        else 
-          (is (r.pred h)).cast <| by
-            nth_rw 2 [← Fin.succ_pred r h]
-            rw [List.get_cons_succ']
-      x i
-    Tensor.of x'
-
-@[simp]
-theorem Tensor.of_get {s : List ℕ} (x : Tensor R s) : Tensor.of x.get = x := by
-  induction s with
-  | nil =>
-    simp [of, get]
-  | cons n₀ ns ih =>
-    simp [of, get]
-    conv_lhs =>
-      intro i₀; arg 1
-      change (x i₀).get
-    simp [ih]
-
-@[simp]
-theorem Tensor.get_of {s : List ℕ} (x : Jax.ValidIdx s → R) : (Tensor.of x).get = x := by
-  induction s with
-  | nil =>
-    simp [of, get]; ext i; congr; apply funext; intro j; nomatch j
-  | cons n₀ ns ih =>
-    simp [of, get, ih]
-    ext i
-    congr
-    apply funext
-    intro r
-    split_ifs with h
-    · congr
-      · simp [h]
-      · exact proof_irrel_heq _ _
-      · exact h.symm
-    congr 1
-    · simp
-      have : r.val ≠ 0 := fun hc ↦ h <| by simpa using hc
-      conv_rhs =>
-        arg 2
-        equals r.val - 1 + 1 =>
-          refine (Nat.sub_add_cancel ?_).symm
-          omega
-      simp
-    · exact proof_irrel_heq _ _
-    congr
-    exact Fin.succ_pred _ _
 
 @[simp]
 def filter_pred {n : ℕ} : List (Fin (n + 1)) → List (Fin n)
@@ -295,12 +130,6 @@ def Tensor.einsum [AddCommMonoid R] [Mul R] [One R] (s : List ℕ)
   (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get))) (nsum : ℕ) :
     Tensor R (s.drop nsum) :=
   (einprod s xs).sumN nsum
-
-def Tensor.reshape (s s' : List ℕ) (h : s.prod = s'.prod) (x : Tensor R s) : Tensor R s' :=
-  Tensor.of fun i ↦ x.get (ValidIdx.unflatten s (i.flatten.cast h.symm))
-
---def Tensor.flatten {s : List ℕ} : Tensor R s → Fin s.prod → R :=
---  fun x i ↦ x.get (ValidIdx.unflatten s i)
 
 def Tensor.flatten {s : List ℕ} : Tensor R s → Fin s.prod → R :=
   match s with

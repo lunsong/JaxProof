@@ -173,6 +173,7 @@ nonrec def Array.addIdx : Array → Array → Array → Array
     | none => error
   | _, _, _ => error
 
+/-
 namespace Einsum
 
 variable {α : Type} [AddCommMonoid α] [Monoid α] 
@@ -208,13 +209,56 @@ def sum (s : List ℕ) (xs : List ((List α) × List (Fin s.length)))
     ∑ idx' ∈ sumIdx, x idx'
 
 end Einsum
+-/
 
+@[simp]
 def allFloat (xs : List Array) : Option (List (List ℝ)) :=
   go xs []
 where go : List Array → List (List ℝ) → Option (List (List ℝ))
   | [], ys => some ys
   | .float x :: xs, ys => go xs (ys.concat x)
   | _, _ => none
+
+@[simp]
+def List.map? {α β : Type} (f : α → Option β) (xs : List α) : Option (List β) :=
+  go xs []
+where go : List α → List β → Option (List β)
+  | [], ys => ys
+  | x :: xs, ys =>
+    match f x with
+    | some y => go xs (ys.concat y)
+    | none => none
+
+def Array.toTensor (s : List ℕ) : Array → Option (Tensor ℝ s)
+  | float x =>
+    if h : x.length = s.prod then
+      some <| Tensor.unflatten s <| x.get ∘ (Fin.cast h.symm)
+    else
+      none
+  | _ => none
+
+def Array.ofTensor {s : List ℕ} : Tensor ℝ s → Array :=
+  fun x ↦ float <| List.ofFn x.flatten
+
+@[simp]
+theorem Array.toTensor_ofTensor {s : List ℕ} (x : Tensor ℝ s) :
+    (Array.ofTensor x).toTensor s = some x := by
+  simp [ofTensor, toTensor]
+  conv_lhs =>
+    arg 2
+    equals x.flatten =>
+      ext i
+      simp
+  simp
+
+@[simp]
+def shapeCorrect (s : List ℕ) :
+    List (Fin s.length) × Array → Option ((i : List (Fin s.length)) × Tensor ℝ (i.map s.get)) :=
+  fun ⟨is,  x⟩ =>
+    let s' : List ℕ := is.map s.get
+    match Array.toTensor s' x with
+    | some tensor => some ⟨is, tensor⟩
+    | none => none
 
 /-
 def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : List (Fin s.length))
@@ -226,7 +270,12 @@ def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : List (Fin 
     | some ys => .float ys
 -/
 
-def Array.einsum (s : List ℕ)
+def Array.einsum (s : List ℕ) (i : List (List (Fin s.length))) (o : ℕ) (xs : List Array) : Array :=
+  match List.map? (shapeCorrect s) (i.zip xs) with
+  | none => error
+  | some tensors => 
+    Array.ofTensor <| Tensor.einsum s tensors o
+
 
 /-
 noncomputable def Expr.eval : Expr → List Array → Array 
@@ -281,9 +330,6 @@ noncomputable def Expr.eval : Expr → List Array → Array
 
 --def Array.ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Array := fun x ↦
 --  .float <| List.ofFn fun (i : Fin (n * m)) ↦ x i.divNat i.modNat
-
-def Array.ofTensor {s : List ℕ} : Tensor ℝ s → Array := fun x ↦
-  .float <| List.ofFn fun i ↦ x.get (ValidIdx.unflatten s i)
 
 def Array.ofMatrix {n m : ℕ} : Matrix (Fin n) (Fin m) ℝ → Array := @Array.ofTensor [n, m]
 

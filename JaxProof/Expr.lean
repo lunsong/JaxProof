@@ -36,7 +36,7 @@ inductive Op : (ℕ∞ → Type) where
   | exp : Op (some 1)
   | log : Op (some 1)
   | sqrt : Op (some 1)
-  | einsum (s : List ℕ) : List (List (Fin s.length)) → List (Fin s.length) → Op none
+  | einsum (s : List ℕ) : List (List (Fin s.length)) → ℕ → Op none
   | tuple : Op none
   | tupleGet : ℕ → Op (some 1)
   | anonTuple : Op none
@@ -80,7 +80,7 @@ def Op.repr {n : ℕ∞} : Op n → Op.reprType n
     let s' := i.map (List.map s.get)
     let xs' := xs.zip (s'.zip i)
     let args := xs'.map fun ⟨x, s, i⟩ ↦ s!"{x}.reshape({argString s}), ({argString i})"
-    s!"jax.numpy.einsum({argString args}, ({argString o}))"
+    s!"UnImplemented einsum({argString args}, ({o}))"
   | tuple => fun xs ↦ s!"tuple({argString xs})"
   | tupleGet n => fun x ↦ s!"{x}[{n}]"
   | anonTuple => fun _ ↦ ""
