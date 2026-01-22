@@ -209,4 +209,69 @@ example (n : ℕ) (A B : Matrix (Fin n) (Fin n) ℝ) :
 --class TensorLike (dtype : Type) where
 --  protected tensor : List ℕ → dtype → Type
 
+instance (α : Type) (x₀ : α) (xs : List α) : NeZero (x₀ :: xs).length :=
+  NeZero.mk <| by simp
+
+def Tensor.preBroadcast : List (ℕ × Bool) → List ℕ
+  | [] => []
+  | (s₀, isBroadcast) :: xs =>
+    let xs' := preBroadcast xs
+    if isBroadcast then xs' else s₀ :: xs'
+
+
+def Tensor.broadcast (s : List (ℕ × Bool)) :
+    Tensor R (preBroadcast s) → Tensor R (s.map Prod.fst) :=
+  match s with
+  | [] => id
+  | (s₀, isBroadcast) :: s => by
+    unfold preBroadcast
+    split_ifs with h
+    · exact fun x _ ↦ x.broadcast s
+    · exact fun x i₀ ↦ (x i₀).broadcast s
+
+#print Tensor.broadcast
+
+#eval Tensor.preBroadcast [(2,true),(3,false)]
+      
+example (i : Fin 2) (j : Fin 3) (k : Fin 4) (x : Tensor R [2,4]) :
+    let y : Tensor R [2,3,4] := x.broadcast [(2,false),(3,true),(4,false)]
+    y i j k = x i k :=
+  rfl
+
+def Tensor.batchGetType (R : Type) (s' : List ℕ) : List ℕ → Type
+  | [] => Tensor R s' 
+  | s₀ :: s => Tensor (Fin s₀) s' → Tensor.batchGetType R s' s
+
+def Tensor.fill {s : List ℕ} (x : R) : Tensor R s :=
+  match s with
+  | [] => x
+  | _ :: _ => fun _ ↦ Tensor.fill x
+
+def Tensor.curry {s₀ : ℕ} {s : List ℕ} : Tensor R (s₀ :: s) → Tensor (Tensor R [s₀]) s :=
+  match s with
+  | [] => id
+  | _ :: _ => fun x i₁ ↦ curry fun i₀ ↦ x i₀ i₁
+
+def Tensor.uncurry {s₀ : ℕ} {s : List ℕ} : Tensor (Tensor R [s₀]) s → Tensor R (s₀ :: s) :=
+  match s with
+  | [] => id
+  | _ :: _ => fun x i₀ i₁ ↦ (x i₁).uncurry i₀
+
+def Tensor.map₂ {s : List ℕ} {α β γ : Type} (f : α → β → γ) :
+    Tensor α s → Tensor β s → Tensor γ s :=
+  match s with
+  | [] => f
+  | _ :: _ => fun x y i ↦ map₂ f (x i) (y i)
+
+def Tensor.batchGetType.uncurry {s₀ : ℕ} {s s' : List ℕ} :
+    batchGetType (Tensor R [s₀]) s' s → Tensor (Fin s₀) s' → batchGetType R s' s :=
+  match s with
+  | [] => map₂ fun x i ↦ x i
+  | _ :: _ => fun x i₀ i₁ ↦ (x i₁).uncurry i₀
+
+def Tensor.batchGet {R : Type} {s s' : List ℕ} : Tensor R s → Tensor.batchGetType R s' s :=
+  match s with
+  | [] => Tensor.fill
+  | _ :: _ => fun x ↦ batchGetType.uncurry x.curry.batchGet
+
 end Jax
