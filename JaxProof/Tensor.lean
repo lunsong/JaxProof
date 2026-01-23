@@ -3,6 +3,7 @@ import Mathlib.Data.Fintype.Pi
 import Mathlib.Tactic
 import Mathlib.Algebra.Ring.Defs
 import Mathlib.Data.Nat.ModEq
+import Mathlib.GroupTheory.Perm.Cycle.Concrete
 import Batteries.Data.Fin.Lemmas
 
 namespace Jax
@@ -194,18 +195,6 @@ theorem Tensor.unflatten_flatten {s : List ℕ} (x : Tensor R s) :
 
 attribute [simp] Tensor.einprod.filter
 
-example (n : ℕ) (A B : Matrix (Fin n) (Fin n) ℝ) :
-    Tensor.einsum [n, n, n] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
-  simp 
-  ext i j
-  simp [Tensor.einsum, Tensor.einprod, show (2 : Fin 3) ≠ 0 by decide, Matrix.mul_apply]
-  have h₁ := Finset.sum_apply i Finset.univ fun j i k ↦ A i j * B j k
-  conv_lhs =>
-    fun
-    equals ∑ j, fun k ↦ A i j * B j k =>
-      exact h₁
-  simp [Finset.sum_apply]
-
 --class TensorLike (dtype : Type) where
 --  protected tensor : List ℕ → dtype → Type
 
@@ -228,15 +217,6 @@ def Tensor.broadcast (s : List (ℕ × Bool)) :
     split_ifs with h
     · exact fun x _ ↦ x.broadcast s
     · exact fun x i₀ ↦ (x i₀).broadcast s
-
-#print Tensor.broadcast
-
-#eval Tensor.preBroadcast [(2,true),(3,false)]
-      
-example (i : Fin 2) (j : Fin 3) (k : Fin 4) (x : Tensor R [2,4]) :
-    let y : Tensor R [2,3,4] := x.broadcast [(2,false),(3,true),(4,false)]
-    y i j k = x i k :=
-  rfl
 
 def Tensor.batchGetType (R : Type) (s' : List ℕ) : List ℕ → Type
   | [] => Tensor R s' 
@@ -273,5 +253,57 @@ def Tensor.batchGet {R : Type} {s s' : List ℕ} : Tensor R s → Tensor.batchGe
   match s with
   | [] => Tensor.fill
   | _ :: _ => fun x ↦ batchGetType.uncurry x.curry.batchGet
+
+def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
+
+ 
+def Tensor.get {s : List ℕ} : Tensor R s → Jax.ValidIdx s → R :=
+  match s with
+  | [] => fun x _ ↦ x
+  | n₀ :: ns => fun x i ↦ Tensor.get (x (i ⟨0, by simp⟩)) fun j ↦ i j.succ
+
+def Tensor.of {s : List ℕ} : (Jax.ValidIdx s → R) → Tensor R s :=
+  match s with
+  | [] => fun x ↦ x (fun i ↦ nomatch i)
+  | n₀ :: ns => fun x i₀ ↦
+    let x' : Jax.ValidIdx ns → R := fun is ↦
+      let i : Jax.ValidIdx (n₀ :: ns) := fun r ↦
+        if h : r = ⟨0, by simp⟩ then
+          i₀.cast <| by simp [h]
+        else 
+          (is (r.pred h)).cast <| by
+            nth_rw 2 [← Fin.succ_pred r h]
+            rw [List.get_cons_succ']
+      x i
+    Tensor.of x'
+
+def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
+    Tensor R s → Tensor R (List.ofFn fun i ↦ s.get (σ i)) :=
+  fun x ↦ Tensor.of fun i ↦ x.get fun μ ↦ 
+    let j := i <| (σ.symm μ).cast <| by simp
+    j.cast <| by simp
+
+example (n m l : ℕ) (A : Matrix (Fin n) (Fin m) ℝ) (B : Matrix (Fin m) (Fin l) ℝ) :
+    Tensor.einsum [m, n, l] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
+  simp 
+  ext i j
+  simp [Tensor.einsum, Tensor.einprod, show (2 : Fin 3) ≠ 0 by decide, Matrix.mul_apply]
+  have h₁ := Finset.sum_apply i Finset.univ fun j i k ↦ A i j * B j k
+  conv_lhs =>
+    fun
+    equals ∑ j, fun k ↦ A i j * B j k =>
+      exact h₁
+  simp [Finset.sum_apply]
+
+example (i : Fin 2) (j : Fin 3) (k : Fin 4) (x : Tensor R [2, 4]) :
+    let y : Tensor R [2,3,4] := x.broadcast [(2,false),(3,true),(4,false)]
+    y i j k = x i k :=
+  rfl
+
+example (x : Tensor R [2, 3]) (i : Tensor (Fin 2) [4, 5]) (j : Tensor (Fin 3) [4, 5])
+  (a : Fin 4) (b : Fin 5) : x.batchGet i j a b = x (i a b) (j a b) := rfl
+
+example (n₁ n₂ : ℕ) (x : Tensor R [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
+    x.transpose [0,1].formPerm j i = x i j := rfl
 
 end Jax
