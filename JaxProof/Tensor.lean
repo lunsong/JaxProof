@@ -62,6 +62,11 @@ def Tensor.zero [Zero R] {s : List ℕ} : Tensor R s :=
   | [] => (0 : R)
   | _ :: _ => fun _ ↦ zero
 
+def Tensor.const {s : List ℕ} (x : R) : Tensor R s :=
+  match s with
+  | [] => x
+  | _ :: _ => fun _ ↦ const x
+
 instance [Add R] {s : List ℕ} : Add (Tensor R s) := ⟨Tensor.add⟩
 instance [Zero R] {s : List ℕ} : Zero (Tensor R s) := ⟨Tensor.zero⟩
 
@@ -254,9 +259,26 @@ def Tensor.batchGet {R : Type} {s s' : List ℕ} : Tensor R s → Tensor.batchGe
   | [] => Tensor.fill
   | _ :: _ => fun x ↦ batchGetType.uncurry x.curry.batchGet
 
+def Tensor.batchGetIntType (R : Type) (s : List ℕ) : ℕ → Type
+  | 0 => Tensor R s
+  | n + 1 => Tensor ℤ s → Tensor.batchGetIntType R s n
+
+def Tensor.cast {R R' : Type} (f : R → R') {s : List ℕ} : Tensor R s → Tensor R' s :=
+  match s with
+  | [] => f
+  | _ :: _ => fun x i₀ ↦ (x i₀).cast f
+
+def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0) :
+    batchGetType R s' s → batchGetIntType R s' s.length :=
+  match s with
+  | [] => id
+  | s₀ :: s => fun x i₀ ↦
+    have : NeZero s₀ := ⟨by simp [hs]⟩
+    let i₀' : Tensor (Fin s₀) s' := i₀.cast Fin.intCast
+    batchGet_to_batchGetInt (by simp at hs; exact hs.2) (x i₀')
+
 def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
 
- 
 def Tensor.get {s : List ℕ} : Tensor R s → Jax.ValidIdx s → R :=
   match s with
   | [] => fun x _ ↦ x
@@ -283,6 +305,14 @@ def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     let j := i <| (σ.symm μ).cast <| by simp
     j.cast <| by simp
 
+def Tensor.map {s : List ℕ} {R R' : Type} (f : R → R') : Tensor R s → Tensor R' s :=
+  match s with
+  | [] => f
+  | _ :: _ => fun x i₀ ↦ (x i₀).map f
+
+@[simps]
+instance [Div R] (s : List ℕ) : Div (Tensor R s) where div := Tensor.map₂ (· / ·)
+
 example (n m l : ℕ) (A : Matrix (Fin n) (Fin m) ℝ) (B : Matrix (Fin m) (Fin l) ℝ) :
     Tensor.einsum [m, n, l] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
   simp 
@@ -305,5 +335,18 @@ example (x : Tensor R [2, 3]) (i : Tensor (Fin 2) [4, 5]) (j : Tensor (Fin 3) [4
 
 example (n₁ n₂ : ℕ) (x : Tensor R [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
     x.transpose [0,1].formPerm j i = x i j := rfl
+
+noncomputable def softmax {n₁ n₂ : ℕ} (x : Tensor ℝ [n₁, n₂]) : Tensor ℝ [n₁, n₂] :=
+  let denom := Tensor.einsum [n₂, n₁] [⟨[#1, #0], x⟩] 1
+  let denom' : Tensor ℝ [n₁, n₂] := denom.broadcast [(n₁, false), (n₂, true)]
+  x / denom'
+
+example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
+    softmax x i j = x i j / ∑ k, x i k := by
+  simp [softmax, Tensor.map₂, Tensor.broadcast, Tensor.einsum, Tensor.einprod]
+  apply congrArg
+  conv_lhs =>
+    change (∑ j, fun i ↦ x i j) i
+  rw [Finset.sum_apply]
 
 end Jax
