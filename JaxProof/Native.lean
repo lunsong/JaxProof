@@ -78,10 +78,7 @@ def Array.mul := Array.pairwise (· * ·) (· * ·)
 noncomputable def Array.div : Array → Array → Array
   | float x, float y =>
     if h : x.length = y.length then
-      if 0 ∈ y then
-        error
-      else
-        float <| .ofFn <| fun (i : Fin x.length) => x.get i / y.get (i.cast h)
+      float <| .ofFn <| fun (i : Fin x.length) => x.get i / y.get (i.cast h)
     else
       error
   | _, _ => error
