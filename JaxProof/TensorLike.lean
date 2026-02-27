@@ -117,4 +117,49 @@ def Softmax_traced (n₁ n₂ : ℕ) : Tracer [n₁, n₂] :=
 
 #eval IO.println (Softmax_traced 10 20).toString
 
+structure TensorInfo where
+  dtype : DataType
+  shape : List ℕ
+
+class TensorProgram (impl : outParam (TensorInfo → Type))
+  (program : List TensorInfo → Type → Type) where
+  monadic {args : List TensorInfo} : Monad (program args)
+  arg {args : List TensorInfo} (i : Fin args.length) : program args (impl args[i])
+  add {args : List TensorInfo} {σ : TensorInfo} :
+    impl σ → impl σ → program args (impl σ)
+
+instance (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
+  [TensorProgram impl program] (args : List TensorInfo) : Monad (program args) :=
+  TensorProgram.monadic (args := args)
+
+def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
+  [TensorProgram impl program] :
+    program [⟨.float, [2,3]⟩, ⟨.float, [2,3]⟩] (impl ⟨.float, [2,3]⟩) := do
+  let x ← TensorProgram.arg 0
+  let y ← TensorProgram.arg 1
+  let z ← TensorProgram.add x y
+  TensorProgram.add z x
+
+inductive TensorOp where
+  | arg : ℕ → TensorOp
+  | var : ℕ → TensorOp
+
+instance : ToString TensorOp where
+  toString op := match op with
+  | .arg n => s!"arg {n}"
+  | .var n => s!"var {n}"
+
+#eval IO.println (⟨.arg 0, .arg 1⟩ : TensorOp × TensorOp)
+
+def stackPush {α : Type} (x : α) : StateM (List α) ℕ := fun l ↦ ⟨l.length, l.concat x⟩
+
+instance : TensorProgram (fun _ ↦ TensorOp) (fun _ ↦ StateM (List (TensorOp × TensorOp))) where
+  monadic := inferInstance
+  arg i := pure (.arg i.val)
+  add x y := do
+    let i ← stackPush ⟨x, y⟩
+    return .var i
+
+#eval simple_program (fun _ ↦ TensorOp) (fun _ ↦ StateM (List (TensorOp × TensorOp))) []
+
 end Jax
