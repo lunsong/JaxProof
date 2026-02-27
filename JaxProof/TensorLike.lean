@@ -121,19 +121,10 @@ structure TensorInfo where
   dtype : DataType
   shape : List ℕ
 
-class TensorProgram (impl : outParam (TensorInfo → Type))
-  (program : List TensorInfo → Type → Type) where
-  monadic {args : List TensorInfo} : Monad (program args)
-  partial_eval {arg₀ : TensorInfo} {args : List TensorInfo} {out : Type} :
-    impl arg₀ → program (arg₀ :: args) out → program args out
-  arg {args : List TensorInfo} (i : Fin args.length) : program args (impl args[i])
-  sin {args : List TensorInfo} {s : List ℕ} : impl ⟨.float, s⟩ → program args (impl ⟨.float, s⟩)
-  add {args : List TensorInfo} {σ : TensorInfo} :
-    impl σ → impl σ → program args (impl σ)
-
-instance (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
-  [TensorProgram impl program] (args : List TensorInfo) : Monad (program args) :=
-  TensorProgram.monadic (args := args)
+class TensorProgram (impl : outParam (TensorInfo → Type)) (program : Type → Type) extends
+  Monad program where
+  sin {s : List ℕ} : impl ⟨.float, s⟩ → program (impl ⟨.float, s⟩)
+  add {σ : TensorInfo} : impl σ → impl σ → program (impl σ)
 
 inductive TensorOp (info : TensorInfo) : Type where
   | arg : ℕ → TensorOp info
@@ -144,21 +135,9 @@ instance (info : TensorInfo) : ToString (TensorOp info) where
   | .arg i => s!"${i}"
   | .var i => s!"%{i}"
 
-def TensorOp.replace {info newInfo : TensorInfo} (newVal : TensorOp newInfo) :
-    TensorOp info → TensorOp info
-  | var n => var n
-  | arg 0 => match newVal with
-    | var n => var n
-    | arg n => arg n
-  | arg (n + 1) => arg n
-
 inductive TensorCommand where
   | sin {s : List ℕ} : TensorOp ⟨.float, s⟩ → TensorCommand
   | add {σ : TensorInfo} : TensorOp σ → TensorOp σ → TensorCommand
-
-def TensorCommand.replace {info : TensorInfo} (new : TensorOp info) : TensorCommand → TensorCommand
-  | sin x => sin (new.replace x)
-  | add x y => add (new.replace x) (new.replace y)
 
 instance : ToString TensorCommand where
   toString x := match x with
@@ -166,17 +145,16 @@ instance : ToString TensorCommand where
   | .add x y => s!"add {x} {y}"
 
 set_option linter.unusedVariables false in
-def TensorStackProgram (args : List TensorInfo) := StateM (List TensorCommand)
+def TensorStackProgram := StateM (List TensorCommand)
 
-instance (args : List TensorInfo) (α : Type) [ToString α] :
-    ToString (TensorStackProgram args α) where
+instance (α : Type) [ToString α] : ToString (TensorStackProgram α) where
   toString x :=
     let ⟨out, l⟩ := x []
     "\n".intercalate (l.map toString) ++ "\nret " ++ toString out
 
+instance : Monad TensorStackProgram := StateT.instMonad
+
 instance : TensorProgram TensorOp TensorStackProgram where
-  monadic := StateT.instMonad
-  arg i := fun l ↦ ⟨.arg i.val, l⟩
   sin x := fun l ↦ ⟨.var l.length, l.concat (.sin x)⟩
   add x y := fun l ↦ ⟨.var l.length, l.concat (.add x y)⟩
 
@@ -184,63 +162,42 @@ def NativeTensor : TensorInfo → Type
   | ⟨.float, s⟩ => Tensor ℝ s
   | ⟨.int, s⟩ => Tensor ℤ s
 
-def NativeProgram (args : List TensorInfo) (out : Type) : Type :=
+noncomputable instance : TensorProgram NativeTensor id where
+  pure x := x
+  bind x f := f x
+  sin := Tensor.map Real.sin
+  add {σ} := match σ with
+    | ⟨.float, _⟩
+    | ⟨.int, _⟩ => Tensor.map₂ (· + ·)
+
+def TensorTuple (impl : TensorInfo → Type) : List TensorInfo → Type
+  | [] => Unit
+  | σ :: σs => impl σ × TensorTuple impl σs
+
+abbrev Program' (impl : TensorInfo → Type) (program : Type → Type)
+  (args : List TensorInfo) (ret : List TensorInfo) : Type :=
   match args with
-  | [] => out
-  | σ :: σs => NativeTensor σ → NativeProgram σs out
+  | [] => program (TensorTuple impl ret)
+  | σ :: σs => impl σ → Program' impl program σs ret
 
-def NativeProgram.const {args : List TensorInfo} {out : Type} (x : out) :
-    NativeProgram args out :=
-  match args with
-  | [] => x
-  | _ :: _ => fun _ => const x
+def Program'' (args : List TensorInfo) (ret : List TensorInfo) : Type 1 :=
+  (impl : TensorInfo → Type) → (program : Type → Type) → [TensorProgram impl program]
+    → Program' impl program args ret
 
-def NativeProgram.bind {args : List TensorInfo} {α β : Type}
-  (f : NativeProgram args α) (g : α → NativeProgram args β) :
-    NativeProgram args β :=
-  match args with
-  | [] => g f
-  | _ :: _ => fun x ↦ bind (f x) fun y ↦ g y x
-
-def NativeProgram.getArg {args : List TensorInfo} (i : Fin args.length) :
-    NativeProgram args (NativeTensor args[i]) :=
-  match args with
-  | [] => nomatch i
-  | [σ] =>
-    match i with
-    | 0 => id
-  | σ₀ :: σ₁ :: σs =>
-    match i with
-    | 0 => fun x ↦ NativeProgram.const x
-    | ⟨n + 1, h⟩ => fun _ ↦ NativeProgram.getArg <| Fin.mk n <| by simpa using h
-
-noncomputable instance : TensorProgram NativeTensor NativeProgram where
-  monadic := {
-    pure := NativeProgram.const
-    bind := NativeProgram.bind
-  }
-  arg := NativeProgram.getArg
-  sin x := NativeProgram.const (Tensor.map Real.sin x)
-  add {_} {σ} x y :=
-    match σ with
-    | ⟨.float, _⟩ => NativeProgram.const (Tensor.map₂ (· + ·) x y)
-    | ⟨.int, _⟩ => NativeProgram.const (Tensor.map₂ (· + ·) x y)
-
-def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
-  [TensorProgram impl program] :
-    program [⟨.float, [2,3]⟩, ⟨.float, [2,3]⟩] (impl ⟨.float, [2,3]⟩) := do
-  let x ← TensorProgram.arg 0
-  let y ← TensorProgram.arg 1
+def simple_program : Program'' [⟨.float, [2, 3]⟩, ⟨.float, [2, 3]⟩] [⟨.float, [2, 3]⟩] :=
+  fun x y ↦ do
   let sin_x ← TensorProgram.sin x
   let sin_y ← TensorProgram.sin y
   let ans ← TensorProgram.add sin_x sin_y
   return ans
 
+
 example (x y : Tensor ℝ [2, 3]) (i : Fin 2) (j : Fin 3) :
-  let f := simple_program NativeTensor NativeProgram;
+  let f := simple_program NativeTensor id;
   f x y i j = Real.sin (x i j) + Real.sin (y i j) := rfl
 
-#eval simple_program TensorOp TensorStackProgram
+
+#eval simple_program TensorOp TensorStackProgram (.arg 0) (.arg 1)
 
 /-
 inductive TensorCommand : TensorInfo → Type
