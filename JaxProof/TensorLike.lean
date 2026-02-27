@@ -14,7 +14,6 @@ class TensorImpl (α : List ℕ → DataType → Type) where
   div {s : List ℕ} : α s .float → α s .float → α s .float
   broadcast {σ : DataType} (s : List (ℕ × Bool)) :
     α (Tensor.preBroadcast s) σ → α (s.map Prod.fst) σ
--/
 
 class TensorImpl (α : List ℕ → Type) where
   einsum (s : List ℕ)
@@ -116,6 +115,7 @@ def Softmax_traced (n₁ n₂ : ℕ) : Tracer [n₁, n₂] :=
   Softmax (Tracer.arg 0 : Tracer [n₁, n₂])
 
 #eval IO.println (Softmax_traced 10 20).toString
+-/
 
 structure TensorInfo where
   dtype : DataType
@@ -133,22 +133,96 @@ instance (impl : TensorInfo → Type) (program : List TensorInfo → Type → Ty
   [TensorProgram impl program] (args : List TensorInfo) : Monad (program args) :=
   TensorProgram.monadic (args := args)
 
+def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
+  [TensorProgram impl program] :
+    program [⟨.float, [2,3]⟩, ⟨.float, [2,3]⟩] (impl ⟨.float, [2,3]⟩) := do
+  let x ← TensorProgram.arg 0
+  let y ← TensorProgram.arg 1
+  let sin_x ← TensorProgram.sin x
+  let sin_y ← TensorProgram.sin y
+  let ans ← TensorProgram.add sin_x sin_y
+  return ans
+
 inductive TensorOp (info : TensorInfo) : Type where
   | arg : ℕ → TensorOp info
   | var : ℕ → TensorOp info
+
+instance (info : TensorInfo) : ToString (TensorOp info) where
+  toString x := match x with
+  | .arg i => s!"${i}"
+  | .var i => s!"%{i}"
 
 inductive TensorCommand where
   | sin {s : List ℕ} : TensorOp ⟨.float, s⟩ → TensorCommand
   | add {σ : TensorInfo} : TensorOp σ → TensorOp σ → TensorCommand
 
+instance : ToString TensorCommand where
+  toString x := match x with
+  | .sin x => s!"sin {x}"
+  | .add x y => s!"add {x} {y}"
+
 set_option linter.unusedVariables false in
 def TensorStackProgram (args : List TensorInfo) := StateM (List TensorCommand)
+
+instance (args : List TensorInfo) (α : Type) [ToString α] :
+    ToString (TensorStackProgram args α) where
+  toString x :=
+    let ⟨out, l⟩ := x []
+    "\n".intercalate (l.map toString) ++ "\nret " ++ toString out
 
 instance : TensorProgram TensorOp TensorStackProgram where
   monadic := StateT.instMonad
   arg i := fun l ↦ ⟨.arg i.val, l⟩
   sin x := fun l ↦ ⟨.var l.length, l.concat (.sin x)⟩
   add x y := fun l ↦ ⟨.var l.length, l.concat (.add x y)⟩
+
+#eval simple_program TensorOp TensorStackProgram
+
+def NativeTensor : TensorInfo → Type
+  | ⟨.float, s⟩ => Tensor ℝ s
+  | ⟨.int, s⟩ => Tensor ℤ s
+
+def NativeProgram (args : List TensorInfo) (out : Type) : Type :=
+  match args with
+  | [] => out
+  | σ :: σs => NativeTensor σ → NativeProgram σs out
+
+def NativeProgram.const {args : List TensorInfo} {out : Type} (x : out) :
+    NativeProgram args out :=
+  match args with
+  | [] => x
+  | _ :: _ => fun _ => const x
+
+def NativeProgram.bind {args : List TensorInfo} {α β : Type}
+  (f : NativeProgram args α) (g : α → NativeProgram args β) :
+    NativeProgram args β :=
+  match args with
+  | [] => g f
+  | _ :: _ => fun x ↦ bind (f x) fun y ↦ g y x
+
+def NativeProgram.getArg {args : List TensorInfo} (i : Fin args.length) :
+    NativeProgram args (NativeTensor args[i]) :=
+  match args with
+  | [] => nomatch i
+  | [σ] =>
+    match i with
+    | 0 => id
+  | σ₀ :: σ₁ :: σs =>
+    match i with
+    | 0 => fun x ↦ NativeProgram.const x
+    | ⟨n + 1, h⟩ => fun _ ↦ NativeProgram.getArg <| Fin.mk n <| by simpa using h
+
+noncomputable instance : TensorProgram NativeTensor NativeProgram where
+  monadic := {
+    pure := NativeProgram.const
+    bind := NativeProgram.bind
+  }
+  arg := NativeProgram.getArg
+  sin x := NativeProgram.const (Tensor.map Real.sin x)
+  add {_} {σ} x y :=
+    match σ with
+    | ⟨.float, _⟩ => NativeProgram.const (Tensor.map₂ (· + ·) x y)
+    | ⟨.int, _⟩ => NativeProgram.const (Tensor.map₂ (· + ·) x y)
 
 /-
 inductive TensorCommand : TensorInfo → Type
