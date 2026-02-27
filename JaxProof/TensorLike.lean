@@ -125,12 +125,72 @@ class TensorProgram (impl : outParam (TensorInfo → Type))
   (program : List TensorInfo → Type → Type) where
   monadic {args : List TensorInfo} : Monad (program args)
   arg {args : List TensorInfo} (i : Fin args.length) : program args (impl args[i])
+  sin {args : List TensorInfo} {s : List ℕ} : impl ⟨.float, s⟩ → program args (impl ⟨.float, s⟩)
   add {args : List TensorInfo} {σ : TensorInfo} :
     impl σ → impl σ → program args (impl σ)
 
 instance (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
   [TensorProgram impl program] (args : List TensorInfo) : Monad (program args) :=
   TensorProgram.monadic (args := args)
+
+inductive TensorOp (info : TensorInfo) : Type where
+  | arg : ℕ → TensorOp info
+  | var : ℕ → TensorOp info
+
+inductive TensorCommand where
+  | sin {s : List ℕ} : TensorOp ⟨.float, s⟩ → TensorCommand
+  | add {σ : TensorInfo} : TensorOp σ → TensorOp σ → TensorCommand
+
+set_option linter.unusedVariables false in
+def TensorStackProgram (args : List TensorInfo) := StateM (List TensorCommand)
+
+instance : TensorProgram TensorOp TensorStackProgram where
+  monadic := StateT.instMonad
+  arg i := fun l ↦ ⟨.arg i.val, l⟩
+  sin x := fun l ↦ ⟨.var l.length, l.concat (.sin x)⟩
+  add x y := fun l ↦ ⟨.var l.length, l.concat (.add x y)⟩
+
+/-
+inductive TensorCommand : TensorInfo → Type
+  -- unops
+  | abs {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | neg {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | sqrt {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | cbrt {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | exp {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | log {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | sin {info : TensorInfo} : TensorOp info→ TensorCommand info
+  | cos {info : TensorInfo} : TensorOp info→ TensorCommand info
+  -- binops
+  | add {info : TensorInfo} : TensorOp info→ TensorOp info→ TensorCommand info
+  | mul {info : TensorInfo} : TensorOp info→ TensorOp info→ TensorCommand info
+  | div {info : TensorInfo} : TensorOp info→ TensorOp info→ TensorCommand info
+  | pow {info : TensorInfo} : TensorOp info→ TensorOp info→ TensorCommand info
+
+structure TensorStorage where
+  info : TensorInfo
+  commabd : TensorCommand info
+
+set_option linter.unusedVariables false in
+def TensorProgram (args : List TensorInfo) := StateM (List TensorStorage)
+
+instance (args : List TensorInfo) : Monad (TensorProgram args) :=
+  inferInstanceAs (Monad (StateM (List TensorStorage)))
+
+def stackPush {args : List TensorInfo} {info : TensorInfo} (x : TensorCommand info) :
+    TensorProgram args (TensorOp info) :=
+  fun l ↦ ⟨.var l.length, l.concat ⟨info, x⟩⟩
+
+def getArg {args : List TensorInfo} (i : Fin args.length) : TensorProgram args (TensorOp args[i]) :=
+  fun l ↦ ⟨.arg i.val, l⟩
+
+def sin {args : List TensorInfo} {info : TensorInfo} (x : TensorOp info) :
+    TensorProgram args (TensorOp info) :=
+  stackPush (.sin x)
+
+def add {args : List TensorInfo} {info : TensorInfo} (x y : TensorOp info) :
+    TensorProgram args (TensorOp info) :=
+  stackPush (.add x y)
 
 def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
   [TensorProgram impl program] :
@@ -139,10 +199,6 @@ def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → T
   let y ← TensorProgram.arg 1
   let z ← TensorProgram.add x y
   TensorProgram.add z x
-
-inductive TensorOp where
-  | arg : ℕ → TensorOp
-  | var : ℕ → TensorOp
 
 instance : ToString TensorOp where
   toString op := match op with
@@ -161,5 +217,6 @@ instance : TensorProgram (fun _ ↦ TensorOp) (fun _ ↦ StateM (List (TensorOp 
     return .var i
 
 #eval simple_program (fun _ ↦ TensorOp) (fun _ ↦ StateM (List (TensorOp × TensorOp))) []
+-/
 
 end Jax
