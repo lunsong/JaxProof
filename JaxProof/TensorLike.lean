@@ -124,6 +124,8 @@ structure TensorInfo where
 class TensorProgram (impl : outParam (TensorInfo → Type))
   (program : List TensorInfo → Type → Type) where
   monadic {args : List TensorInfo} : Monad (program args)
+  partial_eval {arg₀ : TensorInfo} {args : List TensorInfo} {out : Type} :
+    impl arg₀ → program (arg₀ :: args) out → program args out
   arg {args : List TensorInfo} (i : Fin args.length) : program args (impl args[i])
   sin {args : List TensorInfo} {s : List ℕ} : impl ⟨.float, s⟩ → program args (impl ⟨.float, s⟩)
   add {args : List TensorInfo} {σ : TensorInfo} :
@@ -132,16 +134,6 @@ class TensorProgram (impl : outParam (TensorInfo → Type))
 instance (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
   [TensorProgram impl program] (args : List TensorInfo) : Monad (program args) :=
   TensorProgram.monadic (args := args)
-
-def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
-  [TensorProgram impl program] :
-    program [⟨.float, [2,3]⟩, ⟨.float, [2,3]⟩] (impl ⟨.float, [2,3]⟩) := do
-  let x ← TensorProgram.arg 0
-  let y ← TensorProgram.arg 1
-  let sin_x ← TensorProgram.sin x
-  let sin_y ← TensorProgram.sin y
-  let ans ← TensorProgram.add sin_x sin_y
-  return ans
 
 inductive TensorOp (info : TensorInfo) : Type where
   | arg : ℕ → TensorOp info
@@ -152,9 +144,21 @@ instance (info : TensorInfo) : ToString (TensorOp info) where
   | .arg i => s!"${i}"
   | .var i => s!"%{i}"
 
+def TensorOp.replace {info newInfo : TensorInfo} (newVal : TensorOp newInfo) :
+    TensorOp info → TensorOp info
+  | var n => var n
+  | arg 0 => match newVal with
+    | var n => var n
+    | arg n => arg n
+  | arg (n + 1) => arg n
+
 inductive TensorCommand where
   | sin {s : List ℕ} : TensorOp ⟨.float, s⟩ → TensorCommand
   | add {σ : TensorInfo} : TensorOp σ → TensorOp σ → TensorCommand
+
+def TensorCommand.replace {info : TensorInfo} (new : TensorOp info) : TensorCommand → TensorCommand
+  | sin x => sin (new.replace x)
+  | add x y => add (new.replace x) (new.replace y)
 
 instance : ToString TensorCommand where
   toString x := match x with
@@ -175,8 +179,6 @@ instance : TensorProgram TensorOp TensorStackProgram where
   arg i := fun l ↦ ⟨.arg i.val, l⟩
   sin x := fun l ↦ ⟨.var l.length, l.concat (.sin x)⟩
   add x y := fun l ↦ ⟨.var l.length, l.concat (.add x y)⟩
-
-#eval simple_program TensorOp TensorStackProgram
 
 def NativeTensor : TensorInfo → Type
   | ⟨.float, s⟩ => Tensor ℝ s
@@ -223,6 +225,22 @@ noncomputable instance : TensorProgram NativeTensor NativeProgram where
     match σ with
     | ⟨.float, _⟩ => NativeProgram.const (Tensor.map₂ (· + ·) x y)
     | ⟨.int, _⟩ => NativeProgram.const (Tensor.map₂ (· + ·) x y)
+
+def simple_program (impl : TensorInfo → Type) (program : List TensorInfo → Type → Type)
+  [TensorProgram impl program] :
+    program [⟨.float, [2,3]⟩, ⟨.float, [2,3]⟩] (impl ⟨.float, [2,3]⟩) := do
+  let x ← TensorProgram.arg 0
+  let y ← TensorProgram.arg 1
+  let sin_x ← TensorProgram.sin x
+  let sin_y ← TensorProgram.sin y
+  let ans ← TensorProgram.add sin_x sin_y
+  return ans
+
+example (x y : Tensor ℝ [2, 3]) (i : Fin 2) (j : Fin 3) :
+  let f := simple_program NativeTensor NativeProgram;
+  f x y i j = Real.sin (x i j) + Real.sin (y i j) := rfl
+
+#eval simple_program TensorOp TensorStackProgram
 
 /-
 inductive TensorCommand : TensorInfo → Type
