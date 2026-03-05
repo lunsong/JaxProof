@@ -20,11 +20,6 @@ structure TensorType where
   dtype : DType
   shape : List ℕ
 
-def BoundedTuple (shape : List ℕ) : Type :=
-  match shape with
-  | [] => Unit
-  | s₀ :: s => Fin s₀ × BoundedTuple s
-
 inductive Op : List TensorType → TensorType → Type where
   | abs {σ : TensorType} : Op [σ] σ
   | acos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
@@ -45,6 +40,7 @@ inductive Op : List TensorType → TensorType → Type where
   | cholesky {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
   | concat {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} : Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
   | conv {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} : Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
+  | convert_type {α β : DType} {s : Shape} : Op [⟨α, s⟩] ⟨β, s⟩
   | cos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | cosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | cumlogsumexp {s : Shape} (axis : ℕ) (reverse : Bool) : Op [⟨.float, s⟩] ⟨.float, s⟩
@@ -53,42 +49,68 @@ inductive Op : List TensorType → TensorType → Type where
   | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | cumsum {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | div {σ : TensorType} : Op [σ, σ] σ
-  | dot_general {α : DType} (batch contract lhs rhs : Shape) : Op [⟨α, batch ++ contract ++ lhs⟩, ⟨α, batch ++ contract ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
-  | dynamic_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) : Op [⟨α, dims.map Prod.fst⟩] ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩
-  | dynamic_update_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) : Op [⟨α, dims.map Prod.fst⟩, ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩] ⟨α, dims.map Prod.fst⟩
+  | dot_general {α : DType} (batch contract lhs rhs : Shape) :
+    Op [⟨α, batch ++ contract ++ lhs⟩, ⟨α, batch ++ contract ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
+  | dynamic_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
+    Op [⟨α, dims.map Prod.fst⟩] ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩
+  | dynamic_update_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
+    Op [⟨α, dims.map Prod.fst⟩, ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩] ⟨α, dims.map Prod.fst⟩
   | eigvals {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n]⟩
   | eigvalsh {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n]⟩
   | eigvecs {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
   | eigvecsh {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
-  | eq {σ : TensorType} : Op [σ, σ] ⟨.int, σ.shape⟩
   | empty {σ : TensorType} : Op [] σ
+  | eq {σ : TensorType} : Op [σ, σ] ⟨.int, σ.shape⟩
+  | erf {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | erf_inv {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | erfc {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | exp {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | exp2 {σ : TensorType} : Op [σ] σ
+  | expm1 {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  --| fft {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  --| gather {α : DType} {s s' batch: Shape} : Op [⟨α,⟩
   | iota (n : ℕ) : Op [] ⟨.int, [n]⟩
   | mul {σ : TensorType} : Op [σ, σ] σ
   | mod {σ : TensorType} : Op [σ, σ] σ
-  | divInt {σ : TensorType} : Op [σ, σ] σ
-  | toInt {s : List ℕ} : Op [⟨.float, s⟩] ⟨.int, s⟩
-  | toFloat {s : List ℕ} : Op [⟨.int, s⟩] ⟨.float, s⟩
-  | neg {σ : TensorType} : Op [σ] σ
-  | lt : Op (some 2)
-  | select : Op (some 3)
-  | addIdx : Op (some 3)
-  | sin : Op (some 1)
-  | exp : Op (some 1)
-  | log : Op (some 1)
-  | sqrt : Op (some 1)
-  | einsum (s : List ℕ) : List (List (Fin s.length)) → ℕ → Op none
-  | tuple : Op none
-  | tupleGet : ℕ → Op (some 1)
-  | anonTuple : Op none
-  deriving BEq
+  | div_int {σ : TensorType} : Op [σ, σ] σ
+  --| neg {σ : TensorType} : Op [σ] σ
+  --| lt : Op (some 2)
+  --| select : Op (some 3)
+  --| addIdx : Op (some 3)
+  --| sin : Op (some 1)
+  --| log : Op (some 1)
+  --| sqrt : Op (some 1)
+  --| einsum (s : List ℕ) : List (List (Fin s.length)) → ℕ → Op none
+  --| tuple : Op none
+  --| tupleGet : ℕ → Op (some 1)
+  --| anonTuple : Op none
 
 def Op.reprType : ℕ∞ → Type
   | none => List String → String
   | some n => curryType String n
 
+def Op.toString {args : List TensorType} {out : TensorType} : Op args out → String
+  | add => "add"
+  | _ => "unimplemented"
+
 def argString {α : Type} [ToString α] (xs : List α) : String :=
   ", ".intercalate (xs.map toString)
 
+def argType (α : TensorType → Type) : List TensorType → Type
+  | [] => Unit
+  | σ :: σs => α σ × argType α σs
+
+inductive Expr (args : List TensorType) : TensorType → Type where
+  | nullop {out : TensorType} : Op [] out → Expr args out
+  | unop {x out : TensorType} : Op [x] out → Expr args x → Expr args out
+  | binop {x y out : TensorType} : Op [x, y] out → Expr args x → Expr args y → Expr args out
+  | arg (i : Fin args.length) : Expr args args[i]
+
+def fn : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,3]⟩] ⟨.float, [3,3]⟩ :=
+  .unop .cos (.binop .add (.arg 0) (.arg 1))
+
+
+/-
 def Op.repr {n : ℕ∞} : Op n → Op.reprType n
   | iota n => s!"jax.numpy.arange({n})"
   | fill_int n x => s!"jax.numpy.zeros({n}, dtype=int) + {x}"
@@ -129,7 +151,6 @@ Each constructor's first argument is the name of the expression, which is used d
 generation
 -/
 
-/-
 inductive Expr where
   | nullop : Op (some 0) → Expr
   | unop   : Op (some 1) → Expr → Expr
