@@ -237,6 +237,11 @@ def Tensor.curry {s₀ : ℕ} {s : List ℕ} : Tensor R (s₀ :: s) → Tensor (
   | [] => id
   | _ :: _ => fun x i₁ ↦ curry fun i₀ ↦ x i₀ i₁
 
+def Tensor.curry' {s s' : List ℕ} : Tensor R (s ++ s') → Tensor (Tensor R s') s :=
+  match s with
+  | [] => id
+  | _ :: _ => fun x i ↦ Tensor.curry' (x i)
+
 def Tensor.uncurry {s₀ : ℕ} {s : List ℕ} : Tensor (Tensor R [s₀]) s → Tensor R (s₀ :: s) :=
   match s with
   | [] => id

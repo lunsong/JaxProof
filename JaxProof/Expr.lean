@@ -10,26 +10,45 @@ which generates the python code.
 
 namespace Jax
 
-inductive Op : (ℕ∞ → Type) where
-  | const_float : List ℚ → Op (some 0)
-  | const_int : List ℤ → Op (some 0)
-  | iota : ℕ → Op (some 0)
-  | fill_int : ℕ → ℤ → Op (some 0)
-  | fill_float : ℕ → ℚ → Op (some 0)
-  | idx : Op (some 2)
-  | setIdx : Op (some 3)
-  | add : Op (some 2)
-  | sub : Op (some 2)
-  | mul : Op (some 2)
-  | div : Op (some 2)
-  | mod : Op (some 2)
-  | divInt : Op (some 2)
-  | rep : ℕ → Op (some 1)
-  | fori_loop : Op (some 3)
+inductive DType where
+  | float : DType
+  | int : DType
+
+abbrev Shape : Type := List ℕ
+
+structure TensorType where
+  dtype : DType
+  shape : List ℕ
+
+inductive Op : (List TensorType → TensorType → Type) where
+  | abs {σ : TensorType} : Op [σ] σ
+  | acos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | acosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | add {σ : TensorType} : Op [σ, σ] σ
+  | and {s : Shape} : Op [⟨.int, s⟩, ⟨.int, s⟩] ⟨.int, s⟩
+  | argmax {α : DType} {s : Shape} (axis : Fin s.length) : Op [⟨α, s⟩] ⟨.int, s.eraseIdx axis⟩ 
+  | argmin {α : DType} {s : Shape} (axis : Fin s.length) : Op [⟨α, s⟩] ⟨.int, s.eraseIdx axis⟩ 
+  | asin {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | asinh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | atan {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | atanh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | bessel_i0e {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | bessel_i1e {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | broadcast {α : DType} (s : List (ℕ × Bool)) : Op [⟨α, Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
+  | cbrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | ceil {s : Shape} : Op [⟨.float, s⟩] ⟨.int, s⟩
+  | cholesky {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
+  | iota (n : ℕ) : Op [] ⟨.int, [n]⟩
+  | mul {σ : TensorType} : Op [σ, σ] σ
+  | div {σ : TensorType} : Op [σ, σ] σ
+  | mod {σ : TensorType} : Op [σ, σ] σ
+  | divInt {σ : TensorType} : Op [σ, σ] σ
+  | toInt {s : List ℕ} : Op [⟨.float, s⟩] ⟨.int, s⟩
+  | toFloat {s : List ℕ} : Op [⟨.int, s⟩] ⟨.float, s⟩
+  | neg {σ : TensorType} : Op [σ] σ
   | eq : Op (some 2)
   | lt : Op (some 2)
   | select : Op (some 3)
-  | toFloat : Op (some 1)
   | addIdx : Op (some 3)
   | sin : Op (some 1)
   | cos : Op (some 1)
@@ -50,8 +69,6 @@ def argString {α : Type} [ToString α] (xs : List α) : String :=
   ", ".intercalate (xs.map toString)
 
 def Op.repr {n : ℕ∞} : Op n → Op.reprType n
-  | const_float x
-  | const_int x => toString x
   | iota n => s!"jax.numpy.arange({n})"
   | fill_int n x => s!"jax.numpy.zeros({n}, dtype=int) + {x}"
   | fill_float n x => s!"jax.numpy.zeros({n}, dtype=float) + {x}"
@@ -91,7 +108,7 @@ Each constructor's first argument is the name of the expression, which is used d
 generation
 -/
 
-
+/-
 inductive Expr where
   | nullop : Op (some 0) → Expr
   | unop   : Op (some 1) → Expr → Expr
@@ -242,5 +259,7 @@ def Expr.genCode (expr : Expr) : StateM CodeGenCtx String := do
       return name
 
 def Expr.code (expr : Expr) : String := "\n".intercalate (expr.genCode ⟨[], []⟩).2.2
+
+-/
 
 end Jax

@@ -125,6 +125,8 @@ class TensorProgram (impl : outParam (TensorInfo → Type)) (program : Type → 
   Monad program where
   sin {s : List ℕ} : impl ⟨.float, s⟩ → program (impl ⟨.float, s⟩)
   add {σ : TensorInfo} : impl σ → impl σ → program (impl σ)
+  fori_loop {σ : TensorInfo} :
+    (impl ⟨.int, []⟩ → impl σ → program (impl σ)) → impl ⟨.int, []⟩ → impl σ → program (impl σ)
 
 inductive TensorOp (info : TensorInfo) : Type where
   | arg : ℕ → TensorOp info
@@ -138,6 +140,7 @@ instance (info : TensorInfo) : ToString (TensorOp info) where
 inductive TensorCommand where
   | sin {s : List ℕ} : TensorOp ⟨.float, s⟩ → TensorCommand
   | add {σ : TensorInfo} : TensorOp σ → TensorOp σ → TensorCommand
+  | fori_loop {σ : TensorInfo}  : StateM (List TensorCommand) (TensorOp σ) → TensorCommand
 
 instance : ToString TensorCommand where
   toString x := match x with
@@ -170,34 +173,19 @@ noncomputable instance : TensorProgram NativeTensor id where
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· + ·)
 
-def TensorTuple (impl : TensorInfo → Type) : List TensorInfo → Type
-  | [] => Unit
-  | σ :: σs => impl σ × TensorTuple impl σs
-
-abbrev Program' (impl : TensorInfo → Type) (program : Type → Type)
-  (args : List TensorInfo) (ret : List TensorInfo) : Type :=
-  match args with
-  | [] => program (TensorTuple impl ret)
-  | σ :: σs => impl σ → Program' impl program σs ret
-
-def Program'' (args : List TensorInfo) (ret : List TensorInfo) : Type 1 :=
-  (impl : TensorInfo → Type) → (program : Type → Type) → [TensorProgram impl program]
-    → Program' impl program args ret
-
-def simple_program : Program'' [⟨.float, [2, 3]⟩, ⟨.float, [2, 3]⟩] [⟨.float, [2, 3]⟩] :=
-  fun x y ↦ do
+def simple_program {impl : TensorInfo → Type} (program : Type → Type)
+  [TensorProgram impl program] (x y : impl ⟨.float, [2, 3]⟩) :
+    program (impl ⟨.float, [2,3]⟩) := do
   let sin_x ← TensorProgram.sin x
   let sin_y ← TensorProgram.sin y
   let ans ← TensorProgram.add sin_x sin_y
   return ans
 
-
 example (x y : Tensor ℝ [2, 3]) (i : Fin 2) (j : Fin 3) :
-  let f := simple_program NativeTensor id;
+  let f := simple_program id;
   f x y i j = Real.sin (x i j) + Real.sin (y i j) := rfl
 
-
-#eval simple_program TensorOp TensorStackProgram (.arg 0) (.arg 1)
+#eval simple_program TensorStackProgram (.arg 0) (.arg 1)
 
 /-
 inductive TensorCommand : TensorInfo → Type
