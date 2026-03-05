@@ -20,14 +20,19 @@ structure TensorType where
   dtype : DType
   shape : List ℕ
 
-inductive Op : (List TensorType → TensorType → Type) where
+def BoundedTuple (shape : List ℕ) : Type :=
+  match shape with
+  | [] => Unit
+  | s₀ :: s => Fin s₀ × BoundedTuple s
+
+inductive Op : List TensorType → TensorType → Type where
   | abs {σ : TensorType} : Op [σ] σ
   | acos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | acosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | add {σ : TensorType} : Op [σ, σ] σ
   | and {s : Shape} : Op [⟨.int, s⟩, ⟨.int, s⟩] ⟨.int, s⟩
-  | argmax {α : DType} {s : Shape} (axis : Fin s.length) : Op [⟨α, s⟩] ⟨.int, s.eraseIdx axis⟩ 
-  | argmin {α : DType} {s : Shape} (axis : Fin s.length) : Op [⟨α, s⟩] ⟨.int, s.eraseIdx axis⟩ 
+  | argmax {σ : TensorType} (axis : ℕ) : Op [σ] ⟨.int, σ.shape.eraseIdx axis⟩ 
+  | argmin {σ : TensorType} (axis : ℕ) : Op [σ] ⟨.int, σ.shape.eraseIdx axis⟩ 
   | asin {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | asinh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | atan {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
@@ -38,20 +43,36 @@ inductive Op : (List TensorType → TensorType → Type) where
   | cbrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | ceil {s : Shape} : Op [⟨.float, s⟩] ⟨.int, s⟩
   | cholesky {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
+  | concat {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} : Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
+  | conv {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} : Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
+  | cos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | cosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | cumlogsumexp {s : Shape} (axis : ℕ) (reverse : Bool) : Op [⟨.float, s⟩] ⟨.float, s⟩
+  | cummax {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
+  | cummin {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
+  | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
+  | cumsum {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
+  | div {σ : TensorType} : Op [σ, σ] σ
+  | dot_general {α : DType} (batch contract lhs rhs : Shape) : Op [⟨α, batch ++ contract ++ lhs⟩, ⟨α, batch ++ contract ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
+  | dynamic_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) : Op [⟨α, dims.map Prod.fst⟩] ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩
+  | dynamic_update_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) : Op [⟨α, dims.map Prod.fst⟩, ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩] ⟨α, dims.map Prod.fst⟩
+  | eigvals {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n]⟩
+  | eigvalsh {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n]⟩
+  | eigvecs {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
+  | eigvecsh {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
+  | eq {σ : TensorType} : Op [σ, σ] ⟨.int, σ.shape⟩
+  | empty {σ : TensorType} : Op [] σ
   | iota (n : ℕ) : Op [] ⟨.int, [n]⟩
   | mul {σ : TensorType} : Op [σ, σ] σ
-  | div {σ : TensorType} : Op [σ, σ] σ
   | mod {σ : TensorType} : Op [σ, σ] σ
   | divInt {σ : TensorType} : Op [σ, σ] σ
   | toInt {s : List ℕ} : Op [⟨.float, s⟩] ⟨.int, s⟩
   | toFloat {s : List ℕ} : Op [⟨.int, s⟩] ⟨.float, s⟩
   | neg {σ : TensorType} : Op [σ] σ
-  | eq : Op (some 2)
   | lt : Op (some 2)
   | select : Op (some 3)
   | addIdx : Op (some 3)
   | sin : Op (some 1)
-  | cos : Op (some 1)
   | exp : Op (some 1)
   | log : Op (some 1)
   | sqrt : Op (some 1)
