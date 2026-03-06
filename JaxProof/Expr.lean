@@ -34,12 +34,15 @@ inductive Op : List TensorType → TensorType → Type where
   | atanh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | bessel_i0e {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | bessel_i1e {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | broadcast {α : DType} (s : List (ℕ × Bool)) : Op [⟨α, Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
+  | broadcast {α : DType} (s : List (ℕ × Bool)) :
+    Op [⟨α, Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
   | cbrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | ceil {s : Shape} : Op [⟨.float, s⟩] ⟨.int, s⟩
   | cholesky {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
-  | concat {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} : Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
-  | conv {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} : Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
+  | concat {α : DType} {batch : Shape} {n m : ℕ} {axis : ℕ} :
+    Op [⟨α, batch.insertIdx axis n⟩, ⟨α, batch.insertIdx axis m⟩] ⟨α, batch.insertIdx axis (n + m)⟩
+  | conv {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} :
+    Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
   | convert_type {α β : DType} {s : Shape} : Op [⟨α, s⟩] ⟨β, s⟩
   | cos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | cosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
@@ -91,7 +94,12 @@ def Op.reprType : ℕ∞ → Type
 
 def Op.toString {args : List TensorType} {out : TensorType} : Op args out → String
   | add => "add"
+  | cos => "cos"
+  | concat => "concat"
   | _ => "unimplemented"
+
+instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
+  ⟨Op.toString⟩
 
 def argString {α : Type} [ToString α] (xs : List α) : String :=
   ", ".intercalate (xs.map toString)
@@ -106,9 +114,32 @@ inductive Expr (args : List TensorType) : TensorType → Type where
   | binop {x y out : TensorType} : Op [x, y] out → Expr args x → Expr args y → Expr args out
   | arg (i : Fin args.length) : Expr args args[i]
 
-def fn : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,3]⟩] ⟨.float, [3,3]⟩ :=
-  .unop .cos (.binop .add (.arg 0) (.arg 1))
+unsafe def Expr.insert {args : List TensorType} {out : TensorType}
+  (expr : Expr args out) (code : String) :
+    StateM (List (USize × String)) ℕ := fun ctx ↦
+  match ctx.findIdx? (fun x ↦ ptrAddrUnsafe expr == x.1) with
+  | none => ⟨ctx.length, ctx.concat ⟨ptrAddrUnsafe expr, code⟩⟩
+  | some n => ⟨n, ctx⟩
 
+unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
+    (expr : Expr args out) : StateM (List (USize × String)) String :=
+  match expr with
+  | nullop op => do return "%" ++ toString (← expr.insert op.toString)
+  | unop op x => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode}")
+  | binop op x y => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode} {← y.genCode}")
+  | arg i => pure s!"${i}"
+
+def fn : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
+  .unop .cos <| .binop (.concat (batch:=[3]) (n:=3) (m:=4) (axis:=1)) (.arg 0) (.arg 1)
+
+#eval IO.println ("\n".intercalate ((fn.genCode []).2.map Prod.snd))
+
+declare_syntax_cat expr_builder
+
+syntax "build_expr_with" ( ident ":" term "," )* "begin" expr_builder : term
+
+macro_rules
+  | `(build_expr_with $[$argname
 
 /-
 def Op.repr {n : ℕ∞} : Op n → Op.reprType n
