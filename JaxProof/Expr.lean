@@ -139,12 +139,12 @@ unsafe def Exprs.genCode {args outs : List TensorType} (exprs : Exprs args outs)
   | [] => pure ""
   | _ :: _ =>
     let ⟨expr, exprs⟩ := exprs
-    do return s!"{← expr.genCode}, {← exprs.genCode}"
+    do return s!"{← expr.genCode} {← exprs.genCode}"
 
 unsafe def Exprs.code {args outs : List TensorType} (exprs : Exprs args outs) :
     String :=
   let ⟨out, codes⟩ := exprs.genCode []
-  "\n".intercalate (codes.map Prod.snd) ++ "in " ++ out
+  "\n".intercalate (codes.map Prod.snd) ++ "\nreturn " ++ out
 
 
 def fn : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
@@ -157,14 +157,16 @@ def fn' : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
 
 declare_syntax_cat expr_builder
 
-syntax "define_expr" (ident term),* "with" ( ident ":" ident term ),* "begin" expr_builder : term
+syntax "xla_fun" ident (ident term),*
+       "with" ( ident ":" ident term ),*
+       "begin" expr_builder : command
 syntax "let_expr" ident ":" ident term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":=" term ";" expr_builder : expr_builder
 syntax "return" term,* : expr_builder
 
 open Lean in macro_rules
-  | `(define_expr $[$retdtypes $retshapes],*
+  | `(xla_fun $funName $[$retdtypes $retshapes],*
       with $[$argnames : $argdtypes $argshapes],*
       begin $content) => do
     let arglist : TSyntax `term ← `(term| [ $[⟨.$argdtypes, $argshapes⟩],* ])
@@ -189,18 +191,22 @@ open Lean in macro_rules
     | [] => return parsed
     | ⟨name, dtype, shape, id⟩ :: args =>
       do `(let $name : Expr $arglist ⟨.$dtype, $shape⟩ := .arg $id; $(← bind_args args))
-    bind_args args
+    `(def $funName : Exprs $arglist $retlist := $(← bind_args args))
 
 
-def gnn := define_expr
-    float [2,3]
-  with
-    a : float [2,3]
-  begin
-    let_expr b : float [2,3] := a;
-    return b
+xla_fun foobar
+  float [2,3 + 4 + 5]
+with
+  a : float [2,3],
+  b : float [2,4],
+  c : float [2,5]
+begin
+  let_expr d : float [2,3 + 4] := .binop (.concat (batch:=[2]) (axis:=1) (n:=3) (m:=4)) a b;
+  let_expr d' : float [2,3 + 4] := .unop .cos d;
+  return .binop (.concat (batch:=[2]) (axis:=1) (n:=3 + 4) (m:=5)) d' c
 
-#check gnn
+
+#eval IO.println foobar.code
 
 syntax "add_dot" ident : term
 
