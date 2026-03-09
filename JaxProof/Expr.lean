@@ -96,6 +96,7 @@ def Op.toString {args : List TensorType} {out : TensorType} : Op args out → St
   | add => "add"
   | cos => "cos"
   | concat => "concat"
+  | mul => "mul"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
@@ -119,6 +120,10 @@ inductive ExprGroup : List TensorType → List TensorType → Type where
   | nil {args : List TensorType} : ExprGroup args []
   | cons {args : List TensorType} {x : TensorType} {xs : List TensorType} :
     Expr args x → ExprGroup args xs → ExprGroup args (x :: xs)
+  | append {args outs outs' : List TensorType} : 
+    ExprGroup args outs → ExprGroup args outs' → ExprGroup args (outs ++ outs')
+  | apply {xs ys zs : List TensorType} :
+    ExprGroup xs ys → ExprGroup ys zs → ExprGroup xs zs
   | fori_loop {args carry aux : List TensorType} (n : ℕ) :
     ExprGroup (⟨.int, []⟩ :: carry ++ aux) carry
       → ExprGroup args carry → ExprGroup args aux → ExprGroup args carry
@@ -143,6 +148,19 @@ unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
 def complete_code (commands : Cached String) (outs : String) : String :=
   "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
 
+mutual
+
+unsafe def ExprGroup.insert {args outs : List TensorType}
+  (expr : ExprGroup args outs) : StateM (Cached String × Cached String) ℕ :=
+  fun ⟨commands, libs⟩ ↦
+    match libs.findIdx? (fun x ↦ x.1 == ptrAddrUnsafe expr) with
+    | some n => ⟨n, commands, libs⟩
+    | none =>
+      let n := libs.length
+      let ⟨expr_outs, expr_commands, libs⟩ := expr.genCode ⟨[], libs⟩
+      ⟨n, commands, libs⟩
+
+
 unsafe def ExprGroup.genCode {args outs : List TensorType} :
     ExprGroup args outs → StateM (Cached String × Cached String) String
   | nil => pure ""
@@ -150,6 +168,10 @@ unsafe def ExprGroup.genCode {args outs : List TensorType} :
     let ⟨x, commands⟩ := x.genCode commands;
     let ⟨xs, commands, libs⟩ := xs.genCode ⟨commands, libs⟩
     ⟨s!"{x}, {xs}", commands, libs⟩
+  | append x y => do return s!"{← x.genCode}, {← y.genCode}"
+  | apply x f =>
+    sorry
+
   | fori_loop n step_fn init aux => fun ⟨commands, libs⟩ ↦
     let ⟨init, commands, libs⟩ := init.genCode ⟨commands, libs⟩
     let ⟨aux, commands, libs⟩ := aux.genCode ⟨commands, libs⟩
@@ -163,6 +185,8 @@ unsafe def ExprGroup.genCode {args outs : List TensorType} :
         ⟨step_fn_id, libs⟩
       | some i => ⟨i, libs⟩
     ⟨s!"fori_loop({n},#{step_fn_id},({init}),({aux}))", commands, libs⟩
+
+end
 
 unsafe def ExprGroup.code {args outs : List TensorType} : ExprGroup args outs → String :=
   fun expr ↦
@@ -205,8 +229,9 @@ def fn' : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
 
 declare_syntax_cat expr_builder
 
-syntax "xla_fun" ident ("(" ident* ":" term ")")* (ident term),*
-       "with" ( ident ":" ident term ),*
+syntax "xla_fun" ident ("(" ident* ":" term ")")*
+       "arguments" ( ident ":" ident term ),*
+       "returns" (ident term),*
        "begin" expr_builder : command
 syntax "let_expr" ident ":" ident term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
@@ -215,8 +240,8 @@ syntax "return" term,* : expr_builder
 
 open Lean in macro_rules
   | `(xla_fun $funName $[($params* : $paramtype)]*
-      $[$retdtypes $retshapes],*
-      with $[$argnames : $argdtypes $argshapes],*
+      arguments $[$argnames : $argdtypes $argshapes],*
+      returns $[$retdtypes $retshapes],*
       begin $content) => do
     let arglist : TSyntax `term ← `(term| [ $[⟨.$argdtypes, $argshapes⟩],* ])
     let retlist : TSyntax `term ← `(term| [ $[⟨.$retdtypes, $retshapes⟩],* ])
@@ -246,20 +271,35 @@ open Lean in macro_rules
 
 
 xla_fun foobar (n m l k : ℕ)
-  float [n,m + l + k],
-  float [n,m + l]
-with
+arguments
   a : float [n,m],
   b : float [n,l],
   c : float [n,k]
+returns
+  float [n,m + l + k],
+  float [n,m + l]
 begin
   let_expr d : float [n,m + l] := .binop (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) a b;
   let_expr d' : float [n,m + l] := .unop .cos d;
-  return d, .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c
+  return .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c, d
+
+xla_fun square (n : ℕ)
+arguments
+  i : int [],
+  x : float [n]
+returns
+  float [n]
+begin
+  return .binop .mul x x
+
+
+def barfoo (n m : ℕ) : ExprGroup [⟨.float, [n]⟩] [⟨.float, [n]⟩] :=
+  .fori_loop m (square n) (.cons (.arg 0) .nil) .nil
 
 #check foobar
 
 #eval IO.println (foobar 2 3 4 5).code
+#eval IO.println (barfoo 10 12).code
 
 /-
 structure ExprsTuple where
