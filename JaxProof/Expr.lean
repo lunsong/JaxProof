@@ -108,30 +108,65 @@ def argType (α : TensorType → Type) : List TensorType → Type
   | [] => Unit
   | σ :: σs => α σ × argType α σs
 
+
 inductive Expr (args : List TensorType) : TensorType → Type where
   | nullop {out : TensorType} : Op [] out → Expr args out
   | unop {x out : TensorType} : Op [x] out → Expr args x → Expr args out
   | binop {x y out : TensorType} : Op [x, y] out → Expr args x → Expr args y → Expr args out
   | arg (i : Fin args.length) : Expr args args[i]
 
-abbrev Exprs (args : List TensorType) : List TensorType → Type
-  | [] => Unit
-  | σ :: σs => Expr args σ × Exprs args σs
+inductive ExprGroup : List TensorType → List TensorType → Type where
+  | nil {args : List TensorType} : ExprGroup args []
+  | cons {args : List TensorType} {x : TensorType} {xs : List TensorType} :
+    Expr args x → ExprGroup args xs → ExprGroup args (x :: xs)
+  | fori_loop {args carry aux : List TensorType} (n : ℕ) :
+    ExprGroup (⟨.int, []⟩ :: carry ++ aux) carry
+      → ExprGroup args carry → ExprGroup args aux → ExprGroup args carry
+
+abbrev Cached (α : Type) : Type := List (USize × α)
 
 unsafe def Expr.insert {args : List TensorType} {out : TensorType}
   (expr : Expr args out) (code : String) :
-    StateM (List (USize × String)) ℕ := fun ctx ↦
+    StateM (Cached String) ℕ := fun ctx ↦
   match ctx.findIdx? (fun x ↦ ptrAddrUnsafe expr == x.1) with
   | none => ⟨ctx.length, ctx.concat ⟨ptrAddrUnsafe expr, code⟩⟩
   | some n => ⟨n, ctx⟩
 
 unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
-    (expr : Expr args out) : StateM (List (USize × String)) String :=
+    (expr : Expr args out) : StateM (Cached String) String :=
   match expr with
   | nullop op => do return "%" ++ toString (← expr.insert op.toString)
   | unop op x => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode}")
   | binop op x y => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode} {← y.genCode}")
   | arg i => pure s!"${i}"
+
+unsafe def ExprGroup.genCode {args outs : List TensorType} :
+    ExprGroup args outs → StateM (Cached String × Cached String) String
+  | nil => pure ""
+  | cons x xs => fun ⟨commands, libs⟩ ↦
+    let ⟨x, commands⟩ := x.genCode commands;
+    let ⟨xs, commands, libs⟩ := xs.genCode ⟨commands, libs⟩
+    ⟨s!"{x}, {xs}", commands, libs⟩
+  | fori_loop n step_fn init aux => fun ⟨commands, libs⟩ ↦
+    let ⟨init, commands, libs⟩ := init.genCode ⟨commands, libs⟩
+    let ⟨aux, commands, libs⟩ := aux.genCode ⟨commands, libs⟩
+    let ⟨step_fn_id, libs⟩ : ℕ × Cached String :=
+      match libs.findIdx? (fun x ↦ ptrAddrUnsafe step_fn == x.1) with
+      | none =>
+        let ⟨step_fn_outs, step_fn_commands, libs⟩ := step_fn.genCode ⟨[], libs⟩
+        let step_fn_id := libs.length
+        let libs := libs.concat
+          ⟨ptrAddrUnsafe step_fn,
+          ("\n".intercalate (step_fn_commands.map Prod.snd) ++ "\nreturn " ++ step_fn_outs)⟩
+        ⟨step_fn_id, libs⟩
+      | some i => ⟨i, libs⟩
+    ⟨s!"fori_loop({n},{step_fn_id},({init}),({aux}))", commands, libs⟩
+
+
+/-
+abbrev Exprs (args : List TensorType) : List TensorType → Type
+  | [] => Unit
+  | σ :: σs => Expr args σ × Exprs args σs
 
 unsafe def Exprs.genCode {args outs : List TensorType} (exprs : Exprs args outs) :
     StateM (List (USize × String)) String :=
@@ -217,5 +252,6 @@ inductive HiExpr (libs : List ExprsTuple) (args : List TensorType) : List Tensor
   | concat {α β : List TensorType} :
     HiExpr libs args α → HiExpr libs args β → HiExpr libs args (α ++ β)
 
+-/
 
 end Jax
