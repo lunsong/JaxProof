@@ -156,9 +156,9 @@ unsafe def ExprGroup.insert {args outs : List TensorType}
     match libs.findIdx? (fun x ↦ x.1 == ptrAddrUnsafe expr) with
     | some n => ⟨n, commands, libs⟩
     | none =>
-      let n := libs.length
       let ⟨expr_outs, expr_commands, libs⟩ := expr.genCode ⟨[], libs⟩
-      ⟨n, commands, libs⟩
+      ⟨libs.length, commands,
+       libs.concat ⟨ptrAddrUnsafe expr, complete_code expr_commands expr_outs⟩⟩
 
 
 unsafe def ExprGroup.genCode {args outs : List TensorType} :
@@ -170,21 +170,9 @@ unsafe def ExprGroup.genCode {args outs : List TensorType} :
     ⟨s!"{x}, {xs}", commands, libs⟩
   | append x y => do return s!"{← x.genCode}, {← y.genCode}"
   | apply x f =>
-    sorry
-
-  | fori_loop n step_fn init aux => fun ⟨commands, libs⟩ ↦
-    let ⟨init, commands, libs⟩ := init.genCode ⟨commands, libs⟩
-    let ⟨aux, commands, libs⟩ := aux.genCode ⟨commands, libs⟩
-    let ⟨step_fn_id, libs⟩ : ℕ × Cached String :=
-      match libs.findIdx? (fun x ↦ ptrAddrUnsafe step_fn == x.1) with
-      | none =>
-        let ⟨step_fn_outs, step_fn_commands, libs⟩ := step_fn.genCode ⟨[], libs⟩
-        let step_fn_id := libs.length
-        let libs := libs.concat
-          ⟨ptrAddrUnsafe step_fn, complete_code step_fn_commands step_fn_outs⟩
-        ⟨step_fn_id, libs⟩
-      | some i => ⟨i, libs⟩
-    ⟨s!"fori_loop({n},#{step_fn_id},({init}),({aux}))", commands, libs⟩
+    do return s!"apply(@{← f.insert}, {← x.genCode})"
+  | fori_loop n step_fn init aux =>
+    do return s!"fori_loop({n}, @{← step_fn.insert}, ({← init.genCode}), ({← aux.genCode}))"
 
 end
 
@@ -194,7 +182,7 @@ unsafe def ExprGroup.code {args outs : List TensorType} : ExprGroup args outs �
     let main := complete_code commands outs
     main ++ "\nwith\n" ++ "\n\n".intercalate (libs.map Prod.snd)
 
-abbrev Exprs (args : List TensorType) : List TensorType → Type
+def Exprs (args : List TensorType) : List TensorType → Type
   | [] => Unit
   | σ :: σs => Expr args σ × Exprs args σs
 
