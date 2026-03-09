@@ -140,6 +140,9 @@ unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
   | binop op x y => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode} {← y.genCode}")
   | arg i => pure s!"${i}"
 
+def complete_code (commands : Cached String) (outs : String) : String :=
+  "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
+
 unsafe def ExprGroup.genCode {args outs : List TensorType} :
     ExprGroup args outs → StateM (Cached String × Cached String) String
   | nil => pure ""
@@ -156,18 +159,27 @@ unsafe def ExprGroup.genCode {args outs : List TensorType} :
         let ⟨step_fn_outs, step_fn_commands, libs⟩ := step_fn.genCode ⟨[], libs⟩
         let step_fn_id := libs.length
         let libs := libs.concat
-          ⟨ptrAddrUnsafe step_fn,
-          ("\n".intercalate (step_fn_commands.map Prod.snd) ++ "\nreturn " ++ step_fn_outs)⟩
+          ⟨ptrAddrUnsafe step_fn, complete_code step_fn_commands step_fn_outs⟩
         ⟨step_fn_id, libs⟩
       | some i => ⟨i, libs⟩
-    ⟨s!"fori_loop({n},{step_fn_id},({init}),({aux}))", commands, libs⟩
+    ⟨s!"fori_loop({n},#{step_fn_id},({init}),({aux}))", commands, libs⟩
 
+unsafe def ExprGroup.code {args outs : List TensorType} : ExprGroup args outs → String :=
+  fun expr ↦
+    let ⟨outs, commands, libs⟩ := expr.genCode ⟨[], []⟩
+    let main := complete_code commands outs
+    main ++ "\nwith\n" ++ "\n\n".intercalate (libs.map Prod.snd)
 
-/-
 abbrev Exprs (args : List TensorType) : List TensorType → Type
   | [] => Unit
   | σ :: σs => Expr args σ × Exprs args σs
 
+def Exprs.toExprGroup {args outs : List TensorType} : Exprs args outs → ExprGroup args outs :=
+  match outs with
+  | [] => fun _ ↦ .nil
+  | _ :: _ => fun ⟨x, xs⟩ ↦ .cons x xs.toExprGroup
+
+/-
 unsafe def Exprs.genCode {args outs : List TensorType} (exprs : Exprs args outs) :
     StateM (List (USize × String)) String :=
   match outs with
@@ -189,10 +201,11 @@ def fn' : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
   .binop .add fn fn
 
 #eval IO.println ("\n".intercalate ((fn'.genCode []).2.map Prod.snd))
+-/
 
 declare_syntax_cat expr_builder
 
-syntax "xla_fun" ident (ident term),*
+syntax "xla_fun" ident ("(" ident* ":" term ")")* (ident term),*
        "with" ( ident ":" ident term ),*
        "begin" expr_builder : command
 syntax "let_expr" ident ":" ident term ":=" term ";" expr_builder : expr_builder
@@ -201,7 +214,8 @@ syntax "let" ident ":=" term ";" expr_builder : expr_builder
 syntax "return" term,* : expr_builder
 
 open Lean in macro_rules
-  | `(xla_fun $funName $[$retdtypes $retshapes],*
+  | `(xla_fun $funName $[($params* : $paramtype)]*
+      $[$retdtypes $retshapes],*
       with $[$argnames : $argdtypes $argshapes],*
       begin $content) => do
     let arglist : TSyntax `term ← `(term| [ $[⟨.$argdtypes, $argshapes⟩],* ])
@@ -226,7 +240,9 @@ open Lean in macro_rules
     | [] => return parsed
     | ⟨name, dtype, shape, id⟩ :: args =>
       do `(let $name : Expr $arglist ⟨.$dtype, $shape⟩ := .arg $id; $(← bind_args args))
-    `(def $funName : Exprs $arglist $retlist := $(← bind_args args))
+    --`(def $funName : Exprs $arglist $retlist := $(← bind_args args))
+    `(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
+      Exprs.toExprGroup <| $(← bind_args args))
 
 
 xla_fun foobar
@@ -240,8 +256,11 @@ begin
   let_expr d' : float [2,3 + 4] := .unop .cos d;
   return .binop (.concat (batch:=[2]) (axis:=1) (n:=3 + 4) (m:=5)) d' c
 
+#check foobar
+
 #eval IO.println foobar.code
 
+/-
 structure ExprsTuple where
   args : List TensorType
   outs : List TensorType
@@ -251,7 +270,6 @@ inductive HiExpr (libs : List ExprsTuple) (args : List TensorType) : List Tensor
   | arg (i : Fin args.length) : HiExpr libs args [args[i]]
   | concat {α β : List TensorType} :
     HiExpr libs args α → HiExpr libs args β → HiExpr libs args (α ++ β)
-
 -/
 
 end Jax
