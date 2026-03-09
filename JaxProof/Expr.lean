@@ -205,14 +205,17 @@ begin
   let_expr d' : float [2,3 + 4] := .unop .cos d;
   return .binop (.concat (batch:=[2]) (axis:=1) (n:=3 + 4) (m:=5)) d' c
 
-
 #eval IO.println foobar.code
 
-syntax "add_dot" ident : term
+structure ExprsTuple where
+  args : List TensorType
+  outs : List TensorType
+  fn : Exprs args outs
 
-macro_rules
-  | `(add_dot $name) => `(term| .$name)
+inductive HiExpr (libs : List ExprsTuple) (args : List TensorType) : List TensorType → Type where
+  | arg (i : Fin args.length) : HiExpr libs args [args[i]]
+  | concat {α β : List TensorType} :
+    HiExpr libs args α → HiExpr libs args β → HiExpr libs args (α ++ β)
 
-def spec : TensorType := ⟨add_dot float, [2,3]⟩
 
 end Jax
