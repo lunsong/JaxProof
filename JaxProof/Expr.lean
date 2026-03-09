@@ -217,10 +217,29 @@ def fn' : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
 
 declare_syntax_cat expr_builder
 
+/--
+Define an XLA expression. Example:
+xla_fun foobar (n m l k : ℕ)
+arguments
+  a : float [n,m],
+  b : float [n,l],
+  c : float [n,k]
+returns
+  float [n,m + l + k],
+  float [n,m + l]
+begin
+  let_expr d : float [n,m + l] := .binop (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) a b;
+  let_expr d' : float [n,m + l] := .unop .cos d;
+  return .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c, d
+-/
 syntax "xla_fun" ident ("(" ident* ":" term ")")*
        "arguments" ( ident ":" ident term ),*
        "returns" (ident term),*
        "begin" expr_builder : command
+
+/--
+Custom `let` binder for XLA expressions 
+-/
 syntax "let_expr" ident ":" ident term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":=" term ";" expr_builder : expr_builder
@@ -256,49 +275,5 @@ open Lean in macro_rules
     --`(def $funName : Exprs $arglist $retlist := $(← bind_args args))
     `(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
       Exprs.toExprGroup <| $(← bind_args args))
-
-
-xla_fun foobar (n m l k : ℕ)
-arguments
-  a : float [n,m],
-  b : float [n,l],
-  c : float [n,k]
-returns
-  float [n,m + l + k],
-  float [n,m + l]
-begin
-  let_expr d : float [n,m + l] := .binop (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) a b;
-  let_expr d' : float [n,m + l] := .unop .cos d;
-  return .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c, d
-
-xla_fun square (n : ℕ)
-arguments
-  i : int [],
-  x : float [n]
-returns
-  float [n]
-begin
-  return .binop .mul x x
-
-
-def barfoo (n m : ℕ) : ExprGroup [⟨.float, [n]⟩] [⟨.float, [n]⟩] :=
-  .fori_loop m (square n) (.cons (.arg 0) .nil) .nil
-
-#check foobar
-
-#eval IO.println (foobar 2 3 4 5).code
-#eval IO.println (barfoo 10 12).code
-
-/-
-structure ExprsTuple where
-  args : List TensorType
-  outs : List TensorType
-  fn : Exprs args outs
-
-inductive HiExpr (libs : List ExprsTuple) (args : List TensorType) : List TensorType → Type where
-  | arg (i : Fin args.length) : HiExpr libs args [args[i]]
-  | concat {α β : List TensorType} :
-    HiExpr libs args α → HiExpr libs args β → HiExpr libs args (α ++ β)
--/
 
 end Jax
