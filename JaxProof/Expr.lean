@@ -227,8 +227,8 @@ open Lean in macro_rules
       `(term| let $name : $type := $val; $(← parse content))
     | `(expr_builder| let $name := $val; $content) => do
       `(term| let $name := $val; $(← parse content))
-    | `(expr_builder| return $rets) => do
-      `(term| ( ⟨ $rets , () ⟩ : Exprs $arglist $retlist))
+    | `(expr_builder| return $rets,*) => do
+      `(term| ( ⟨ $rets,* , () ⟩ : Exprs $arglist $retlist))
     | _ => Macro.throwUnsupported
     let argId : Array (TSyntax `term) := Array.ofFn fun (i : Fin argnames.size) => quote i.val
     let parsed : TSyntax `term ← parse content
@@ -245,20 +245,21 @@ open Lean in macro_rules
       Exprs.toExprGroup <| $(← bind_args args))
 
 
-xla_fun foobar
-  float [2,3 + 4 + 5]
+xla_fun foobar (n m l k : ℕ)
+  float [n,m + l + k],
+  float [n,m + l]
 with
-  a : float [2,3],
-  b : float [2,4],
-  c : float [2,5]
+  a : float [n,m],
+  b : float [n,l],
+  c : float [n,k]
 begin
-  let_expr d : float [2,3 + 4] := .binop (.concat (batch:=[2]) (axis:=1) (n:=3) (m:=4)) a b;
-  let_expr d' : float [2,3 + 4] := .unop .cos d;
-  return .binop (.concat (batch:=[2]) (axis:=1) (n:=3 + 4) (m:=5)) d' c
+  let_expr d : float [n,m + l] := .binop (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) a b;
+  let_expr d' : float [n,m + l] := .unop .cos d;
+  return d, .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c
 
 #check foobar
 
-#eval IO.println foobar.code
+#eval IO.println (foobar 2 3 4 5).code
 
 /-
 structure ExprsTuple where
