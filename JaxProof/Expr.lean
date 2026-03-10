@@ -20,6 +20,17 @@ structure TensorType where
   dtype : DType
   shape : List ℕ
 
+namespace _dot_general
+
+def get_shape (batch contract indep : List ℕ)
+  (i : List (Fin batch.length ⊕ Fin contract.length ⊕ Fin indep.length)) : List ℕ :=
+  i.map fun i => match i with
+  | .inl i => batch[i]
+  | .inr (.inl i) => contract[i]
+  | .inr (.inr i) => indep[i]
+
+end _dot_general
+
 inductive Op : List TensorType → TensorType → Type where
   | abs {σ : TensorType} : Op [σ] σ
   | acos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
@@ -52,8 +63,18 @@ inductive Op : List TensorType → TensorType → Type where
   | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | cumsum {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | div {σ : TensorType} : Op [σ, σ] σ
-  | dot_general {α : DType} (batch contract lhs rhs : Shape) :
-    Op [⟨α, batch ++ contract ++ lhs⟩, ⟨α, batch ++ contract ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
+  | dot_general {α : DType}
+    (batch contract lhs_indep rhs_indep: List ℕ)
+    (lhs : List (Fin batch.length ⊕ Fin contract.length ⊕ Fin lhs_indep.length))
+    (rhs : List (Fin batch.length ⊕ Fin contract.length ⊕ Fin rhs_indep.length))
+    (lhs_inj : Function.Injective lhs.get := by decide)
+    (lhs_surj : Function.Surjective lhs.get := by decide)
+    (rhs_inj : Function.Injective rhs.get := by decide)
+    (rhs_surj : Function.Surjective rhs.get := by decide)
+    : 
+    Op [⟨α, _dot_general.get_shape batch contract lhs_indep lhs⟩,
+        ⟨α, _dot_general.get_shape batch contract rhs_indep rhs⟩]
+      ⟨α, batch ++ lhs_indep ++ rhs_indep⟩
   | dynamic_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
     Op [⟨α, dims.map Prod.fst⟩] ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩
   | dynamic_update_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
