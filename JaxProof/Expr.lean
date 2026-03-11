@@ -110,11 +110,33 @@ def argType (α : TensorType → Type) : List TensorType → Type
   | [] => Unit
   | σ :: σs => α σ × argType α σs
 
+inductive DList {α : Type} (m : α → Type) : List α → Type where
+  | nil : DList m []
+  | cons {x : α} {xs : List α} : m x → DList m xs → DList m (x :: xs)
+
+syntax "*[" term,* "]" : term
+open Lean in macro_rules
+  | `(term| *[ $[$items],* ]) =>
+    let rec parse : List (TSyntax `term) → MacroM (TSyntax `term)
+    | [] => `(DList.nil)
+    | x :: xs => do
+      let xs ← parse xs
+      `(DList.cons $x $xs) 
+    let ⟨items⟩ := items
+    parse items
+
+abbrev floatAsReal : DType → Type
+  | .float => Real
+  | .int => Int
+
+def AA : DList floatAsReal [.float, .int] := *[1, 2]
 
 inductive Expr (args : List TensorType) : TensorType → Type where
   | nullop {out : TensorType} : Op [] out → Expr args out
   | unop {x out : TensorType} : Op [x] out → Expr args x → Expr args out
   | binop {x y out : TensorType} : Op [x, y] out → Expr args x → Expr args y → Expr args out
+  | varop {ins : List TensorType} {out : TensorType} :
+    Op ins out → DList (Expr args) ins → Expr args out
   | arg (i : Fin args.length) : Expr args args[i]
 
 inductive ExprGroup : List TensorType → List TensorType → Type where
