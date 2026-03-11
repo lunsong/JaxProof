@@ -2,38 +2,55 @@ import JaxProof.Expr
 
 namespace Jax
 
-def Tuple (impl : TensorType → Type) : List TensorType → Type
-  | [] => Unit
-  | σ :: σs => impl σ × Tuple impl σs
-
-def Tuple.append {impl : TensorType → Type} {x y : List TensorType}
-  (a : Tuple impl x) (b : Tuple impl y) : Tuple impl (x ++ y) :=
+def DList.append {α : Type} {γ : α → Type} {a b : List α}
+  (x : DList γ a) (y : DList γ b) : DList γ (a ++ b) :=
   match x with
-  | [] => b
-  | _ :: _ =>
-    let ⟨a, as⟩ := a
-    ⟨a, as.append b⟩
+  | nil => y
+  | cons x xs => cons x (xs.append y)
 
-def Tuple.get {impl : TensorType → Type} {args : List TensorType} (i : Fin args.length) :
-    Tuple impl args → impl args[i] := 
-  match args with
-  | arg :: args =>
-    fun ⟨x, xs⟩ ↦
-    match i with
-    | 0 => x
-    | .mk (n + 1) h => xs.get <| .mk n <| by simpa using h
-    
+def DList.get {α : Type} {γ : α → Type} {a : List α}
+    (i : Fin a.length) (x : DList γ a) : γ a[i] :=
+  match a with
+  | a :: as =>
+    match x with
+    | cons x xs =>
+      match i with
+      | .mk 0 _ => x
+      | .mk (n + 1) h => xs.get <| .mk n <| by simpa using h
+
+def DList.map {α : Type} {γ γ' : α → Type} {a : List α} (f : {a : α} → γ a → γ' a) :
+    DList γ a → DList γ' a
+  | nil => nil
+  | cons x xs => cons (f x) (xs.map f)
 
 class TensorImpl (tensor : TensorType → Type) where
-  impl {args : List TensorType} {out : TensorType} : Op args out → Tuple tensor args → tensor out
+  impl {args : List TensorType} {out : TensorType} : Op args out → DList tensor args → tensor out
   ofNat : ℕ → tensor ⟨.int, []⟩
 
 def Expr.eval {args : List TensorType} {out : TensorType} (impl : TensorType → Type)
-  [TensorImpl impl] (xs : Tuple impl args) : Expr args out → impl out
+  [TensorImpl impl] (xs : DList impl args) (expr : Expr args out) : impl out :=
+  match expr with
   | arg i => xs.get i
-  | nullop op => TensorImpl.impl op ()
-  | unop op x => TensorImpl.impl op ⟨x.eval impl xs, ()⟩
-  | binop op x y => TensorImpl.impl op ⟨x.eval impl xs, y.eval impl xs, ()⟩
+  --| bind op res => TensorImpl.impl op (res.map (Expr.eval impl xs))
+  | bind op res => 
+    let rec recursive_eval {ins : List TensorType} : DList (Expr args) ins → DList impl ins
+    | .nil => .nil
+    | .cons res res' => .cons (res.eval impl xs) (recursive_eval res')
+    TensorImpl.impl op (recursive_eval res)
+--  match args with
+--  | [] => match expr with
+--    | bind op xs => TensorImpl.impl op (xs.map (Expr.eval impl .nil))
+--  | a :: as => sorry
+--  expr.rec
+--    (motive_1 := fun a e => impl a)
+--    (motive_2 := fun a e => DList impl a)
+--    (bind := fun op _ res => TensorImpl.impl op res)
+--    (arg := xs.get)
+--    (by sorry)
+--    (by sorry)
+--  | arg i => xs.get i
+--  | bind op ins =>
+--    TensorImpl.impl op (ins.map (Expr.eval impl xs))
     
 
 def ExprGroup.eval {args outs : List TensorType} (impl : TensorType → Type) [TensorImpl impl]
