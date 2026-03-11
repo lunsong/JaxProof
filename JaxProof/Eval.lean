@@ -31,38 +31,23 @@ def Expr.eval {args : List TensorType} {out : TensorType} (impl : TensorType →
   [TensorImpl impl] (xs : DList impl args) (expr : Expr args out) : impl out :=
   match expr with
   | arg i => xs.get i
-  --| bind op res => TensorImpl.impl op (res.map (Expr.eval impl xs))
   | bind op res => 
     let rec recursive_eval {ins : List TensorType} : DList (Expr args) ins → DList impl ins
     | .nil => .nil
     | .cons res res' => .cons (res.eval impl xs) (recursive_eval res')
     TensorImpl.impl op (recursive_eval res)
---  match args with
---  | [] => match expr with
---    | bind op xs => TensorImpl.impl op (xs.map (Expr.eval impl .nil))
---  | a :: as => sorry
---  expr.rec
---    (motive_1 := fun a e => impl a)
---    (motive_2 := fun a e => DList impl a)
---    (bind := fun op _ res => TensorImpl.impl op res)
---    (arg := xs.get)
---    (by sorry)
---    (by sorry)
---  | arg i => xs.get i
---  | bind op ins =>
---    TensorImpl.impl op (ins.map (Expr.eval impl xs))
-    
+   
 
 def ExprGroup.eval {args outs : List TensorType} (impl : TensorType → Type) [TensorImpl impl]
-    (xs : Tuple impl args) : ExprGroup args outs → Tuple impl outs
-  | nil => ()
-  | cons e es => ⟨e.eval impl xs, es.eval impl xs⟩
+    (xs : DList impl args) : ExprGroup args outs → DList impl outs
+  | nil => .nil
+  | cons e es => .cons (e.eval impl xs) (es.eval impl xs)
   | apply x f => f.eval impl (x.eval impl xs)
   | append x y => (x.eval impl xs).append (y.eval impl xs)
   | fori_loop (carry := carry) n step init aux =>
     let init := init.eval impl xs
     let aux := aux.eval impl xs
-    let f i (a : Tuple impl carry) := (step.eval impl) ⟨TensorImpl.ofNat i, a.append aux⟩
+    let f i (a : DList impl carry) := (step.eval impl) (.cons (TensorImpl.ofNat i) (a.append aux))
     n.rec init f
 
 end Jax
