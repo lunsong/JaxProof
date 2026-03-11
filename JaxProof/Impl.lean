@@ -17,33 +17,22 @@ instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
 #print Tensor.einprod
 #check Tensor.transpose
 
-syntax "⟪" term,* "⟫" : term
-open Lean in macro_rules
-  | `(term| ⟪$[$items],*⟫) =>
-    let rec parse : List (TSyntax `term) → MacroM (TSyntax `term)
-    | [] => `([])
-    | x :: xs => do let xs ← parse xs; `($x :: $xs)
-    let ⟨items⟩ := items
-    parse items
-
-def A : List ℕ := ⟪1, 2⟫
-
 noncomputable instance : TensorImpl FloatAsReal where
   ofNat i := Int.ofNat i
   impl {args} {out} op := match op with
-  | .abs => fun ⟨x, _⟩ => match out with
+  | .abs => fun *[x] => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => x.map abs
-  | .acos => fun ⟨x, _⟩ => x.map Real.arccos
+  | .acos => fun *[x] => x.map Real.arccos
   -- `Real.Arcosh` isn't available in this lean version
-  | .acosh => fun ⟨x, _⟩ => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
-  | .add => fun ⟨x, y, _⟩ => match out with
+  | .acosh => fun *[x] => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
+  | .add => fun *[x, y] => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.add x y
-  | .mul => fun ⟨x, y, _⟩ => match out with
+  | .mul => fun *[x, y] => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· * ·) x y
-  | .sum n => fun ⟨x, _⟩ => by
+--  | .sum n => fun ⟨x, _⟩ => by
 --  | .dot_general (α := α) batch contract lhs rhs => fun ⟨x, y, _⟩ =>
 --    match α with
 --    | .float =>
