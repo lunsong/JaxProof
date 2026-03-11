@@ -22,6 +22,14 @@ variable {R : Type}
 theorem Tensor.ext {s₀ : ℕ} {s : List ℕ} {A B : Tensor R (s₀ :: s)} : (∀ i, A i = B i) → A = B :=
   fun h => funext h
 
+def Tensor.cast {s s' : List ℕ} (h : s = s') : Tensor R s → Tensor R s' :=
+  match s, s' with
+  | [], [] => id
+  | s₀ :: s₁, s₀' :: s₁' =>
+    have h₀ : s₀ = s₀' := by injection h
+    have h₁ : s₁ = s₁' := by injection h
+    fun x i ↦ (x (i.cast h₀.symm)).cast h₁
+
 @[simp]
 def filter_pred {n : ℕ} : List (Fin (n + 1)) → List (Fin n)
   | [] => []
@@ -206,22 +214,21 @@ attribute [simp] Tensor.einprod.filter
 instance (α : Type) (x₀ : α) (xs : List α) : NeZero (x₀ :: xs).length :=
   NeZero.mk <| by simp
 
-def Tensor.preBroadcast : List (ℕ × Bool) → List ℕ
-  | [] => []
-  | (s₀, isBroadcast) :: xs =>
-    let xs' := preBroadcast xs
-    if isBroadcast then xs' else s₀ :: xs'
+def Tensor.preBroadcast (s : List (ℕ × Bool)) : List ℕ :=
+  (s.filter Prod.snd).map Prod.fst
 
+@[simp]
+theorem Tensor.preBroadcast_append (s s' : List (ℕ × Bool)) :
+    Tensor.preBroadcast (s ++ s') = Tensor.preBroadcast s ++ Tensor.preBroadcast s' := by
+  simp [preBroadcast]
 
 def Tensor.broadcast (s : List (ℕ × Bool)) :
     Tensor R (preBroadcast s) → Tensor R (s.map Prod.fst) :=
   match s with
   | [] => id
-  | (s₀, isBroadcast) :: s => by
-    unfold preBroadcast
-    split_ifs with h
-    · exact fun x _ ↦ x.broadcast s
-    · exact fun x i₀ ↦ (x i₀).broadcast s
+  | (_, true) :: s => fun x i ↦ (x i).broadcast s
+  | (_, false) :: s => fun x _ ↦ x.broadcast s
+    
 
 def Tensor.batchGetType (R : Type) (s' : List ℕ) : List ℕ → Type
   | [] => Tensor R s' 
@@ -268,10 +275,10 @@ def Tensor.batchGetIntType (R : Type) (s : List ℕ) : ℕ → Type
   | 0 => Tensor R s
   | n + 1 => Tensor ℤ s → Tensor.batchGetIntType R s n
 
-def Tensor.cast {R R' : Type} (f : R → R') {s : List ℕ} : Tensor R s → Tensor R' s :=
+def Tensor.map {s : List ℕ} {R R' : Type} (f : R → R') : Tensor R s → Tensor R' s :=
   match s with
   | [] => f
-  | _ :: _ => fun x i₀ ↦ (x i₀).cast f
+  | _ :: _ => fun x i₀ ↦ (x i₀).map f
 
 def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0) :
     batchGetType R s' s → batchGetIntType R s' s.length :=
@@ -279,7 +286,7 @@ def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0)
   | [] => id
   | s₀ :: s => fun x i₀ ↦
     have : NeZero s₀ := ⟨by simp [hs]⟩
-    let i₀' : Tensor (Fin s₀) s' := i₀.cast Fin.intCast
+    let i₀' : Tensor (Fin s₀) s' := i₀.map Fin.intCast
     batchGet_to_batchGetInt (by simp at hs; exact hs.2) (x i₀')
 
 def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
@@ -310,11 +317,6 @@ def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     let j := i <| (σ.symm μ).cast <| by simp
     j.cast <| by simp
 
-def Tensor.map {s : List ℕ} {R R' : Type} (f : R → R') : Tensor R s → Tensor R' s :=
-  match s with
-  | [] => f
-  | _ :: _ => fun x i₀ ↦ (x i₀).map f
-
 @[simps]
 instance [Div R] (s : List ℕ) : Div (Tensor R s) where div := Tensor.map₂ (· / ·)
 
@@ -331,7 +333,7 @@ example (n m l : ℕ) (A : Matrix (Fin n) (Fin m) ℝ) (B : Matrix (Fin m) (Fin 
   simp [Finset.sum_apply]
 
 example (i : Fin 2) (j : Fin 3) (k : Fin 4) (x : Tensor R [2, 4]) :
-    let y : Tensor R [2,3,4] := x.broadcast [(2,false),(3,true),(4,false)]
+    let y : Tensor R [2,3,4] := x.broadcast [(2,true),(3,false),(4,true)]
     y i j k = x i k :=
   rfl
 
@@ -343,7 +345,7 @@ example (n₁ n₂ : ℕ) (x : Tensor R [n₁, n₂]) (i : Fin n₁) (j : Fin n�
 
 noncomputable def softmax {n₁ n₂ : ℕ} (x : Tensor ℝ [n₁, n₂]) : Tensor ℝ [n₁, n₂] :=
   let denom := Tensor.einsum [n₂, n₁] [⟨[#1, #0], x⟩] 1
-  let denom' : Tensor ℝ [n₁, n₂] := denom.broadcast [(n₁, false), (n₂, true)]
+  let denom' : Tensor ℝ [n₁, n₂] := denom.broadcast [(n₁, true), (n₂, false)]
   x / denom'
 
 example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :

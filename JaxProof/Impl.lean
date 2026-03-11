@@ -1,5 +1,6 @@
 import JaxProof.Eval
 
+#check List.filter
 namespace Jax
 
 def FloatAsReal : TensorType → Type
@@ -16,6 +17,17 @@ instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
 #print Tensor.einprod
 #check Tensor.transpose
 
+syntax "⟪" term,* "⟫" : term
+open Lean in macro_rules
+  | `(term| ⟪$[$items],*⟫) =>
+    let rec parse : List (TSyntax `term) → MacroM (TSyntax `term)
+    | [] => `([])
+    | x :: xs => do let xs ← parse xs; `($x :: $xs)
+    let ⟨items⟩ := items
+    parse items
+
+def A : List ℕ := ⟪1, 2⟫
+
 noncomputable instance : TensorImpl FloatAsReal where
   ofNat i := Int.ofNat i
   impl {args} {out} op := match op with
@@ -31,23 +43,33 @@ noncomputable instance : TensorImpl FloatAsReal where
   | .mul => fun ⟨x, y, _⟩ => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· * ·) x y
-  | .dot_general (α := α) batch contract lhs_indep rhs_indep lhs rhs lhs_inj lhs_surj rhs_inj rhs_surj =>
-    fun ⟨x, y, _⟩ =>
-    match α with
-    | .int => sorry
-    | .float =>
-      --let lhs_shape := _dot_general.get_shape batch contract lhs_indep lhs
-      --let rhs_shape := _dot_general.get_shape batch contract rhs_indep rhs
-      let σ : Fin lhs.length → Fin (contract ++ batch ++ lhs_indep).length := fun i ↦
-        match lhs[i] with
-        | .inl j => Fin.mk j <| by simp; omega
-        | .inr (.inl j) => Fin.mk (batch.length + j) <| by simp; omega
-        | .inr (.inr j) => Fin.mk (batch.length + contract.length + j) <| by simp; omega
-      have σ_inj : Function.Injective σ := by sorry
-      have σ_surj : Function.Surjective σ := by sorry
-      let σ : Equiv
-      --let x' : Tensor ℝ (contract ++ batch ++ lhs_indep) := x.transpose
-      sorry
+  | .sum n => fun ⟨x, _⟩ => by
+--  | .dot_general (α := α) batch contract lhs rhs => fun ⟨x, y, _⟩ =>
+--    match α with
+--    | .float =>
+--      let real_indices (x : List ℕ) : List (ℕ × Bool) := x.map (Prod.mk · true) 
+--      let virt_indices (x : List ℕ) : List (ℕ × Bool) := x.map (Prod.mk · false) 
+--      have preBroadcast_real (x : List ℕ) : Tensor.preBroadcast (real_indices x) = x := by
+--        induction x with
+--        | nil => rfl
+--        | cons x xs ih =>
+--          unfold real_indices
+--          simp [Tensor.preBroadcast]
+--          exact ih
+--      have preBroadcast_virt (x : List ℕ) : Tensor.preBroadcast (virt_indices x) = [] := by
+--        induction x with
+--        | nil => rfl
+--        | cons x xs ih =>
+--          unfold virt_indices
+--          simp [Tensor.preBroadcast]
+--      let lhs_broadcast := real_indices (contract ++ batch ++ lhs) ++ virt_indices rhs
+--      have preBroadcast_lhs : Tensor.preBroadcast lhs_broadcast = contract ++ batch ++ lhs := by
+--        unfold lhs_broadcast
+--        rw [Tensor.preBroadcast_append, preBroadcast_real, preBroadcast_virt, List.append_nil]
+--      let x' := (x.cast preBroadcast_lhs.symm).broadcast lhs_broadcast
+--      by
+--
+--      sorry
   | _ => 0
 
 
