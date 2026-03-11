@@ -125,17 +125,16 @@ open Lean in macro_rules
     let ⟨items⟩ := items
     parse items
 
-abbrev floatAsReal : DType → Type
-  | .float => Real
-  | .int => Int
-
-def AA : DList floatAsReal [.float, .int] := *[1, 2]
+def DList.mapM {α β : Type} {γ : α → Type} {x : List α} {m : Type → Type} [Monad m]
+  (f : {x : α} → γ x → m β) : DList γ x → m (List β)
+  | nil => pure []
+  | cons a as => do
+    let a ← f a
+    let as ← as.mapM f
+    return a :: as
 
 inductive Expr (args : List TensorType) : TensorType → Type where
-  | nullop {out : TensorType} : Op [] out → Expr args out
-  | unop {x out : TensorType} : Op [x] out → Expr args x → Expr args out
-  | binop {x y out : TensorType} : Op [x, y] out → Expr args x → Expr args y → Expr args out
-  | varop {ins : List TensorType} {out : TensorType} :
+  | bind {ins : List TensorType} {out : TensorType} :
     Op ins out → DList (Expr args) ins → Expr args out
   | arg (i : Fin args.length) : Expr args args[i]
 
@@ -163,10 +162,11 @@ unsafe def Expr.insert {args : List TensorType} {out : TensorType}
 unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
     (expr : Expr args out) : StateM (Cached String) String :=
   match expr with
-  | nullop op => do return "%" ++ toString (← expr.insert op.toString)
-  | unop op x => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode}")
-  | binop op x y => do return "%" ++ toString (← expr.insert s!"{op} {← x.genCode} {← y.genCode}")
   | arg i => pure s!"${i}"
+  | bind op xs => do
+    let xs ← xs.mapM Expr.genCode
+    let id ← expr.insert (toString op ++ " " ++ " ".intercalate (xs.map toString))
+    return s!"%{id}"
 
 def complete_code (commands : Cached String) (outs : String) : String :=
   "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
@@ -298,5 +298,22 @@ open Lean in macro_rules
     --`(def $funName : Exprs $arglist $retlist := $(← bind_args args))
     `(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
       Exprs.toExprGroup <| $(← bind_args args))
+
+/-
+xla_fun foobar (n m l k : ℕ)
+arguments
+  a : float [n,m],
+  b : float [n,l],
+  c : float [n,k]
+returns
+  float [n,m + l + k],
+  float [n,m + l]
+begin
+  let_expr d : float [n,m + l] := .bind (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) *[a, b];
+  let_expr d' : float [n,m + l] := .bind .cos *[d];
+  return .bind (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) *[d', c], d
+
+#eval IO.println (foobar 2 3 4 5).code
+-/
 
 end Jax
