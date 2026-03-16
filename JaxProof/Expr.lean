@@ -52,8 +52,8 @@ inductive Op : List TensorType → TensorType → Type where
   | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | cumsum {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | div {σ : TensorType} : Op [σ, σ] σ
-  --| dot_general {α : DType} (batch contract lhs rhs: List ℕ) : 
-  --  Op [⟨α, contract ++ batch ++ lhs⟩, ⟨α, contract ++ batch ++ lhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
+  | dot_general {α : DType} (batch contract lhs rhs: List ℕ) : 
+    Op [⟨α, contract ++ batch ++ lhs⟩, ⟨α, contract ++ batch ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
   | sum {α : DType} {s : List ℕ} (n : ℕ) : Op [⟨α, s⟩] ⟨α, s.drop n⟩
   | transpose {α : DType} {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     Op [⟨α, s⟩] ⟨α, List.ofFn fun i => s.get (σ i)⟩
@@ -257,10 +257,9 @@ begin
   let_expr d' : float [n,m + l] := .unop .cos d;
   return .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c, d
 -/
-syntax "xla_fun" ident ("(" ident* ":" term ")")*
-       "arguments" ( ident ":" ident term ),*
+syntax "xla" "with" ( ident ":" ident term ),*
        "returns" (ident term),*
-       "begin" expr_builder : command
+       "begin" expr_builder : term
 
 /--
 Custom `let` binder for XLA expressions 
@@ -269,10 +268,10 @@ syntax "let_expr" ident ":" ident term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":=" term ";" expr_builder : expr_builder
 syntax "return" term,* : expr_builder
+syntax "fori_loop" term "," term "," term "," term : expr_builder
 
 open Lean in macro_rules
-  | `(xla_fun $funName $[($params* : $paramtype)]*
-      arguments $[$argnames : $argdtypes $argshapes],*
+  | `(xla with $[$argnames : $argdtypes $argshapes],*
       returns $[$retdtypes $retshapes],*
       begin $content) => do
     let arglist : TSyntax `term ← `(term| [ $[⟨.$argdtypes, $argshapes⟩],* ])
@@ -284,8 +283,15 @@ open Lean in macro_rules
       `(term| let $name : $type := $val; $(← parse content))
     | `(expr_builder| let $name := $val; $content) => do
       `(term| let $name := $val; $(← parse content))
-    | `(expr_builder| return $rets,*) => do
-      `(term| ( ⟨ $rets,* , () ⟩ : Exprs $arglist $retlist))
+    | `(expr_builder| return $[$rets],*) => do
+      let ⟨rets⟩ := rets
+      let rec parse_rets : List (TSyntax `term) → MacroM (TSyntax `term)
+      | [] => `(term| ExprGroup.nil)
+      | x :: xs => do `(term| ExprGroup.cons $x $(← parse_rets xs))
+      parse_rets rets
+    --  `(term| ( ⟨ $rets,* , () ⟩ : Exprs $arglist $retlist))
+    | `(expr_builder| fori_loop $n, $fn , $init , $aux) =>
+      `(term| ExprGroup.fori_loop $n $fn $init $aux)
     | _ => Macro.throwUnsupported
     let argId : Array (TSyntax `term) := Array.ofFn fun (i : Fin argnames.size) => quote i.val
     let parsed : TSyntax `term ← parse content
@@ -298,8 +304,41 @@ open Lean in macro_rules
     | ⟨name, dtype, shape, id⟩ :: args =>
       do `(let $name : Expr $arglist ⟨.$dtype, $shape⟩ := .arg $id; $(← bind_args args))
     --`(def $funName : Exprs $arglist $retlist := $(← bind_args args))
-    `(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
-      Exprs.toExprGroup <| $(← bind_args args))
+    --`(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
+    --  Exprs.toExprGroup <| $(← bind_args args))
+    `(term| ( $(← bind_args args) : ExprGroup $arglist $retlist) )
+
+def foobar (n m l k : ℕ) :=
+  xla with
+  a : float [n,m],
+  b : float [n,l],
+  c : float [n,k]
+  returns
+  float [n,m + l + k],
+  float [n,m + l]
+  begin
+  let_expr d : float [n,m + l] := .bind (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) *[a, b];
+  let_expr d' : float [n,m + l] := .bind .cos *[d];
+  return .bind (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) *[d', c], d
+
+def barfoo (n : ℕ) :=
+  xla with
+  x : float [n]
+  returns
+  float [n]
+  begin
+  let loop_fn :=
+    xla with
+    i : int [],
+    x : float [n]
+    returns
+    float [n]
+    begin
+    return .bind .mul *[x, x];
+  fori_loop 12, loop_fn, (.cons x .nil), .nil
+
+#eval IO.println (barfoo 10).code
+
 
 /-
 xla_fun foobar (n m l k : ℕ)

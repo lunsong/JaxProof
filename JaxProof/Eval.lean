@@ -40,11 +40,11 @@ def Expr.eval {args : List TensorType} {out : TensorType} (impl : TensorType →
 
 def ExprGroup.eval {args outs : List TensorType} (impl : TensorType → Type) [TensorImpl impl]
     (xs : DList impl args) : ExprGroup args outs → DList impl outs
-  | nil => .nil
-  | cons e es => .cons (e.eval impl xs) (es.eval impl xs)
-  | apply x f => f.eval impl (x.eval impl xs)
-  | append x y => (x.eval impl xs).append (y.eval impl xs)
-  | fori_loop (carry := carry) n step init aux =>
+  | .nil => .nil
+  | .cons e es => .cons (e.eval impl xs) (es.eval impl xs)
+  | .apply x f => f.eval impl (x.eval impl xs)
+  | .append x y => (x.eval impl xs).append (y.eval impl xs)
+  | .fori_loop (carry := carry) n step init aux =>
     let init := init.eval impl xs
     let aux := aux.eval impl xs
     let f i (a : DList impl carry) := (step.eval impl) (.cons (TensorImpl.ofNat i) (a.append aux))

@@ -3,7 +3,7 @@ import JaxProof.Eval
 #check List.filter
 namespace Jax
 
-def FloatAsReal : TensorType → Type
+abbrev FloatAsReal : TensorType → Type
   | ⟨.float, s⟩ => Tensor ℝ s
   | ⟨.int, s⟩ => Tensor ℤ s
 
@@ -36,6 +36,18 @@ noncomputable instance : TensorImpl FloatAsReal where
     | .int => x.sumN n
   | .transpose (α := α) σ => fun *[x] => match α with
     | .float | .int => x.transpose σ
+  | .broadcast (α := α) s => fun *[x] => match α with
+    | .float | .int => x.broadcast
+  | .dot_general (α := α) batch contract lhs rhs => fun *[x,y] =>
+    match α with
+    | .float
+    | .int =>
+      let x : Tensor _ (contract ++ batch ++ lhs ++ rhs) := Tensor.uncurry' (x.map Tensor.const)
+      let y : Tensor _ (contract ++ batch ++ (lhs ++ rhs)) :=
+        Tensor.uncurry' <| (y.curry'.map Tensor.const).map Tensor.uncurry'
+      let y : Tensor _ (contract ++ batch ++ lhs ++ rhs) := y.cast <| by simp
+      let z := (Tensor.map₂ (· * ·) x y).sumN (contract.length)
+      z.cast <| by simp
 --  | .dot_general (α := α) batch contract lhs rhs => fun ⟨x, y, _⟩ =>
 --    match α with
 --    | .float =>

@@ -30,6 +30,17 @@ def Tensor.cast {s s' : List ℕ} (h : s = s') : Tensor R s → Tensor R s' :=
     have h₁ : s₁ = s₁' := by injection h
     fun x i ↦ (x (i.cast h₀.symm)).cast h₁
 
+#check List.cons_eq_cons
+
+--def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
+--  (h₀ : s₀ = s₀') (h : s = s') (i : Fin s₀) (i' : Fin s₀') :
+--    i.val = i'.val → (x i).cast h = (x.cast (List.cons_eq_cons.mpr (.intro h₀ h))) i' := by
+--  intro hi
+--  cases h₀
+--  cases h
+--  rfl
+
+
 @[simp]
 def filter_pred {n : ℕ} : List (Fin (n + 1)) → List (Fin n)
   | [] => []
@@ -253,6 +264,11 @@ def Tensor.uncurry {s₀ : ℕ} {s : List ℕ} : Tensor (Tensor R [s₀]) s → 
   match s with
   | [] => id
   | _ :: _ => fun x i₀ i₁ ↦ (x i₁).uncurry i₀
+
+def Tensor.uncurry' {s s' : List ℕ} : Tensor (Tensor R s') s → Tensor R (s ++ s') :=
+  match s with
+  | [] => id
+  | _ :: _ => fun x i => (x i).uncurry'
 
 def Tensor.map₂ {s : List ℕ} {α β γ : Type} (f : α → β → γ) :
     Tensor α s → Tensor β s → Tensor γ s :=
