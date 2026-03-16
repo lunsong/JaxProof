@@ -14,7 +14,6 @@ def FloatAsReal.zero {σ : TensorType} : FloatAsReal σ :=
 
 instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
 
-#print Tensor.einprod
 #check Tensor.transpose
 
 noncomputable instance : TensorImpl FloatAsReal where
@@ -32,7 +31,11 @@ noncomputable instance : TensorImpl FloatAsReal where
   | .mul => fun *[x, y] => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· * ·) x y
---  | .sum n => fun ⟨x, _⟩ => by
+  | .sum (α := α) n => fun *[x] => match α with
+    | .float
+    | .int => x.sumN n
+  | .transpose (α := α) σ => fun *[x] => match α with
+    | .float | .int => x.transpose σ
 --  | .dot_general (α := α) batch contract lhs rhs => fun ⟨x, y, _⟩ =>
 --    match α with
 --    | .float =>

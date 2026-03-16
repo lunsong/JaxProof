@@ -55,6 +55,8 @@ inductive Op : List TensorType → TensorType → Type where
   --| dot_general {α : DType} (batch contract lhs rhs: List ℕ) : 
   --  Op [⟨α, contract ++ batch ++ lhs⟩, ⟨α, contract ++ batch ++ lhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
   | sum {α : DType} {s : List ℕ} (n : ℕ) : Op [⟨α, s⟩] ⟨α, s.drop n⟩
+  | transpose {α : DType} {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
+    Op [⟨α, s⟩] ⟨α, List.ofFn fun i => s.get (σ i)⟩
   | dynamic_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
     Op [⟨α, dims.map Prod.fst⟩] ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩
   | dynamic_update_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
