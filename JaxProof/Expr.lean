@@ -100,6 +100,10 @@ def Op.toString {args : List TensorType} {out : TensorType} : Op args out → St
   | cos => "cos"
   | concat => "concat"
   | mul => "mul"
+  | transpose σ =>
+    let σ : List ℕ := List.ofFn fun i => σ i
+    s!"transpose {σ}"
+  | dot_general batch contract lhs rhs => s!"dot_general {contract.length} {batch.length}"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
