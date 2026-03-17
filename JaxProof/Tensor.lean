@@ -44,11 +44,8 @@ def Tensor.cast {s s' : List ℕ} (h : s = s') : Tensor R s → Tensor R s' :=
 @[simp]
 def filter_pred {n : ℕ} : List (Fin (n + 1)) → List (Fin n)
   | [] => []
-  | x :: xs => 
-    if h : x = 0 then
-      filter_pred xs
-    else
-      (x.pred h) :: filter_pred xs
+  | Fin.mk 0 _ :: xs => filter_pred xs
+  | Fin.mk (n + 1) _ :: xs => (Fin.mk n (by omega)) :: filter_pred xs
 
 def Tensor.einprod [Mul R] [One R] (s : List ℕ)
   (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get))) : Tensor R s :=
@@ -61,13 +58,8 @@ def Tensor.einprod [Mul R] [One R] (s : List ℕ)
       Tensor R ((filter_pred i).map s'.get) :=
       match i with
       | [] => x
-      | i₁ :: is => by
-        unfold filter_pred
-        split_ifs with h
-        · exact filter is (x (i₀.cast (by simp[h])))
-        · exact fun i' ↦ filter is <| x <| i'.cast <| by
-            have ⟨i₁', h'⟩ := Fin.eq_succ_of_ne_zero h
-            simp [h']
+      | Fin.mk 0 _ :: is => filter is (x i₀)
+      | Fin.mk (_ + 1) _ :: _ => fun i ↦ filter _ (x i)
     let xs' := xs.map fun ⟨i, x⟩ ↦ ⟨filter_pred i, filter i x⟩
     einprod s' xs'
 
