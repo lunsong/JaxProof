@@ -13,8 +13,6 @@ def FloatAsReal.zero {σ : TensorType} : FloatAsReal σ :=
 
 instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
 
-#check Tensor.transpose
-
 def FloatAsReal.get {s : List ℕ} {R : Type} [Zero R]
   (x : Tensor R s) (indices : DList FloatAsReal (List.replicate s.length ⟨.int, []⟩)) : R :=
   match s with
