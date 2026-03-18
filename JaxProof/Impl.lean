@@ -1,6 +1,5 @@
 import JaxProof.Eval
 
-#check List.filter
 namespace Jax
 
 abbrev FloatAsReal : TensorType → Type
@@ -80,6 +79,15 @@ noncomputable instance : TensorImpl FloatAsReal where
       let z := (Tensor.map₂ (· * ·) x y).sumN (contract.length)
       z.cast <| by simp
   | .gather (α := α) (s := s) => FloatAsReal.gather
+  | .sorted (α := α) => fun *[x] => match α with
+    | .int =>
+      Tensor.uncurry' <|
+        x.curry'.map fun (x : Fin _ → ℤ) i =>
+          ((List.ofFn x).mergeSort).get <| i.cast <| by simp
+    | .float =>
+      Tensor.uncurry' <|
+        x.curry'.map fun (x : Fin _ → ℝ) i =>
+          ((List.ofFn x).mergeSort).get <| i.cast <| by simp
     --match α with
     --| .float =>
     --  match s with
