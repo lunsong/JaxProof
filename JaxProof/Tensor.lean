@@ -30,8 +30,6 @@ def Tensor.cast {s s' : List ℕ} (h : s = s') : Tensor R s → Tensor R s' :=
     have h₁ : s₁ = s₁' := by injection h
     fun x i ↦ (x (i.cast h₀.symm)).cast h₁
 
-#check List.cons_eq_cons
-
 --def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
 --  (h₀ : s₀ = s₀') (h : s = s') (i : Fin s₀) (i' : Fin s₀') :
 --    i.val = i'.val → (x i).cast h = (x.cast (List.cons_eq_cons.mpr (.intro h₀ h))) i' := by
@@ -310,12 +308,9 @@ def Tensor.of {s : List ℕ} : (Jax.ValidIdx s → R) → Tensor R s :=
   | n₀ :: ns => fun x i₀ ↦
     let x' : Jax.ValidIdx ns → R := fun is ↦
       let i : Jax.ValidIdx (n₀ :: ns) := fun r ↦
-        if h : r = ⟨0, by simp⟩ then
-          i₀.cast <| by simp [h]
-        else 
-          (is (r.pred h)).cast <| by
-            nth_rw 2 [← Fin.succ_pred r h]
-            rw [List.get_cons_succ']
+        match r with
+        | Fin.mk 0 _ => i₀
+        | Fin.mk (r + 1) h => is <| Fin.mk r <| by simp at h; omega
       x i
     Tensor.of x'
 
@@ -332,12 +327,9 @@ example (n m l : ℕ) (A : Matrix (Fin n) (Fin m) ℝ) (B : Matrix (Fin m) (Fin 
     Tensor.einsum [m, n, l] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
   simp 
   ext i j
-  simp [Tensor.einsum, Tensor.einprod, show (2 : Fin 3) ≠ 0 by decide, Matrix.mul_apply]
-  have h₁ := Finset.sum_apply i Finset.univ fun j i k ↦ A i j * B j k
+  simp [Tensor.einsum, Tensor.einprod, Matrix.mul_apply]
   conv_lhs =>
-    fun
-    equals ∑ j, fun k ↦ A i j * B j k =>
-      exact h₁
+    change (∑ k, fun i j ↦ A i k * B k j) i j
   simp [Finset.sum_apply]
 
 example (i : Fin 2) (j : Fin 3) (k : Fin 4) (x : Tensor R [2, 4]) :

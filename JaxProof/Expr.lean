@@ -74,7 +74,8 @@ inductive Op : List TensorType → TensorType → Type where
   | exp2 {σ : TensorType} : Op [σ] σ
   | expm1 {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   --| fft {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  --| gather {α : DType} {s s' batch: Shape} : Op [⟨α,⟩
+  | gather {α : DType} {s s' batch: Shape} :
+    Op (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
   | iota (n : ℕ) : Op [] ⟨.int, [n]⟩
   | mul {σ : TensorType} : Op [σ, σ] σ
   | mod {σ : TensorType} : Op [σ, σ] σ
@@ -311,54 +312,5 @@ open Lean in macro_rules
     --`(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
     --  Exprs.toExprGroup <| $(← bind_args args))
     `(term| ( $(← bind_args args) : ExprGroup $arglist $retlist) )
-
-def foobar (n m l k : ℕ) :=
-  xla with
-  a : float [n,m],
-  b : float [n,l],
-  c : float [n,k]
-  returns
-  float [n,m + l + k],
-  float [n,m + l]
-  begin
-  let_expr d : float [n,m + l] := .bind (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) *[a, b];
-  let_expr d' : float [n,m + l] := .bind .cos *[d];
-  return .bind (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) *[d', c], d
-
-def barfoo (n : ℕ) :=
-  xla with
-  x : float [n]
-  returns
-  float [n]
-  begin
-  let loop_fn :=
-    xla with
-    i : int [],
-    x : float [n]
-    returns
-    float [n]
-    begin
-    return .bind .mul *[x, x];
-  fori_loop 12, loop_fn, (.cons x .nil), .nil
-
-#eval IO.println (barfoo 10).code
-
-
-/-
-xla_fun foobar (n m l k : ℕ)
-arguments
-  a : float [n,m],
-  b : float [n,l],
-  c : float [n,k]
-returns
-  float [n,m + l + k],
-  float [n,m + l]
-begin
-  let_expr d : float [n,m + l] := .bind (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) *[a, b];
-  let_expr d' : float [n,m + l] := .bind .cos *[d];
-  return .bind (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) *[d', c], d
-
-#eval IO.println (foobar 2 3 4 5).code
--/
 
 end Jax

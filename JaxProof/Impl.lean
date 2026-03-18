@@ -16,6 +16,37 @@ instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
 
 #check Tensor.transpose
 
+def FloatAsReal.get {s : List ℕ} {R : Type} [Zero R]
+  (x : Tensor R s) (indices : DList FloatAsReal (List.replicate s.length ⟨.int, []⟩)) : R :=
+  match s with
+  | [] => x
+  | s₀ :: _ =>
+    match s₀ with
+    | 0 => 0
+    | _ + 1 =>
+      let (.cons i₀ i) := indices
+      FloatAsReal.get (x (Fin.intCast i₀)) i
+
+def FloatAsReal.gather {α : DType} {s s' : List ℕ}
+  (args : DList FloatAsReal (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩))
+  : FloatAsReal ⟨α, s'⟩ :=
+  let (.cons x indices) := args
+  match α with
+  | .float | .int =>
+    match s' with
+    | [] =>
+      FloatAsReal.get x indices
+    | _ :: _ => fun i₀ => 
+      let indices := feed i₀ indices
+      FloatAsReal.gather (.cons x indices)
+where feed {n : ℕ} {s₀ : ℕ} {s : List ℕ} (i₀ : Fin s₀) :
+  DList FloatAsReal (List.replicate n ⟨.int, s₀ :: s⟩) →
+  DList FloatAsReal (List.replicate n ⟨.int, s⟩) :=
+  match n with
+  | 0 => id
+  | _ + 1 => fun (.cons a₀ as) => .cons (a₀ i₀) <| feed i₀ as
+
+
 noncomputable instance : TensorImpl FloatAsReal where
   ofNat i := Int.ofNat i
   impl {args} {out} op := match op with
@@ -48,6 +79,12 @@ noncomputable instance : TensorImpl FloatAsReal where
       let y : Tensor _ (contract ++ batch ++ lhs ++ rhs) := y.cast <| by simp
       let z := (Tensor.map₂ (· * ·) x y).sumN (contract.length)
       z.cast <| by simp
+  | .gather (α := α) (s := s) => FloatAsReal.gather
+    --match α with
+    --| .float =>
+    --  match s with
+    --  | [] => fun *[x] => Tensor.const x
+    --  | s :: s' => 
 --  | .dot_general (α := α) batch contract lhs rhs => fun ⟨x, y, _⟩ =>
 --    match α with
 --    | .float =>
@@ -75,7 +112,6 @@ noncomputable instance : TensorImpl FloatAsReal where
 --
 --      sorry
   | _ => 0
-
 
 
 end Jax
