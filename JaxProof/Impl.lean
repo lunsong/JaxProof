@@ -6,6 +6,8 @@ abbrev FloatAsReal : TensorType → Type
   | ⟨.float, s⟩ => Tensor ℝ s
   | ⟨.int, s⟩ => Tensor ℤ s
 
+abbrev ArgList := DList FloatAsReal
+
 def FloatAsReal.zero {σ : TensorType} : FloatAsReal σ :=
   match σ with
   | ⟨.float, _⟩
@@ -14,7 +16,7 @@ def FloatAsReal.zero {σ : TensorType} : FloatAsReal σ :=
 instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
 
 def FloatAsReal.get {s : List ℕ} {R : Type} [Zero R]
-  (x : Tensor R s) (indices : DList FloatAsReal (List.replicate s.length ⟨.int, []⟩)) : R :=
+  (x : Tensor R s) (indices : ArgList (List.replicate s.length ⟨.int, []⟩)) : R :=
   match s with
   | [] => x
   | s₀ :: _ =>
@@ -25,7 +27,7 @@ def FloatAsReal.get {s : List ℕ} {R : Type} [Zero R]
       FloatAsReal.get (x (Fin.intCast i₀)) i
 
 def FloatAsReal.gather {α : DType} {s s' : List ℕ}
-  (args : DList FloatAsReal (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩))
+  (args : ArgList (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩))
   : FloatAsReal ⟨α, s'⟩ :=
   let (.cons x indices) := args
   match α with
@@ -37,12 +39,42 @@ def FloatAsReal.gather {α : DType} {s s' : List ℕ}
       let indices := feed i₀ indices
       FloatAsReal.gather (.cons x indices)
 where feed {n : ℕ} {s₀ : ℕ} {s : List ℕ} (i₀ : Fin s₀) :
-  DList FloatAsReal (List.replicate n ⟨.int, s₀ :: s⟩) →
-  DList FloatAsReal (List.replicate n ⟨.int, s⟩) :=
+  ArgList (List.replicate n ⟨.int, s₀ :: s⟩) →
+  ArgList (List.replicate n ⟨.int, s⟩) :=
   match n with
   | 0 => id
   | _ + 1 => fun (.cons a₀ as) => .cons (a₀ i₀) <| feed i₀ as
 
+instance (s : Shape) : DecidableEq (ValidIdx s) :=
+  inferInstanceAs (DecidableEq (∀ i : Fin s.length, Fin s[i]))
+
+def FloatAsReal.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Tensor R [n])
+  (indices : ArgList (List.replicate s.length ⟨.int, [n]⟩)) :
+    Tensor R s :=
+  let rec get_indices {l m : ℕ} (is : ArgList (List.replicate m ⟨.int, [l]⟩)) :
+    Fin m → Fin l → ℤ :=
+    match m with
+    | 0 => fun r => nomatch r
+    | m + 1 => fun r =>
+      let (.cons i₀ is) := is
+      match r with
+      | 0 => i₀
+      | .mk (r + 1) hr => get_indices is <| .mk r <| by linarith
+  let indices := get_indices indices
+  if h : ∀ i : Fin s.length, s[i] ≠ 0 then
+    let indices : Fin n → ValidIdx s := fun i r =>
+      have : NeZero s[r] := ⟨h r⟩
+      Fin.intCast (indices r i)
+    let rec update {n : ℕ} (indices : Fin n → ValidIdx s) (x : Tensor R s) (y : Fin n → R) :
+      Tensor R s :=
+      match n with
+      | 0 => x
+      | n + 1 =>
+        let x := Tensor.of (Function.update x.get (indices 0) (y 0))
+        update (Fin.tail indices) x (Fin.tail y)
+    update indices x y
+  else
+    x
 
 noncomputable instance : TensorImpl FloatAsReal where
   ofNat i := Int.ofNat i
@@ -86,6 +118,7 @@ noncomputable instance : TensorImpl FloatAsReal where
       Tensor.uncurry' <|
         x.curry'.map fun (x : Fin _ → ℝ) i =>
           ((List.ofFn x).mergeSort).get <| i.cast <| by simp
+  | .scatter => fun (.cons x (.cons y indices)) => by sorry
     --match α with
     --| .float =>
     --  match s with
