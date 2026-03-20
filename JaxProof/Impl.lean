@@ -120,6 +120,8 @@ noncomputable instance : TensorImpl FloatAsReal where
           ((List.ofFn x).mergeSort).get <| i.cast <| by simp
   | .scatter (α := α) => fun (.cons x (.cons y indices)) =>
     match α with | .int | .float => FloatAsReal.scatter x y indices
+  | .iota => fun _ => fun i => (i.val : ℤ)
+  | .zeros => 0
     --match α with
     --| .float =>
     --  match s with

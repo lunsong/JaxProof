@@ -80,10 +80,11 @@ inductive Op : List TensorType → TensorType → Type where
     Op (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
   | scatter {α : DType} {s : Shape} {n : ℕ} :
     Op (⟨α, s⟩ :: ⟨α, [n]⟩ :: List.replicate s.length ⟨.int, [n]⟩) ⟨α, s⟩
-  | iota (n : ℕ) : Op [] ⟨.int, [n]⟩
+  | iota {n : ℕ} : Op [] ⟨.int, [n]⟩
   | mul {σ : TensorType} : Op [σ, σ] σ
   | mod {σ : TensorType} : Op [σ, σ] σ
   | div_int {σ : TensorType} : Op [σ, σ] σ
+  | zeros {σ : TensorType} : Op [] σ
   --| neg {σ : TensorType} : Op [σ] σ
   --| lt : Op (some 2)
   --| select : Op (some 3)
@@ -100,6 +101,9 @@ def Op.reprType : ℕ∞ → Type
   | none => List String → String
   | some n => curryType String n
 
+instance : ToString DType where
+  toString x := match x with | .float => "float" | .int => "int"
+
 def Op.toString {args : List TensorType} {out : TensorType} : Op args out → String
   | add => "add"
   | cos => "cos"
@@ -109,6 +113,9 @@ def Op.toString {args : List TensorType} {out : TensorType} : Op args out → St
     let σ : List ℕ := List.ofFn fun i => σ i
     s!"transpose {σ}"
   | dot_general batch contract lhs rhs => s!"dot_general {contract.length} {batch.length}"
+  | scatter => "scatter"
+  | zeros (σ := σ) => s!"zeros {σ.dtype} {σ.shape}"
+  | iota (n := n) => s!"iota {n}"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
