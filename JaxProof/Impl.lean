@@ -118,7 +118,8 @@ noncomputable instance : TensorImpl FloatAsReal where
       Tensor.uncurry' <|
         x.curry'.map fun (x : Fin _ → ℝ) i =>
           ((List.ofFn x).mergeSort).get <| i.cast <| by simp
-  | .scatter => fun (.cons x (.cons y indices)) => by sorry
+  | .scatter (α := α) => fun (.cons x (.cons y indices)) =>
+    match α with | .int | .float => FloatAsReal.scatter x y indices
     --match α with
     --| .float =>
     --  match s with
