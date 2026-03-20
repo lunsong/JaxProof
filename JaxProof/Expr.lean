@@ -78,6 +78,8 @@ inductive Op : List TensorType → TensorType → Type where
   --| fft {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   | gather {α : DType} {s s' batch: Shape} :
     Op (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
+  | scatter {α : DType} {s : Shape} {n : ℕ} :
+    Op (⟨α, s⟩ :: ⟨α, [n]⟩ :: List.replicate s.length ⟨.int, [n]⟩) ⟨α, s⟩
   | iota (n : ℕ) : Op [] ⟨.int, [n]⟩
   | mul {σ : TensorType} : Op [σ, σ] σ
   | mod {σ : TensorType} : Op [σ, σ] σ
