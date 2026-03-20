@@ -17,95 +17,57 @@ theorem inv_def (n : ℕ) (σ : Equiv.Perm (Fin n)) :
   match n with
   | 0 => by
     intro x y
-    simp [inv, Jax.ExprGroup.eval]
+    simp [Jax.ExprGroup.eval, inv]
     ext i
     nomatch i
-  | 1 => by
+  | n + 1 => by
     intro x y
-    simp [inv, Jax.ExprGroup.eval]
-    ext i
-    cases (show i = 0 by omega)
-    simp [Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval, Jax.FloatAsReal.scatter,
-      Jax.FloatAsReal.scatter.update, Jax.Tensor.of, Jax.Tensor.get, Function.update]
-    split
-    · change x 0 = y 0
-      simp [x, y]
-    · rename_i h
-      contrapose! h
-      apply funext
-      intro i
-      match i with
-      | 0 => rfl
-  | n + 2 =>
-    let pivot : Fin (n + 1) := if h : σ 0 = 0 then 0 else (σ 0).pred h
-    let f : Fin (n + 1) → Fin (n + 1) := fun i => Fin.predAbove pivot (σ i.succ)
-    have helper (i : Fin (n + 1)) : σ i.succ ≠ σ 0 := by
-      intro h
-      have := σ.injective h
-      simp at this
-    let f_inv : Fin (n + 1) → Fin (n + 1) := fun i =>
-      let j := σ.symm (Fin.succAbove (σ 0) i)
-      j.pred <| by
-        simp only [j]
-        nth_rw 2 [show 0 = σ.symm (σ 0) by simp]
-        intro h
-        have := σ.symm.injective h
-        simp at this
-    let σ' : Equiv.Perm (Fin (n + 1)) := {
-      toFun := f
-      invFun := f_inv
-      left_inv x := by
-        simp [f, f_inv, pivot]
-        split_ifs with h
-        · simp[h, h ▸ helper x]
-        · conv_lhs =>
-            arg 1; arg 2; arg 1
-            equals ((σ 0).pred h).succ => simp
-          simp only [Fin.succ_succAbove_predAbove (p := (σ 0).pred h) (i := σ x.succ) (by simp)]
+    simp [inv, Jax.ExprGroup.eval, Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval]
+    let ι : Jax.FloatAsReal ⟨.int, [n + 1]⟩ := Jax.Expr.eval Jax.FloatAsReal (Jax.DList.cons x Jax.DList.nil) Jax.iota
+    change Jax.FloatAsReal.scatter (s := [n + 1]) 0 x *[ι] = y
+    --have : σ ∈ (⊤ : Submonoid (Equiv.Perm (Fin (n + 1)))) := by simp
+    --rw [← Equiv.Perm.mclosure_swap_castSucc_succ] at this
+    --refine Submonoid.closure_induction  ?_ ?_ ?_ this
+    simp [Jax.FloatAsReal.scatter]
+    conv_lhs =>
+      arg 1; intro i r
+      arg 1
+      simp [Jax.FloatAsReal.scatter.get_indices]
+      rw [show r = 0 by omega]
+      simp
+
+    let fn {n : ℕ} (x ι : Fin (n + 1) → ℤ) : Fin (n + 1) → ℤ :=
+      let ι' : Fin (n + 1) → Jax.ValidIdx [n + 1] := fun i r =>
+        have : NeZero [n + 1][r.val] := .mk <| by simp
+        Fin.intCast (ι i)
+      Jax.FloatAsReal.scatter.update ι' 0 x
+    change fn x ι = y
+
+    let z : Fin (n + 1) → ℤ := fun i => σ.symm i
+
+    suffices h1 : ∀ σ : Equiv.Perm (Fin (n + 1)), ∀ (x ι : Fin (n + 1) → ℤ),
+      fn (x ∘ σ) (ι ∘ σ) = fn x ι by
+      specialize h1 σ.symm x ι
+      conv_lhs at h1 =>
+        conv =>
+          arg 1
+          change fun i => σ (σ.symm i)
           simp
-      right_inv x := by
-        simp [f, f_inv, pivot]
-        split_ifs with h
-        · simp [h]
-        · simp [Fin.pred, Fin.predAbove, Fin.succAbove]
-          split_ifs with h1 h2 <;> omega
-
-
-    }
+        arg 2
+        change fun i => σ.symm i
+      rw [← h1]
+      suffices h2 : ∀ n, ∀ x : Fin (n + 1) → ℤ, fn (fun i => i) x = x by
+        rw [h2]
+        rfl
+      intro n
+      induction n with
+      | zero =>
+        intro x
+        simp [fn]
+        ext i
     sorry
-
-        
-
-      
-
-    
---  intro x y
---  simp [inv, Jax.ExprGroup.eval, Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval]
---  let ι : Jax.FloatAsReal ⟨.int, [n]⟩ := Jax.Expr.eval Jax.FloatAsReal (Jax.DList.cons x Jax.DList.nil) Jax.iota
---  change Jax.FloatAsReal.scatter (s := [n]) 0 x *[ι] = y
---  revert σ 
---  induction n with
---  | zero =>
---    intro σ x y ι
---    simp [Jax.FloatAsReal.scatter]
---    ext i
---    nomatch i
---
---  | succ n ih =>
---    intro σ x y ι
---    simp [Jax.FloatAsReal.scatter]
---    conv_lhs =>
---      arg 1; intro i r; arg 1
---      rw [show r = 1 by omega]
---      change i.val
---    simp [Jax.FloatAsReal.scatter.update]
---    conv at ih =>
---      intro σ x y ι
---      simp [Jax.FloatAsReal.scatter]
-
-
-      
-
+    --have h1 (σ : Equiv.Perm (Fin (n + 1))) (x ι : Fin (n + 1) → ℤ) :
+    --  fn (x ∘ σ) (ι ∘ σ) = (fn x ι) ∘ σ := sorry
 
 
 
