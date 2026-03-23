@@ -48,31 +48,31 @@ where feed {n : ℕ} {s₀ : ℕ} {s : List ℕ} (i₀ : Fin s₀) :
 instance (s : Shape) : DecidableEq (ValidIdx s) :=
   inferInstanceAs (DecidableEq (∀ i : Fin s.length, Fin s[i]))
 
+def DList.unfold_replicate {α : Type} {γ : α → Type} {n : ℕ} {a : α} :
+    DList γ (List.replicate n a) → Fin n → γ a :=
+  match n with
+  | 0 => fun _ i => nomatch i
+  | n + 1 => fun xs i =>
+    let (.cons x xs) := xs
+    match i with
+    | 0 => x
+    | .mk (i + 1) h => xs.unfold_replicate <| .mk i <| by omega
+
+def ValidIdx.intCast {s : Shape} (h : ∀ i : Fin s.length, s[i] ≠ 0) (idx : Fin s.length → ℤ) :
+    ValidIdx s :=
+  fun r =>
+    have : NeZero s[r] := ⟨h r⟩
+    Fin.intCast (idx r)
+
 def FloatAsReal.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Tensor R [n])
   (indices : ArgList (List.replicate s.length ⟨.int, [n]⟩)) :
     Tensor R s :=
-  let rec get_indices {l m : ℕ} (is : ArgList (List.replicate m ⟨.int, [l]⟩)) :
-    Fin m → Fin l → ℤ :=
-    match m with
-    | 0 => fun r => nomatch r
-    | m + 1 => fun r =>
-      let (.cons i₀ is) := is
-      match r with
-      | 0 => i₀
-      | .mk (r + 1) hr => get_indices is <| .mk r <| by linarith
-  let indices := get_indices indices
   if h : ∀ i : Fin s.length, s[i] ≠ 0 then
-    let indices : Fin n → ValidIdx s := fun i r =>
-      have : NeZero s[r] := ⟨h r⟩
-      Fin.intCast (indices r i)
-    let rec update {n : ℕ} (indices : Fin n → ValidIdx s) (x : Tensor R s) (y : Fin n → R) :
-      Tensor R s :=
-      match n with
-      | 0 => x
-      | n + 1 =>
-        let x := Tensor.of (Function.update x.get (indices 0) (y 0))
-        update (Fin.tail indices) x (Fin.tail y)
-    update indices x y
+    let indices := (ValidIdx.intCast h) ∘ (Function.swap indices.unfold_replicate)
+    Tensor.of fun idx =>
+      match Fin.find? (fun i => idx = indices i) with
+      | none => x.get idx
+      | some i => y i
   else
     x
 

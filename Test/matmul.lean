@@ -15,7 +15,8 @@ def matmul {n m l : ℕ} :=
 
 example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
     matmul.eval Jax.FloatAsReal *[x, y] = *[x * y] := by
-  simp [matmul, Jax.ExprGroup.eval]
+  simp only [matmul, List.length_cons, List.length_nil, Nat.reduceAdd, List.formPerm_cons_cons,
+    List.formPerm_singleton, Jax.ExprGroup.eval, Jax.DList.cons.injEq, and_true]
   apply funext
   intro i
   apply funext

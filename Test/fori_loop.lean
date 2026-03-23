@@ -20,14 +20,14 @@ def fn (m n : ℕ) :=
 
 example (m n : ℕ) (x : Fin n → ℝ) :
     ((fn m n).eval Jax.FloatAsReal) *[x] = *[x ^ (2 ^ m)] := by
-  simp [Jax.ExprGroup.eval, fn]
+  simp only [fn, Fin.isValue, Jax.ExprGroup.eval, List.cons_append, List.nil_append, List.append_eq]
   induction m with
   | zero =>
     simp [Jax.Expr.eval]
     rfl
   | succ m ih =>
     simp only [Fin.isValue, ih, Jax.DList.cons.injEq, and_true]
-    simp [Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval]
+    simp only [Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval]
     rw [pow_add, pow_one, pow_mul, pow_two]
     rfl
 

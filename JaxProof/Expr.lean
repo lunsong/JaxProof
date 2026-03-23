@@ -286,31 +286,34 @@ syntax "let" ident ":=" term ";" expr_builder : expr_builder
 syntax "return" term,* : expr_builder
 syntax "fori_loop" term "," term "," term "," term : expr_builder
 
+open Lean in
+partial def parse_expr_builder (arglist : TSyntax `term) :
+    TSyntax `expr_builder → MacroM (TSyntax `term)
+  | `(expr_builder| let_expr $name : $dtype $shape := $val; $content) => do
+    `(term| let $name : Expr $arglist ⟨.$dtype, $shape⟩ := $val;
+            $(← parse_expr_builder arglist content))
+  | `(expr_builder| let $name : $type := $val; $content) => do
+    `(term| let $name : $type := $val; $(← parse_expr_builder arglist content))
+  | `(expr_builder| let $name := $val; $content) => do
+    `(term| let $name := $val; $(← parse_expr_builder arglist content))
+  | `(expr_builder| return $[$rets],*) => do
+    let ⟨rets⟩ := rets
+    let rec parse_rets : List (TSyntax `term) → MacroM (TSyntax `term)
+    | [] => `(term| ExprGroup.nil)
+    | x :: xs => do `(term| ExprGroup.cons $x $(← parse_rets xs))
+    parse_rets rets
+  | `(expr_builder| fori_loop $n, $fn , $init , $aux) =>
+    `(term| ExprGroup.fori_loop $n $fn $init $aux)
+  | _ => Macro.throwUnsupported
+
 open Lean in macro_rules
   | `(xla with $[$argnames : $argdtypes $argshapes],*
       returns $[$retdtypes $retshapes],*
       begin $content) => do
     let arglist : TSyntax `term ← `(term| [ $[⟨.$argdtypes, $argshapes⟩],* ])
     let retlist : TSyntax `term ← `(term| [ $[⟨.$retdtypes, $retshapes⟩],* ])
-    let rec parse : TSyntax `expr_builder → MacroM (TSyntax `term)
-    | `(expr_builder| let_expr $name : $dtype $shape := $val; $content) => do
-      `(term| let $name : Expr $arglist ⟨.$dtype, $shape⟩ := $val; $(← parse content))
-    | `(expr_builder| let $name : $type := $val; $content) => do
-      `(term| let $name : $type := $val; $(← parse content))
-    | `(expr_builder| let $name := $val; $content) => do
-      `(term| let $name := $val; $(← parse content))
-    | `(expr_builder| return $[$rets],*) => do
-      let ⟨rets⟩ := rets
-      let rec parse_rets : List (TSyntax `term) → MacroM (TSyntax `term)
-      | [] => `(term| ExprGroup.nil)
-      | x :: xs => do `(term| ExprGroup.cons $x $(← parse_rets xs))
-      parse_rets rets
-    --  `(term| ( ⟨ $rets,* , () ⟩ : Exprs $arglist $retlist))
-    | `(expr_builder| fori_loop $n, $fn , $init , $aux) =>
-      `(term| ExprGroup.fori_loop $n $fn $init $aux)
-    | _ => Macro.throwUnsupported
     let argId : Array (TSyntax `term) := Array.ofFn fun (i : Fin argnames.size) => quote i.val
-    let parsed : TSyntax `term ← parse content
+    let parsed : TSyntax `term ← parse_expr_builder arglist content
     let args : List (TSyntax `ident × TSyntax `ident × TSyntax `term × TSyntax `term) :=
       Array.toList <| argnames.zip <| argdtypes.zip <| argshapes.zip <| argId
     let rec bind_args :
@@ -319,9 +322,6 @@ open Lean in macro_rules
     | [] => return parsed
     | ⟨name, dtype, shape, id⟩ :: args =>
       do `(let $name : Expr $arglist ⟨.$dtype, $shape⟩ := .arg $id; $(← bind_args args))
-    --`(def $funName : Exprs $arglist $retlist := $(← bind_args args))
-    --`(def $funName $[($params* : $paramtype)]* : ExprGroup $arglist $retlist :=
-    --  Exprs.toExprGroup <| $(← bind_args args))
     `(term| ( $(← bind_args args) : ExprGroup $arglist $retlist) )
 
 end Jax

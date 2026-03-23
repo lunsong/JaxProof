@@ -166,19 +166,19 @@ def _root_.Fin.mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) : Fin (n * m) :=
 
 @[simp]
 theorem _root_.Fin.divNat_mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) : (i.mulAdd j).divNat = i := by
-  simp [Fin.mulAdd, Fin.divNat, ← Fin.val_eq_val]
+  simp only [Fin.divNat, Fin.mulAdd, ← Fin.val_eq_val]
   have : 0 < m := Nat.zero_lt_of_lt j.isLt
   rw [mul_comm _ m, Nat.mul_add_div this, (Nat.div_eq_zero_iff_lt this).mpr j.isLt, add_zero]
 
 @[simp]
 theorem _root_.Fin.modNat_mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) : (i.mulAdd j).modNat = j := by
-  simp [Fin.mulAdd, Fin.modNat, ← Fin.val_eq_val]
+  simp only [Fin.modNat, Fin.mulAdd, Nat.mul_add_mod_self_right, ← Fin.val_eq_val]
   exact Nat.mod_eq_of_lt j.isLt
 
 @[simp]
 theorem _root_.Fin.mulAdd_divNat_modNat {n m : ℕ} (i : Fin (n * m)) :
     i.divNat.mulAdd i.modNat = i := by
-  simp [Fin.mulAdd, ← Fin.val_eq_val]
+  simp only [Fin.mulAdd, Fin.coe_divNat, Fin.coe_modNat, ← Fin.val_eq_val]
   exact Nat.div_add_mod' i.val m
 
 def Tensor.unflatten (s : List ℕ) : (Fin s.prod → R) → Tensor R s :=
@@ -191,7 +191,7 @@ theorem Tensor.flatten_unflatten (s : List ℕ) (x : Fin s.prod → R) :
     (Tensor.unflatten s x).flatten = x := by
   induction s with
   | nil =>
-    simp [unflatten, flatten]
+    simp only [List.prod_nil, flatten, unflatten, Fin.isValue]
     ext i
     fin_cases i
     simp
@@ -293,7 +293,9 @@ def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0)
   | s₀ :: s => fun x i₀ ↦
     have : NeZero s₀ := ⟨by simp [hs]⟩
     let i₀' : Tensor (Fin s₀) s' := i₀.map Fin.intCast
-    batchGet_to_batchGetInt (by simp at hs; exact hs.2) (x i₀')
+    batchGet_to_batchGetInt
+      (by simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at hs; exact hs.2)
+      (x i₀')
 
 def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
 
@@ -314,6 +316,39 @@ def Tensor.of {s : List ℕ} : (Jax.ValidIdx s → R) → Tensor R s :=
       x i
     Tensor.of x'
 
+@[simp]
+theorem Tensor.get_of {s : List ℕ} {x : Jax.ValidIdx s → R} : (Tensor.of x).get = x := by
+  ext i
+  induction s with
+  | nil =>
+    simp only [get, of, List.length_nil, List.get_eq_getElem]
+    congr
+    apply funext
+    intro r
+    nomatch r
+  | cons s₀ s ih =>
+    simp only [get, of, List.length_cons, List.get_eq_getElem, Fin.zero_eta, ih, Fin.succ_mk]
+    congr
+    conv_lhs =>
+      intro r
+      equals i r =>
+        match r with
+        | 0 => rfl
+        | .mk (_ + 1) _ => rfl
+
+@[simp]
+theorem Tensor.of_get {s : List ℕ} {x : Tensor R s} : Tensor.of x.get = x := by
+  induction s with
+  | nil => rfl
+  | cons s₀ s ih =>
+    simp only [of, get, List.length_cons, List.get_eq_getElem]
+    conv_lhs =>
+      intro i₀; arg 1
+      equals (x i₀).get =>
+        ext is
+        congr
+    simp [ih]
+
 def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     Tensor R s → Tensor R (List.ofFn fun i ↦ s.get (σ i)) :=
   fun x ↦ Tensor.of fun i ↦ x.get fun μ ↦ 
@@ -325,9 +360,14 @@ instance [Div R] (s : List ℕ) : Div (Tensor R s) where div := Tensor.map₂ (�
 
 example (n m l : ℕ) (A : Matrix (Fin n) (Fin m) ℝ) (B : Matrix (Fin m) (Fin l) ℝ) :
     Tensor.einsum [m, n, l] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
-  simp 
+  simp only [List.drop_succ_cons, List.drop_zero, List.length_cons, List.length_nil, Nat.reduceAdd,
+    Fin.mk_one, Fin.isValue, Fin.zero_eta, Fin.reduceFinMk] 
   ext i j
-  simp [Tensor.einsum, Tensor.einprod, Matrix.mul_apply]
+  simp only [Tensor.einsum, Tensor.sumN, Tensor.sumFirst, Tensor.einprod, List.length_nil,
+    List.map_nil, List.length_cons, Nat.reduceAdd, Fin.isValue, List.map_cons, filter_pred,
+    Fin.zero_eta, Tensor.einprod.filter, List.get_eq_getElem, Fin.coe_ofNat_eq_mod, Nat.zero_mod,
+    List.getElem_cons_zero, Fin.mk_one, Nat.reduceMod, List.getElem_cons_succ, List.prod_cons,
+    List.prod_nil, mul_one, List.tail_cons, Matrix.mul_apply]
   conv_lhs =>
     change (∑ k, fun i j ↦ A i k * B k j) i j
   simp [Finset.sum_apply]
@@ -350,7 +390,11 @@ noncomputable def softmax {n₁ n₂ : ℕ} (x : Tensor ℝ [n₁, n₂]) : Tens
 
 example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
     softmax x i j = x i j / ∑ k, x i k := by
-  simp [softmax, Tensor.map₂, Tensor.broadcast, Tensor.einsum, Tensor.einprod]
+  simp only [softmax, Tensor.broadcast, Tensor.einsum, Tensor.sumN, Tensor.sumFirst, Tensor.einprod,
+    List.length_nil, List.map_nil, List.length_cons, Nat.reduceAdd, Fin.mk_one, Fin.isValue,
+    Fin.zero_eta, List.map_cons, filter_pred, Tensor.einprod.filter, List.get_eq_getElem,
+    Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, List.prod_cons, List.prod_nil,
+    mul_one, List.tail_cons, id_eq, div_def, Tensor.map₂]
   apply congrArg
   conv_lhs =>
     change (∑ j, fun i ↦ x i j) i
