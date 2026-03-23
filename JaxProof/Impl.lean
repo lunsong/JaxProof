@@ -91,9 +91,13 @@ noncomputable instance : TensorImpl FloatAsReal where
   | .mul => fun *[x, y] => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· * ·) x y
+  | .div => fun *[x, y] => match out with
+    | ⟨.float, _⟩
+    | ⟨.int, _⟩ => Tensor.map₂ (· / ·) x y
   | .sum (α := α) n => fun *[x] => match α with
     | .float
     | .int => x.sumN n
+  | .sqrt => fun *[x] => x.map Real.sqrt
   | .transpose (α := α) σ => fun *[x] => match α with
     | .float | .int => x.transpose σ
   | .broadcast (α := α) s => fun *[x] => match α with

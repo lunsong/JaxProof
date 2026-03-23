@@ -85,6 +85,7 @@ inductive Op : List TensorType → TensorType → Type where
   | mod {σ : TensorType} : Op [σ, σ] σ
   | div_int {σ : TensorType} : Op [σ, σ] σ
   | zeros {σ : TensorType} : Op [] σ
+  | sqrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
   --| neg {σ : TensorType} : Op [σ] σ
   --| lt : Op (some 2)
   --| select : Op (some 3)
@@ -116,6 +117,10 @@ def Op.toString {args : List TensorType} {out : TensorType} : Op args out → St
   | scatter => "scatter"
   | zeros (σ := σ) => s!"zeros {σ.dtype} {σ.shape}"
   | iota (n := n) => s!"iota {n}"
+  | sum n => s!"sum {n}"
+  | broadcast s => s!"braodcast {s.map Prod.snd}"
+  | div => "div"
+  | sqrt => "sqrt"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
