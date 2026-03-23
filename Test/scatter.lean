@@ -1,6 +1,6 @@
 import JaxProof
 
-def inv {n : ℕ} :=
+def inv_permutation {n : ℕ} :=
   xla with
     x : int [n]
   returns
@@ -8,27 +8,28 @@ def inv {n : ℕ} :=
   begin
     return .bind .scatter *[0, Jax.iota, x]
 
-#eval IO.println (inv (n := 10)).code
+#eval IO.println (inv_permutation (n := 10)).code
 
-theorem inv_def (n : ℕ) (σ : Equiv.Perm (Fin n)) :
+example (n : ℕ) (σ : Equiv.Perm (Fin n)) :
     let x : Jax.FloatAsReal ⟨.int, [n]⟩ := (Int.ofNat ∘ Fin.val ∘ σ);
     let y : Jax.FloatAsReal ⟨.int, [n]⟩ := (Int.ofNat ∘ Fin.val ∘ σ.symm);
-    inv.eval _ *[x] = *[y] :=
+    inv_permutation.eval _ *[x] = *[y] :=
   match n with
   | 0 => by
     intro x y
-    simp only [inv, List.length_cons, List.length_nil, Nat.reduceAdd, List.replicate_one,
-      List.replicate_zero, Fin.isValue, Jax.ExprGroup.eval, Jax.DList.cons.injEq, and_true]
+    simp only [inv_permutation, List.length_cons, List.length_nil, Nat.reduceAdd,
+      List.replicate_one, List.replicate_zero, Fin.isValue, Jax.ExprGroup.eval,
+      Jax.DList.cons.injEq, and_true]
     ext i
     nomatch i
   | n + 1 => by
     intro x y
-    simp only [inv, List.length_cons, List.length_nil, Nat.reduceAdd, List.replicate_one,
-      List.replicate_zero, Fin.isValue, Jax.ExprGroup.eval, Jax.Expr.eval, Jax.TensorImpl.impl,
-      Jax.Expr.eval.recursive_eval, Pi.zero_apply, Jax.FloatAsReal.scatter, Fin.getElem_fin,
-      Fin.val_eq_zero, List.getElem_cons_zero, ne_eq, Nat.add_eq_zero_iff, one_ne_zero, and_false,
-      not_false_eq_true, implies_true, ↓reduceDIte, Function.comp_apply, Jax.DList.cons.injEq,
-      and_true]
+    simp only [inv_permutation, List.length_cons, List.length_nil, Nat.reduceAdd,
+      List.replicate_one, List.replicate_zero, Fin.isValue, Jax.ExprGroup.eval,
+      Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval, Pi.zero_apply,
+      Jax.FloatAsReal.scatter, Fin.getElem_fin, Fin.val_eq_zero, List.getElem_cons_zero,
+      ne_eq, Nat.add_eq_zero_iff, one_ne_zero, and_false, not_false_eq_true, implies_true,
+      ↓reduceDIte, Function.comp_apply, Jax.DList.cons.injEq, and_true]
     rw [← Jax.Tensor.of_get (x := y)]
     congr
     ext idx
