@@ -54,7 +54,6 @@ theorem normalize_def (n : ℕ) (x : Fin n → ℝ) :
     change x i
   conv_lhs =>
     arg 2
-    change Jax.DList.get 0 (norm_xla_verion.eval Jax.FloatAsReal *[x])
     rw [norm_def]
     change norm x
   rfl

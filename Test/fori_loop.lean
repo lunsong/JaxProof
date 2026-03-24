@@ -2,19 +2,19 @@ import JaxProof
 
 def fn (m n : ℕ) :=
   xla with
-  x : float [n]
-  returns
-  float [n]
-  begin
-  let loop_fn :=
-    xla with
-    i : int [],
     x : float [n]
-    returns
+  returns
     float [n]
-    begin
-    return .bind .mul *[x, x];
-  fori_loop m, loop_fn, (.cons x .nil), .nil
+  begin
+    let loop_fn :=
+      xla with
+        i : int [],
+        x : float [n]
+      returns
+        float [n]
+      begin
+        return .bind .mul *[x, x];
+    fori_loop m, loop_fn, (.cons x .nil), .nil
 
 #eval IO.println (fn 2 3).code
 
