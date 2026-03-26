@@ -26,6 +26,16 @@ def normalize_xla_verion {n : ℕ} :=
   Jax.ExprGroup.apply f₀ f₁
 
 #eval IO.println (normalize_xla_verion (n := 12)).pretty_print
+/-
+%0: mul $0 $0
+%1: sum 1 %0
+%2: sqrt %1
+return apply(@0, $0, %2, )
+@0:
+%0: braodcast [false] $1
+%1: div $0 %0
+returns %1, 
+-/
 
 noncomputable def norm {n : ℕ} (x : Fin n → ℝ) : ℝ := √(∑ i, (x i)^2)
 

@@ -8,7 +8,14 @@ def inv_permutation {n : ℕ} :=
   begin
     return .bind .scatter *[0, Jax.iota, x]
 
-#eval IO.println (inv_permutation (n := 10)).code
+#eval IO.println (inv_permutation (n := 10)).pretty_print
+/-
+%0: const int [10] 0 
+%1: iota 10 
+%2: scatter %0 %1 $0
+return %2, 
+-/
+
 
 example (n : ℕ) (σ : Equiv.Perm (Fin n)) :
     let x : Jax.FloatAsReal ⟨.int, [n]⟩ := (Int.ofNat ∘ Fin.val ∘ σ);
