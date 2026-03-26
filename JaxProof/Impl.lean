@@ -78,6 +78,7 @@ def FloatAsReal.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : T
 
 noncomputable instance : TensorImpl FloatAsReal where
   ofNat i := Int.ofNat i
+  toInt x := x
   impl {args} {out} op := match op with
   | .abs => fun *[x] => match out with
     | ⟨.float, _⟩
@@ -126,6 +127,17 @@ noncomputable instance : TensorImpl FloatAsReal where
     match α with | .int | .float => FloatAsReal.scatter x y indices
   | .iota => fun _ => fun i => (i.val : ℤ)
   | .zeros => 0
+  | .choice (α := α) => fun *[c, x, y]=>
+    match α with | .int | .float => Tensor.map₃ (fun c x y => if c != 0 then x else y) c x y
+  | .cumsum (σ := σ) => fun *[x] =>
+    let ⟨α, s⟩ := σ
+    match α with | .int | .float => x.cumsum
+  | .ofNat (σ := ⟨α, s⟩) n => fun _ =>
+    match α with | .int | .float => Tensor.const n
+  | .neg (σ := ⟨α, s⟩) => fun *[x] =>
+    match α with | .int | .float => x.map (fun x => - x)
+  | .sub (σ := ⟨α, s⟩) => fun *[x, y] =>
+    match α with | .int | .float => Tensor.map₂ (fun x y => x - y) x y
     --match α with
     --| .float =>
     --  match s with

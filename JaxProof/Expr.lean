@@ -50,7 +50,7 @@ inductive Op : List TensorType → TensorType → Type where
   | cummax {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | cummin {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
   | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
-  | cumsum {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
+  | cumsum {σ : TensorType} : Op [σ] σ
   | div {σ : TensorType} : Op [σ, σ] σ
   | dot_general {α : DType} (batch contract lhs rhs: List ℕ) : 
     Op [⟨α, contract ++ batch ++ lhs⟩, ⟨α, contract ++ batch ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
@@ -86,7 +86,10 @@ inductive Op : List TensorType → TensorType → Type where
   | div_int {σ : TensorType} : Op [σ, σ] σ
   | zeros {σ : TensorType} : Op [] σ
   | sqrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  --| neg {σ : TensorType} : Op [σ] σ
+  | choice {α : DType} {s : Shape} : Op [⟨.int, s⟩, ⟨α, s⟩, ⟨α, s⟩] ⟨α, s⟩
+  | ofNat {σ : TensorType} (val : ℕ) : Op [] σ
+  | neg {σ : TensorType} : Op [σ] σ
+  | sub {σ : TensorType} : Op [σ, σ] σ
   --| lt : Op (some 2)
   --| select : Op (some 3)
   --| addIdx : Op (some 3)
@@ -121,6 +124,11 @@ def Op.toString {args : List TensorType} {out : TensorType} : Op args out → St
   | broadcast s => s!"braodcast {s.map Prod.snd}"
   | div => "div"
   | sqrt => "sqrt"
+  | cumsum => "cumsum"
+  | choice => "where"
+  | ofNat (σ := ⟨α, s⟩) n => s!"const {α} {s} {n}"
+  | neg => "neg"
+  | sub => "sub"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
@@ -169,8 +177,8 @@ inductive ExprGroup : List TensorType → List TensorType → Type where
     ExprGroup args outs → ExprGroup args outs' → ExprGroup args (outs ++ outs')
   | apply {xs ys zs : List TensorType} :
     ExprGroup xs ys → ExprGroup ys zs → ExprGroup xs zs
-  | fori_loop {args carry aux : List TensorType} (n : ℕ) :
-    ExprGroup (⟨.int, []⟩ :: carry ++ aux) carry
+  | fori_loop {args carry aux : List TensorType} :
+    ExprGroup (⟨.int, []⟩ :: carry ++ aux) carry → Expr args ⟨.int, []⟩
       → ExprGroup args carry → ExprGroup args aux → ExprGroup args carry
 
 abbrev Cached (α : Type) : Type := List (USize × α)
@@ -197,18 +205,18 @@ def complete_code (commands : Cached String) (outs : String) : String :=
 mutual
 
 unsafe def ExprGroup.insert {args outs : List TensorType}
-  (expr : ExprGroup args outs) : StateM (Cached String × Cached String) ℕ :=
+  (expr : ExprGroup args outs) : StateM (Cached String × Cached (String × List String)) ℕ :=
   fun ⟨commands, libs⟩ ↦
     match libs.findIdx? (fun x ↦ x.1 == ptrAddrUnsafe expr) with
     | some n => ⟨n, commands, libs⟩
     | none =>
       let ⟨expr_outs, expr_commands, libs⟩ := expr.genCode ⟨[], libs⟩
       ⟨libs.length, commands,
-       libs.concat ⟨ptrAddrUnsafe expr, complete_code expr_commands expr_outs⟩⟩
+        libs.concat ⟨ptrAddrUnsafe expr, expr_outs, expr_commands.map Prod.snd⟩⟩
 
 
 unsafe def ExprGroup.genCode {args outs : List TensorType} :
-    ExprGroup args outs → StateM (Cached String × Cached String) String
+    ExprGroup args outs → StateM (Cached String × Cached (String × List String)) String
   | nil => pure ""
   | cons x xs => fun ⟨commands, libs⟩ ↦
     let ⟨x, commands⟩ := x.genCode commands;
@@ -217,16 +225,31 @@ unsafe def ExprGroup.genCode {args outs : List TensorType} :
   | append x y => do return s!"{← x.genCode}, {← y.genCode}"
   | apply x f =>
     do return s!"apply(@{← f.insert}, {← x.genCode})"
-  | fori_loop n step_fn init aux =>
-    do return s!"fori_loop({n}, @{← step_fn.insert}, ({← init.genCode}), ({← aux.genCode}))"
+  | fori_loop step_fn n init aux =>
+    let n : ExprGroup args [⟨.int, []⟩] := .cons n .nil;
+    do return (
+    s!"fori_loop({← n.genCode}, @{← step_fn.insert}, ({← init.genCode}), ({← aux.genCode}))")
 
 end
 
 unsafe def ExprGroup.code {args outs : List TensorType} : ExprGroup args outs → String :=
   fun expr ↦
     let ⟨outs, commands, libs⟩ := expr.genCode ⟨[], []⟩
-    let main := complete_code commands outs
-    main ++ "\nwith\n" ++ "\n\n".intercalate (libs.map Prod.snd)
+    let main := "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
+    let libs := libs.map fun ⟨_, outs, commands⟩ =>
+      "\n".intercalate commands ++ "\nreturns " ++ outs
+    main ++ "\n" ++ "\n".intercalate libs
+
+unsafe def ExprGroup.pretty_print {args outs : List TensorType} : ExprGroup args outs → String :=
+  fun expr ↦
+    let ⟨outs, commands, libs⟩ := expr.genCode ⟨[], []⟩
+    let numberd_lines (symbol : ℕ → String) (x : List String) : String :=
+      let x := List.zip (List.ofFn fun (i : Fin x.length) => symbol i) x
+      "\n".intercalate (x.map fun ⟨x, y⟩ => x ++ y)
+    let main := numberd_lines (fun i => s!"%{i}: ") (commands.map Prod.snd) ++ "\nreturn " ++ outs
+    let libs := libs.map fun ⟨_, outs, commands⟩ =>
+      numberd_lines (fun i => s!"%{i}: ") commands ++ "\nreturns " ++ outs
+    main ++ "\n" ++ numberd_lines (fun i => s!"@{i}:\n") libs
 
 def Exprs (args : List TensorType) : List TensorType → Type
   | [] => Unit

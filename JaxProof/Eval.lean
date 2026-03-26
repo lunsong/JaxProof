@@ -25,6 +25,7 @@ def DList.map {α : Type} {γ γ' : α → Type} {a : List α} (f : {a : α} →
 
 class TensorImpl (tensor : TensorType → Type) where
   impl {args : List TensorType} {out : TensorType} : Op args out → DList tensor args → tensor out
+  toInt : tensor ⟨.int, []⟩ → ℤ
   ofNat : ℕ → tensor ⟨.int, []⟩
 
 def Expr.eval {args : List TensorType} {out : TensorType} (impl : TensorType → Type)
@@ -44,10 +45,12 @@ def ExprGroup.eval {args outs : List TensorType} (impl : TensorType → Type) [T
   | .cons e es => .cons (e.eval impl xs) (es.eval impl xs)
   | .apply x f => f.eval impl (x.eval impl xs)
   | .append x y => (x.eval impl xs).append (y.eval impl xs)
-  | .fori_loop (carry := carry) n step init aux =>
+  | .fori_loop (carry := carry) step n init aux =>
     let init := init.eval impl xs
     let aux := aux.eval impl xs
+    let n := n.eval impl xs
+    let n := TensorImpl.toInt n
     let f i (a : DList impl carry) := (step.eval impl) (.cons (TensorImpl.ofNat i) (a.append aux))
-    n.rec init f
+    n.natAbs.rec init f
 
 end Jax

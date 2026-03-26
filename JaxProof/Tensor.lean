@@ -141,6 +141,13 @@ def Tensor.sumN [AddCommMonoid R] {s : List ℕ} (n : ℕ) (x : Tensor R s) : Te
   | _ + 1, [] => x
   | n + 1, _ :: _ => sumN n x.sumFirst
 
+@[simp]
+def Tensor.cumsum [AddCommMonoid R] {s : List ℕ} (x : Tensor R s) : Tensor R s :=
+  match s with
+  | [] => x
+  | [_] => fun i => ∑ j with j ≤ i, x j
+  | _ :: _ :: _ => fun i => (x i).cumsum
+
 def Tensor.einsum [AddCommMonoid R] [Mul R] [One R] (s : List ℕ)
   (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get))) (nsum : ℕ) :
     Tensor R (s.drop nsum) :=
@@ -259,6 +266,12 @@ def Tensor.uncurry' {s s' : List ℕ} : Tensor (Tensor R s') s → Tensor R (s +
   match s with
   | [] => id
   | _ :: _ => fun x i => (x i).uncurry'
+
+def Tensor.map₃ {s : List ℕ} {α β γ μ : Type} (f : α → β → γ → μ) :
+    Tensor α s → Tensor β s → Tensor γ s → Tensor μ s :=
+  match s with
+  | [] => f
+  | _ :: _ => fun x y z i ↦ map₃ f (x i) (y i) (z i)
 
 def Tensor.map₂ {s : List ℕ} {α β γ : Type} (f : α → β → γ) :
     Tensor α s → Tensor β s → Tensor γ s :=

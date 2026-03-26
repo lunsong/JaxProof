@@ -25,7 +25,7 @@ def normalize_xla_verion {n : ℕ} :=
       return .bind .div *[x, norm_x]
   Jax.ExprGroup.apply f₀ f₁
 
-#eval IO.println (normalize_xla_verion (n := 12)).code
+#eval IO.println (normalize_xla_verion (n := 12)).pretty_print
 
 noncomputable def norm {n : ℕ} (x : Fin n → ℝ) : ℝ := √(∑ i, (x i)^2)
 
@@ -50,12 +50,8 @@ theorem normalize_def (n : ℕ) (x : Fin n → ℝ) :
   apply funext
   intro i
   conv_lhs =>
-    arg 1
-    change x i
-  conv_lhs =>
     arg 2
     rw [norm_def]
-    change norm x
   rfl
 
 end Example
