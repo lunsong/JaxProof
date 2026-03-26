@@ -13,7 +13,7 @@ def norm_xla_verion {n : ℕ} :=
     return .bind .sqrt *[x2_sumed]
 
 def normalize_xla_verion {n : ℕ} :=
-  let f₀ := Jax.ExprGroup.cons (Jax.Expr.arg 0) (norm_xla_verion (n := n))
+  let f₀ := Jax.ExprGroup.of *[Jax.Expr.arg 0, norm_xla_verion (n := n)]
   let f₁ :=
     xla with
       x : float [n],

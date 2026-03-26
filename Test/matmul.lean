@@ -11,7 +11,12 @@ def matmul {n m l : ℕ} :=
     let_expr z : float [n, l] := Jax.dot_general [] [m] [n] [l] x y;
     return z
 
-#eval IO.println (matmul (n:=10) (m:=20) (l:=30)).code
+#eval IO.println (matmul (n:=10) (m:=20) (l:=30)).pretty_print
+/-
+%0: transpose [1, 0] $0
+%1: dot_general 1 0 %0 $1
+return %1, 
+-/
 
 example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
     matmul.eval Jax.FloatAsReal *[x, y] = *[x * y] := by

@@ -170,16 +170,30 @@ inductive Expr (args : List TensorType) : TensorType → Type where
   | arg (i : Fin args.length) : Expr args args[i]
 
 inductive ExprGroup : List TensorType → List TensorType → Type where
-  | nil {args : List TensorType} : ExprGroup args []
-  | cons {args : List TensorType} {x : TensorType} {xs : List TensorType} :
-    Expr args x → ExprGroup args xs → ExprGroup args (x :: xs)
-  | append {args outs outs' : List TensorType} : 
-    ExprGroup args outs → ExprGroup args outs' → ExprGroup args (outs ++ outs')
+  | of {args outs : List TensorType} : DList (Expr args) outs → ExprGroup args outs
   | apply {xs ys zs : List TensorType} :
     ExprGroup xs ys → ExprGroup ys zs → ExprGroup xs zs
   | fori_loop {args carry aux : List TensorType} :
     ExprGroup (⟨.int, []⟩ :: carry ++ aux) carry → Expr args ⟨.int, []⟩
       → ExprGroup args carry → ExprGroup args aux → ExprGroup args carry
+
+def DList.get {α : Type} {γ : α → Type} {a : List α}
+    (i : Fin a.length) (x : DList γ a) : γ a[i] :=
+  match a with
+  | a :: as =>
+    match x with
+    | cons x xs =>
+      match i with
+      | .mk 0 _ => x
+      | .mk (n + 1) h => xs.get <| .mk n <| by simpa using h
+
+def ExprGroup.get {args outs : List TensorType} (i : Fin outs.length) :
+    ExprGroup args outs → Expr args outs[i]
+  | .of xs =>
+    xs.get i
+  | .apply x y =>
+    let y' := ExprGroup.of *[y.get i]
+    let z := ExprGroup.
 
 abbrev Cached (α : Type) : Type := List (USize × α)
 
@@ -217,16 +231,15 @@ unsafe def ExprGroup.insert {args outs : List TensorType}
 
 unsafe def ExprGroup.genCode {args outs : List TensorType} :
     ExprGroup args outs → StateM (Cached String × Cached (String × List String)) String
-  | nil => pure ""
-  | cons x xs => fun ⟨commands, libs⟩ ↦
+  | .of .nil => pure ""
+  | .of (.cons x xs) => fun ⟨commands, libs⟩ ↦
     let ⟨x, commands⟩ := x.genCode commands;
-    let ⟨xs, commands, libs⟩ := xs.genCode ⟨commands, libs⟩
+    let ⟨xs, commands, libs⟩ := (ExprGroup.of xs).genCode ⟨commands, libs⟩
     ⟨s!"{x}, {xs}", commands, libs⟩
-  | append x y => do return s!"{← x.genCode}, {← y.genCode}"
   | apply x f =>
     do return s!"apply(@{← f.insert}, {← x.genCode})"
   | fori_loop step_fn n init aux =>
-    let n : ExprGroup args [⟨.int, []⟩] := .cons n .nil;
+    let n : ExprGroup args [⟨.int, []⟩] := .of *[n];
     do return (
     s!"fori_loop({← n.genCode}, @{← step_fn.insert}, ({← init.genCode}), ({← aux.genCode}))")
 
@@ -251,38 +264,6 @@ unsafe def ExprGroup.pretty_print {args outs : List TensorType} : ExprGroup args
       numberd_lines (fun i => s!"%{i}: ") commands ++ "\nreturns " ++ outs
     main ++ "\n" ++ numberd_lines (fun i => s!"@{i}:\n") libs
 
-def Exprs (args : List TensorType) : List TensorType → Type
-  | [] => Unit
-  | σ :: σs => Expr args σ × Exprs args σs
-
-def Exprs.toExprGroup {args outs : List TensorType} : Exprs args outs → ExprGroup args outs :=
-  match outs with
-  | [] => fun _ ↦ .nil
-  | _ :: _ => fun ⟨x, xs⟩ ↦ .cons x xs.toExprGroup
-
-/-
-unsafe def Exprs.genCode {args outs : List TensorType} (exprs : Exprs args outs) :
-    StateM (List (USize × String)) String :=
-  match outs with
-  | [] => pure ""
-  | _ :: _ =>
-    let ⟨expr, exprs⟩ := exprs
-    do return s!"{← expr.genCode} {← exprs.genCode}"
-
-unsafe def Exprs.code {args outs : List TensorType} (exprs : Exprs args outs) :
-    String :=
-  let ⟨out, codes⟩ := exprs.genCode []
-  "\n".intercalate (codes.map Prod.snd) ++ "\nreturn " ++ out
-
-
-def fn : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
-  .unop .cos <| .binop (.concat (batch:=[3]) (n:=3) (m:=4) (axis:=1)) (.arg 0) (.arg 1)
-
-def fn' : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
-  .binop .add fn fn
-
-#eval IO.println ("\n".intercalate ((fn'.genCode []).2.map Prod.snd))
--/
 
 declare_syntax_cat expr_builder
 
@@ -324,12 +305,8 @@ partial def parse_expr_builder (arglist : TSyntax `term) :
     `(term| let $name : $type := $val; $(← parse_expr_builder arglist content))
   | `(expr_builder| let $name := $val; $content) => do
     `(term| let $name := $val; $(← parse_expr_builder arglist content))
-  | `(expr_builder| return $[$rets],*) => do
-    let ⟨rets⟩ := rets
-    let rec parse_rets : List (TSyntax `term) → MacroM (TSyntax `term)
-    | [] => `(term| ExprGroup.nil)
-    | x :: xs => do `(term| ExprGroup.cons $x $(← parse_rets xs))
-    parse_rets rets
+  | `(expr_builder| return $rets,*) =>
+    `(term| ExprGroup.of *[ $rets,* ])
   | `(expr_builder| fori_loop $n, $fn , $init , $aux) =>
     `(term| ExprGroup.fori_loop $n $fn $init $aux)
   | _ => Macro.throwUnsupported

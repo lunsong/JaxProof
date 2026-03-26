@@ -8,16 +8,6 @@ def DList.append {α : Type} {γ : α → Type} {a b : List α}
   | nil => y
   | cons x xs => cons x (xs.append y)
 
-def DList.get {α : Type} {γ : α → Type} {a : List α}
-    (i : Fin a.length) (x : DList γ a) : γ a[i] :=
-  match a with
-  | a :: as =>
-    match x with
-    | cons x xs =>
-      match i with
-      | .mk 0 _ => x
-      | .mk (n + 1) h => xs.get <| .mk n <| by simpa using h
-
 def DList.map {α : Type} {γ γ' : α → Type} {a : List α} (f : {a : α} → γ a → γ' a) :
     DList γ a → DList γ' a
   | nil => nil
@@ -41,10 +31,9 @@ def Expr.eval {args : List TensorType} {out : TensorType} (impl : TensorType →
 
 def ExprGroup.eval {args outs : List TensorType} (impl : TensorType → Type) [TensorImpl impl]
     (xs : DList impl args) : ExprGroup args outs → DList impl outs
-  | .nil => .nil
-  | .cons e es => .cons (e.eval impl xs) (es.eval impl xs)
+  | .of .nil => .nil
+  | .of (.cons e es) => .cons (e.eval impl xs) ((ExprGroup.of es).eval impl xs)
   | .apply x f => f.eval impl (x.eval impl xs)
-  | .append x y => (x.eval impl xs).append (y.eval impl xs)
   | .fori_loop (carry := carry) step n init aux =>
     let init := init.eval impl xs
     let aux := aux.eval impl xs

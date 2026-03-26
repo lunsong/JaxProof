@@ -23,6 +23,7 @@ def iota {n : ℕ} : Expr args ⟨.int, [n]⟩ := .bind .iota *[]
 instance (n : ℕ) : OfNat (Expr args out) n := .mk <| .bind (.ofNat n) *[]
 
 instance : Sub (Expr args out) := .mk fun x y => .bind .sub *[x, y]
+instance : Mul (Expr args out) := .mk fun x y => .bind .mul *[x, y]
 
 def cumsum (x : Expr args out) : Expr args out := .bind .cumsum *[x]
 

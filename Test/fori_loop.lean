@@ -14,10 +14,16 @@ def fn {n : ℕ} :=
       returns
         float [n]
       begin
-        return .bind .mul *[x, x];
-    fori_loop loop_fn, m, (.cons x .nil), .nil
+        return x * x;
+    fori_loop loop_fn, m, .of *[x], .of *[]
 
 #eval IO.println (fn (n := 10)).pretty_print
+/-
+return fori_loop($1, , @0, ($0, ), ())
+@0:
+%0: mul $1 $1
+returns %0, 
+-/
 
 example (m n : ℕ) (x : Fin n → ℝ) :
     (fn (n := n).eval Jax.FloatAsReal) *[x, (m : ℤ)] = *[x ^ (2 ^ m)] := by
