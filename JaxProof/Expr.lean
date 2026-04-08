@@ -164,20 +164,27 @@ def DList.mapM {α β : Type} {γ : α → Type} {x : List α} {m : Type → Typ
     let as ← as.mapM f
     return a :: as
 
-inductive Expr (args : List TensorType) : TensorType → Type where
-  | bind {ins : List TensorType} {out : TensorType} :
-    Op ins out → DList (Expr args) ins → Expr args out
-  | arg (i : Fin args.length) : Expr args args[i]
+def DList.get {α : Type} {γ : α → Type} {a : List α}
+    (i : Fin a.length) (x : DList γ a) : γ a[i] :=
+  match a with
+  | a :: as =>
+    match x with
+    | cons x xs =>
+      match i with
+      | .mk 0 _ => x
+      | .mk (n + 1) h => xs.get <| .mk n <| by simpa using h
 
-inductive ExprGroup : List TensorType → List TensorType → Type where
-  | nil {args : List TensorType} : ExprGroup args []
-  | cons {args : List TensorType} {x : TensorType} {xs : List TensorType} :
-    Expr args x → ExprGroup args xs → ExprGroup args (x :: xs)
-  | apply {xs ys zs : List TensorType} :
-    ExprGroup xs ys → ExprGroup ys zs → ExprGroup xs zs
-  | fori_loop {args carry aux : List TensorType} :
-    ExprGroup (⟨.int, []⟩ :: carry ++ aux) carry → Expr args ⟨.int, []⟩
-      → ExprGroup args carry → ExprGroup args aux → ExprGroup args carry
+def DList.of {α : Type} {γ : α → Type} {a : List α} (x : ∀ i : Fin a.length, γ a[i]) : DList γ a :=
+  match a with
+  | [] => *[]
+  | _ :: _ => .cons (x 0) <| DList.of fun i => x i.succ
+
+inductive Expr : List TensorType → TensorType → Type where
+  | bind {args : List TensorType} {ins : List TensorType} {out : TensorType} :
+    Op ins out → (∀ i : Fin ins.length, Expr args ins[i]) → Expr args out
+  | arg {args : List TensorType} (i : Fin args.length) : Expr args args[i]
+  | apply {args : List TensorType} {ins : List TensorType} {out : TensorType} (f : Expr ins out):
+    (∀ i : Fin ins.length, Expr args ins[i]) → Expr args out
 
 abbrev Cached (α : Type) : Type := List (USize × α)
 
@@ -193,13 +200,16 @@ unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
   match expr with
   | arg i => pure s!"${i}"
   | bind op xs => do
+    let xs := DList.of xs
     let xs ← xs.mapM Expr.genCode
     let id ← expr.insert (toString op ++ " " ++ " ".intercalate (xs.map toString))
     return s!"%{id}"
+  | apply fn xs =>
 
 def complete_code (commands : Cached String) (outs : String) : String :=
   "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
 
+/-
 mutual
 
 unsafe def ExprGroup.insert {args outs : List TensorType}
@@ -348,5 +358,7 @@ open Lean in macro_rules
     | ⟨name, dtype, shape, id⟩ :: args =>
       do `(let $name : Expr $arglist ⟨.$dtype, $shape⟩ := .arg $id; $(← bind_args args))
     `(term| ( $(← bind_args args) : ExprGroup $arglist $retlist) )
+
+-/
 
 end Jax
