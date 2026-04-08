@@ -173,8 +173,6 @@ inductive ExprGroup : List TensorType → List TensorType → Type where
   | nil {args : List TensorType} : ExprGroup args []
   | cons {args : List TensorType} {x : TensorType} {xs : List TensorType} :
     Expr args x → ExprGroup args xs → ExprGroup args (x :: xs)
-  | append {args outs outs' : List TensorType} : 
-    ExprGroup args outs → ExprGroup args outs' → ExprGroup args (outs ++ outs')
   | apply {xs ys zs : List TensorType} :
     ExprGroup xs ys → ExprGroup ys zs → ExprGroup xs zs
   | fori_loop {args carry aux : List TensorType} :
@@ -222,7 +220,6 @@ unsafe def ExprGroup.genCode {args outs : List TensorType} :
     let ⟨x, commands⟩ := x.genCode commands;
     let ⟨xs, commands, libs⟩ := xs.genCode ⟨commands, libs⟩
     ⟨s!"{x}, {xs}", commands, libs⟩
-  | append x y => do return s!"{← x.genCode}, {← y.genCode}"
   | apply x f =>
     do return s!"apply(@{← f.insert}, {← x.genCode})"
   | fori_loop step_fn n init aux =>

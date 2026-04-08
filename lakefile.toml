@@ -17,3 +17,6 @@ rev = "v4.28.0"
 
 [[lean_lib]]
 name = "JaxProof"
+
+[[lean_lib]]
+name = "JaxProofTests"

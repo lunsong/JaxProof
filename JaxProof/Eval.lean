@@ -44,7 +44,6 @@ def ExprGroup.eval {args outs : List TensorType} (impl : TensorType → Type) [T
   | .nil => .nil
   | .cons e es => .cons (e.eval impl xs) (es.eval impl xs)
   | .apply x f => f.eval impl (x.eval impl xs)
-  | .append x y => (x.eval impl xs).append (y.eval impl xs)
   | .fori_loop (carry := carry) step n init aux =>
     let init := init.eval impl xs
     let aux := aux.eval impl xs

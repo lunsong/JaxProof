@@ -33,7 +33,7 @@ example (n : ℕ) (σ : Equiv.Perm (Fin n)) :
     intro x y
     simp only [inv_permutation, List.length_cons, List.length_nil, Nat.reduceAdd,
       List.replicate_one, List.replicate_zero, Fin.isValue, Jax.ExprGroup.eval,
-      Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval, Pi.zero_apply,
+      Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval,
       Jax.FloatAsReal.scatter, Fin.getElem_fin, Fin.val_eq_zero, List.getElem_cons_zero,
       ne_eq, Nat.add_eq_zero_iff, one_ne_zero, and_false, not_false_eq_true, implies_true,
       ↓reduceDIte, Function.comp_apply, Jax.DList.cons.injEq, and_true]
