@@ -6,10 +6,12 @@ def idxOfNonzero {n : ℕ} :=
   returns
     int [n]
   begin
-    let_expr x : int [n] := Jax.choice x 1 0;
-    let_expr x_id : int [n] := Jax.cumsum x;
-    let_expr x_id : int [n] := Jax.choice x x_id 0;
-    return x_id
+    -- First we find nonzero elements of x
+    let x_nonzero := Jax.choice x 1 0;
+    -- Then we give each nonzero element an index by counting the
+    -- number of nonzero elements before it
+    let x_id := Jax.cumsum x_nonzero;
+    return Jax.choice x x_id 0
 
 #eval IO.println (idxOfNonzero (n := 12)).pretty_print
 /-
@@ -79,12 +81,11 @@ theorem Finset.idxOf_sort_of_mem {m : ℕ} {s : Finset (Fin m)} {x : (Fin m)} :
 theorem idxOfNonzero_eq_def {n : ℕ} {x : Fin n → ℤ} :
     idxOfNonzero.eval Jax.FloatAsReal *[x] = *[idxOfNonzero_def x] := by
   simp only [idxOfNonzero, Fin.isValue, Jax.ExprGroup.eval, Jax.Expr.eval, Jax.TensorImpl.impl,
-    Jax.Expr.eval.recursive_eval, Jax.DList.get_zero_cons, Nat.cast_one, CharP.cast_eq_zero,
+    Jax.Expr.eval.recursive_eval, Jax.DList.get_zero_cons, CharP.cast_eq_zero,
     Jax.Tensor.map₃, bne_iff_ne, ne_eq, ite_not, Jax.DList.cons.injEq, and_true, Jax.choice]
   apply funext
   intro i
-  simp only [Jax.Tensor.const, ite_eq_left_iff, one_ne_zero, imp_false, Decidable.not_not,
-    Fin.isValue, idxOfNonzero_def, ne_eq, dite_eq_ite]
+  simp only [Jax.Tensor.const, Fin.isValue, idxOfNonzero_def, ne_eq, dite_eq_ite]
   by_cases h : x i = 0
   · simp [h]
   · simp only [h, ↓reduceIte, Jax.cumsum, Fin.isValue, Jax.Expr.eval, Jax.TensorImpl.impl,
