@@ -120,27 +120,9 @@ unsafe def Expr.code {args outs : List TensorType} (expr : Expr opType args outs
 
 declare_syntax_cat expr_builder
 
-/--
-Define an XLA expression. Example:
-xla_fun foobar (n m l k : ℕ)
-arguments
-  a : float [n,m],
-  b : float [n,l],
-  c : float [n,k]
-returns
-  float [n,m + l + k],
-  float [n,m + l]
-begin
-  let_expr d : float [n,m + l] := .binop (.concat (batch:=[n]) (axis:=1) (n:=m) (m:=l)) a b;
-  let_expr d' : float [n,m + l] := .unop .cos d;
-  return .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c, d
--/
 syntax "define_expr" "using" term "with" ( ident ":" term ),*
        "begin" expr_builder : term
 
-/--
-Custom `let` binder for XLA expressions 
--/
 syntax "let_expr" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":=" term ";" expr_builder : expr_builder
