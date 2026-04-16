@@ -20,127 +20,10 @@ structure TensorType where
   dtype : DType
   shape : List ℕ
 
-inductive Op : List TensorType → TensorType → Type where
-  | abs {σ : TensorType} : Op [σ] σ
-  | acos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | acosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | add {σ : TensorType} : Op [σ, σ] σ
-  | and {s : Shape} : Op [⟨.int, s⟩, ⟨.int, s⟩] ⟨.int, s⟩
-  | argmax {σ : TensorType} (axis : ℕ) : Op [σ] ⟨.int, σ.shape.eraseIdx axis⟩ 
-  | argmin {σ : TensorType} (axis : ℕ) : Op [σ] ⟨.int, σ.shape.eraseIdx axis⟩ 
-  | asin {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | asinh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | atan {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | atanh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | bessel_i0e {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | bessel_i1e {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | broadcast {α : DType} (s : List (ℕ × Bool)) :
-    Op [⟨α, Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
-  | cbrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | ceil {s : Shape} : Op [⟨.float, s⟩] ⟨.int, s⟩
-  | cholesky {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
-  | concat {α : DType} {batch : Shape} {n m : ℕ} {axis : ℕ} :
-    Op [⟨α, batch.insertIdx axis n⟩, ⟨α, batch.insertIdx axis m⟩] ⟨α, batch.insertIdx axis (n + m)⟩
-  | conv {α : DType} {s : Shape} {n m : ℕ} {axis : ℕ} :
-    Op [⟨α, s.insertIdx axis n⟩, ⟨α, s.insertIdx axis m⟩] ⟨α, s.insertIdx axis (n + m)⟩
-  | convert_type {α β : DType} {s : Shape} : Op [⟨α, s⟩] ⟨β, s⟩
-  | cos {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | cosh {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | cumlogsumexp {s : Shape} (axis : ℕ) (reverse : Bool) : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | cummax {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
-  | cummin {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
-  | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : Op [σ] σ
-  | cumsum {σ : TensorType} : Op [σ] σ
-  | div {σ : TensorType} : Op [σ, σ] σ
-  | dot_general {α : DType} (batch contract lhs rhs: List ℕ) : 
-    Op [⟨α, contract ++ batch ++ lhs⟩, ⟨α, contract ++ batch ++ rhs⟩] ⟨α, batch ++ lhs ++ rhs⟩
-  | sum {α : DType} {s : List ℕ} (n : ℕ) : Op [⟨α, s⟩] ⟨α, s.drop n⟩
-  | sorted {α : DType} {batch : List ℕ} {sorted_axes : ℕ} :
-    Op [⟨α, batch ++ [sorted_axes]⟩] ⟨α, batch ++ [sorted_axes]⟩
-  | transpose {α : DType} {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
-    Op [⟨α, s⟩] ⟨α, List.ofFn fun i => s.get (σ i)⟩
-  | dynamic_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
-    Op [⟨α, dims.map Prod.fst⟩] ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩
-  | dynamic_update_slice {α : DType} (dims : List (ℕ × ℕ × ℕ)) :
-    Op [⟨α, dims.map Prod.fst⟩, ⟨α, dims.map (Prod.snd ∘ Prod.snd)⟩] ⟨α, dims.map Prod.fst⟩
-  | eigvals {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n]⟩
-  | eigvalsh {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n]⟩
-  | eigvecs {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
-  | eigvecsh {batch : Shape} {n : ℕ} : Op [⟨.float, batch ++ [n, n]⟩] ⟨.float, batch ++ [n, n]⟩
-  | empty {σ : TensorType} : Op [] σ
-  | eq {σ : TensorType} : Op [σ, σ] ⟨.int, σ.shape⟩
-  | erf {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | erf_inv {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | erfc {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | exp {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | exp2 {σ : TensorType} : Op [σ] σ
-  | expm1 {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  --| fft {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | gather {α : DType} {s s' batch: Shape} :
-    Op (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
-  | scatter {α : DType} {s : Shape} {n : ℕ} :
-    Op (⟨α, s⟩ :: ⟨α, [n]⟩ :: List.replicate s.length ⟨.int, [n]⟩) ⟨α, s⟩
-  | iota {n : ℕ} : Op [] ⟨.int, [n]⟩
-  | mul {σ : TensorType} : Op [σ, σ] σ
-  | mod {σ : TensorType} : Op [σ, σ] σ
-  | div_int {σ : TensorType} : Op [σ, σ] σ
-  | zeros {σ : TensorType} : Op [] σ
-  | sqrt {s : Shape} : Op [⟨.float, s⟩] ⟨.float, s⟩
-  | choice {α : DType} {s : Shape} : Op [⟨.int, s⟩, ⟨α, s⟩, ⟨α, s⟩] ⟨α, s⟩
-  | ofNat {σ : TensorType} (val : ℕ) : Op [] σ
-  | neg {σ : TensorType} : Op [σ] σ
-  | sub {σ : TensorType} : Op [σ, σ] σ
-  --| lt : Op (some 2)
-  --| select : Op (some 3)
-  --| addIdx : Op (some 3)
-  --| sin : Op (some 1)
-  --| log : Op (some 1)
-  --| sqrt : Op (some 1)
-  --| einsum (s : List ℕ) : List (List (Fin s.length)) → ℕ → Op none
-  --| tuple : Op none
-  --| tupleGet : ℕ → Op (some 1)
-  --| anonTuple : Op none
-
-def Op.reprType : ℕ∞ → Type
-  | none => List String → String
-  | some n => curryType String n
-
 instance : ToString DType where
   toString x := match x with | .float => "float" | .int => "int"
 
-def Op.toString {args : List TensorType} {out : TensorType} : Op args out → String
-  | add => "add"
-  | cos => "cos"
-  | concat => "concat"
-  | mul => "mul"
-  | transpose σ =>
-    let σ : List ℕ := List.ofFn fun i => σ i
-    s!"transpose {σ}"
-  | dot_general batch contract lhs rhs => s!"dot_general {contract.length} {batch.length}"
-  | scatter => "scatter"
-  | zeros (σ := σ) => s!"zeros {σ.dtype} {σ.shape}"
-  | iota (n := n) => s!"iota {n}"
-  | sum n => s!"sum {n}"
-  | broadcast s => s!"braodcast {s.map Prod.snd}"
-  | div => "div"
-  | sqrt => "sqrt"
-  | cumsum => "cumsum"
-  | choice => "where"
-  | ofNat (σ := ⟨α, s⟩) n => s!"const {α} {s} {n}"
-  | neg => "neg"
-  | sub => "sub"
-  | _ => "unimplemented"
-
-instance (args : List TensorType) (out : TensorType) : ToString (Op args out) :=
-  ⟨Op.toString⟩
-
-def argString {α : Type} [ToString α] (xs : List α) : String :=
-  ", ".intercalate (xs.map toString)
-
-def argType (α : TensorType → Type) : List TensorType → Type
-  | [] => Unit
-  | σ :: σs => α σ × argType α σs
-
+/-
 inductive DList {α : Type} (m : α → Type) : List α → Type where
   | nil : DList m []
   | cons {x : α} {xs : List α} : m x → DList m xs → DList m (x :: xs)
@@ -178,118 +61,86 @@ def DList.of {α : Type} {γ : α → Type} {a : List α} (x : ∀ i : Fin a.len
   match a with
   | [] => *[]
   | _ :: _ => .cons (x 0) <| DList.of fun i => x i.succ
+-/
 
-inductive Expr : List TensorType → TensorType → Type where
+inductive Expr (opType : List TensorType → TensorType → Type) :
+    List TensorType → List TensorType → Type where
+  | arg {args : List TensorType} (i : Fin args.length) : Expr opType args [args[i]]
   | bind {args : List TensorType} {ins : List TensorType} {out : TensorType} :
-    Op ins out → (∀ i : Fin ins.length, Expr args ins[i]) → Expr args out
-  | arg {args : List TensorType} (i : Fin args.length) : Expr args args[i]
-  | apply {args : List TensorType} {ins : List TensorType} {out : TensorType} (f : Expr ins out):
-    (∀ i : Fin ins.length, Expr args ins[i]) → Expr args out
+    opType ins out → Expr opType args ins → Expr opType args [out]
+  | apply {args ins outs: List TensorType} :
+    Expr opType ins outs → Expr opType args ins  → Expr opType args outs
+  | append {args outs outs' : List TensorType} :
+    Expr opType args outs → Expr opType args outs' → Expr opType args (outs ++ outs')
+  | select {args outs : List TensorType} (i : List (Fin outs.length)) :
+    Expr opType args outs → Expr opType args (i.map outs.get)
+
+variable {opType : List TensorType → TensorType → Type} [∀ args, ∀ out, ToString (opType args out)]
 
 abbrev Cached (α : Type) : Type := List (USize × α)
 
-unsafe def Expr.insert {args : List TensorType} {out : TensorType}
-  (expr : Expr args out) (code : String) :
-    StateM (Cached String) ℕ := fun ctx ↦
-  match ctx.findIdx? (fun x ↦ ptrAddrUnsafe expr == x.1) with
-  | none => ⟨ctx.length, ctx.concat ⟨ptrAddrUnsafe expr, code⟩⟩
-  | some n => ⟨n, ctx⟩
-
-unsafe def Expr.genCode {args : List TensorType} {out : TensorType}
-    (expr : Expr args out) : StateM (Cached String) String :=
-  match expr with
-  | arg i => pure s!"${i}"
-  | bind op xs => do
-    let xs := DList.of xs
-    let xs ← xs.mapM Expr.genCode
-    let id ← expr.insert (toString op ++ " " ++ " ".intercalate (xs.map toString))
-    return s!"%{id}"
-  | apply fn xs =>
-
-def complete_code (commands : Cached String) (outs : String) : String :=
-  "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
-
-/-
-mutual
-
-unsafe def ExprGroup.insert {args outs : List TensorType}
-  (expr : ExprGroup args outs) : StateM (Cached String × Cached (String × List String)) ℕ :=
-  fun ⟨commands, libs⟩ ↦
-    match libs.findIdx? (fun x ↦ x.1 == ptrAddrUnsafe expr) with
-    | some n => ⟨n, commands, libs⟩
+unsafe def Expr.addLine {args outs : List TensorType}
+  (expr : Expr opType args outs) (code : String) :
+    StateM (ℕ × Cached (List ℕ × String) × Cached String) (List ℕ) :=
+  fun ⟨n_var, codes, libs⟩ ↦
+    match codes.find? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
     | none =>
-      let ⟨expr_outs, expr_commands, libs⟩ := expr.genCode ⟨[], libs⟩
-      ⟨libs.length, commands,
-        libs.concat ⟨ptrAddrUnsafe expr, expr_outs, expr_commands.map Prod.snd⟩⟩
+      let out_ids : List ℕ := List.ofFn fun (i : Fin outs.length) ↦ i.val + n_var
+      let new_codes := codes.concat ⟨ptrAddrUnsafe expr, out_ids, code⟩
+      ⟨out_ids, outs.length + n_var, new_codes, libs⟩
+    | some ⟨_, out_ids, _⟩ =>
+      ⟨out_ids, n_var, codes, libs⟩
 
+unsafe def Expr.addLib {args outs : List TensorType}
+  (expr : Expr opType args outs) (code : String) :
+    StateM (ℕ × Cached (List ℕ × String) × Cached String) ℕ :=
+  fun ⟨n_var, codes, libs⟩ ↦
+    match libs.findIdx? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
+    | none =>
+      ⟨libs.length, n_var, codes, libs.concat ⟨ptrAddrUnsafe expr, code⟩⟩
+    | some i =>
+      ⟨i, n_var, codes, libs⟩
 
-unsafe def ExprGroup.genCode {args outs : List TensorType} :
-    ExprGroup args outs → StateM (Cached String × Cached (String × List String)) String
-  | nil => pure ""
-  | cons x xs => fun ⟨commands, libs⟩ ↦
-    let ⟨x, commands⟩ := x.genCode commands;
-    let ⟨xs, commands, libs⟩ := xs.genCode ⟨commands, libs⟩
-    ⟨s!"{x}, {xs}", commands, libs⟩
-  | apply x f =>
-    do return s!"apply(@{← f.insert}, {← x.genCode})"
-  | fori_loop step_fn n init aux =>
-    let n : ExprGroup args [⟨.int, []⟩] := .cons n .nil;
-    do return (
-    s!"fori_loop({← n.genCode}, @{← step_fn.insert}, ({← init.genCode}), ({← aux.genCode}))")
+def Expr.processCode (out_names : List String) (codes : Cached (List ℕ × String)) : String :=
+  let body : String := "\n".intercalate <|
+    codes.map fun ⟨_, assign_id, line⟩ =>
+      let assign_names := ",".intercalate (assign_id.map fun i => s!"%{i}")
+      s!"{assign_names} = {line}"
+  s!"{body}\nreturn {",".intercalate out_names}"
 
-end
-
-unsafe def ExprGroup.code {args outs : List TensorType} : ExprGroup args outs → String :=
-  fun expr ↦
-    let ⟨outs, commands, libs⟩ := expr.genCode ⟨[], []⟩
-    let main := "\n".intercalate (commands.map Prod.snd) ++ "\nreturn " ++ outs
-    let libs := libs.map fun ⟨_, outs, commands⟩ =>
-      "\n".intercalate commands ++ "\nreturns " ++ outs
-    main ++ "\n" ++ "\n".intercalate libs
-
-unsafe def ExprGroup.pretty_print {args outs : List TensorType} : ExprGroup args outs → String :=
-  fun expr ↦
-    let ⟨outs, commands, libs⟩ := expr.genCode ⟨[], []⟩
-    let numberd_lines (symbol : ℕ → String) (x : List String) : String :=
-      let x := List.zip (List.ofFn fun (i : Fin x.length) => symbol i) x
-      "\n".intercalate (x.map fun ⟨x, y⟩ => x ++ y)
-    let main := numberd_lines (fun i => s!"%{i}: ") (commands.map Prod.snd) ++ "\nreturn " ++ outs
-    let libs := libs.map fun ⟨_, outs, commands⟩ =>
-      numberd_lines (fun i => s!"%{i}: ") commands ++ "\nreturns " ++ outs
-    main ++ "\n" ++ numberd_lines (fun i => s!"@{i}:\n") libs
-
-def Exprs (args : List TensorType) : List TensorType → Type
-  | [] => Unit
-  | σ :: σs => Expr args σ × Exprs args σs
-
-def Exprs.toExprGroup {args outs : List TensorType} : Exprs args outs → ExprGroup args outs :=
-  match outs with
-  | [] => fun _ ↦ .nil
-  | _ :: _ => fun ⟨x, xs⟩ ↦ .cons x xs.toExprGroup
-
-/-
-unsafe def Exprs.genCode {args outs : List TensorType} (exprs : Exprs args outs) :
-    StateM (List (USize × String)) String :=
-  match outs with
-  | [] => pure ""
-  | _ :: _ =>
-    let ⟨expr, exprs⟩ := exprs
-    do return s!"{← expr.genCode} {← exprs.genCode}"
-
-unsafe def Exprs.code {args outs : List TensorType} (exprs : Exprs args outs) :
-    String :=
-  let ⟨out, codes⟩ := exprs.genCode []
-  "\n".intercalate (codes.map Prod.snd) ++ "\nreturn " ++ out
-
-
-def fn : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
-  .unop .cos <| .binop (.concat (batch:=[3]) (n:=3) (m:=4) (axis:=1)) (.arg 0) (.arg 1)
-
-def fn' : Expr [⟨.float, [3,3]⟩, ⟨.float, [3,4]⟩] ⟨.float, [3,7]⟩ :=
-  .binop .add fn fn
-
-#eval IO.println ("\n".intercalate ((fn'.genCode []).2.map Prod.snd))
--/
+unsafe def Expr.genCode {args outs : List TensorType} (expr : Expr opType args outs) :
+    StateM (ℕ × Cached (List ℕ × String) × Cached String) (List String) :=
+  match expr with
+  | arg i => pure [s!"${i}"]
+  | bind op xs => do
+    let xs ← xs.genCode
+    let out_id ← expr.addLine s!"{op} {",".intercalate xs}"
+    return out_id.map fun n ↦ s!"%{n}"
+  | apply fn xs => do
+    let ⟨n_var, codes, libs⟩ ← get
+    let ⟨out_names, _, fn_codes, libs⟩ := fn.genCode ⟨0, [], libs⟩
+    set (n_var, codes, libs)
+    let fn_code := processCode out_names fn_codes
+    let fn_id ← fn.addLib fn_code
+    let xs ← xs.genCode
+    let out_id ← expr.addLine s!"call @{fn_id} {",".intercalate xs}"
+    return out_id.map fun n ↦ s!"%{n}"
+  | append xs ys => do
+    let xs ← xs.genCode
+    let ys ← ys.genCode
+    return xs ++ ys
+  | select is xs => do
+    let xs ← xs.genCode
+    return is.map fun i =>
+      match xs[i]? with
+      | none => ""
+      | some a => a
+    
+unsafe def Expr.code {args outs : List TensorType} (expr : Expr opType args outs) : String :=
+  let ⟨out_names, _, codes, libs⟩ := expr.genCode ⟨0, [], []⟩
+  let body := processCode out_names codes
+  let libs := "\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}\n{libs[i]}"
+  s!"{body}\n{libs}"
 
 declare_syntax_cat expr_builder
 
@@ -308,39 +159,62 @@ begin
   let_expr d' : float [n,m + l] := .unop .cos d;
   return .binop (.concat (batch:=[n]) (axis:=1) (n:=m + l) (m:=k)) d' c, d
 -/
-syntax "xla" "with" ( ident ":" ident term ),*
-       "returns" (ident term),*
+syntax "define_expr" "using" term "with" ( ident ":" term ),*
        "begin" expr_builder : term
 
 /--
 Custom `let` binder for XLA expressions 
 -/
-syntax "let_expr" ident ":" ident term ":=" term ";" expr_builder : expr_builder
+syntax "let_expr" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
 syntax "let" ident ":=" term ";" expr_builder : expr_builder
-syntax "return" term,* : expr_builder
-syntax "fori_loop" term "," term "," term "," term : expr_builder
+syntax "return" term : expr_builder
+--syntax "fori_loop" term "," term "," term "," term : expr_builder
 
 open Lean in
-partial def parse_expr_builder (arglist : TSyntax `term) :
+partial def parse_expr_builder (opType args : TSyntax `term) :
     TSyntax `expr_builder → MacroM (TSyntax `term)
-  | `(expr_builder| let_expr $name : $dtype $shape := $val; $content) => do
-    `(term| let $name : Expr $arglist ⟨.$dtype, $shape⟩ := $val;
-            $(← parse_expr_builder arglist content))
+  | `(expr_builder| let_expr $name : $outs := $val; $content) => do
+    `(term| let $name : Expr $opType $args $outs := $val;
+            $(← parse_expr_builder opType args content))
   | `(expr_builder| let $name : $type := $val; $content) => do
-    `(term| let $name : $type := $val; $(← parse_expr_builder arglist content))
+    `(term| let $name : $type := $val; $(← parse_expr_builder opType args content))
   | `(expr_builder| let $name := $val; $content) => do
-    `(term| let $name := $val; $(← parse_expr_builder arglist content))
-  | `(expr_builder| return $[$rets],*) => do
-    let ⟨rets⟩ := rets
-    let rec parse_rets : List (TSyntax `term) → MacroM (TSyntax `term)
-    | [] => `(term| ExprGroup.nil)
-    | x :: xs => do `(term| ExprGroup.cons $x $(← parse_rets xs))
-    parse_rets rets
-  | `(expr_builder| fori_loop $n, $fn , $init , $aux) =>
-    `(term| ExprGroup.fori_loop $n $fn $init $aux)
+    `(term| let $name := $val; $(← parse_expr_builder opType args content))
+  | `(expr_builder| return $rets) => pure rets
+--  | `(expr_builder| fori_loop $n, $fn , $init , $aux) =>
+--    `(term| ExprGroup.fori_loop $n $fn $init $aux)
   | _ => Macro.throwUnsupported
 
+open Lean in macro_rules
+  | `(define_expr using $opType with $[$argnames : $argtypes],* begin $body) => do
+    let args : TSyntax `term ← `(term| [ $[$argtypes],* ])
+    let parsed_body : TSyntax `term ← parse_expr_builder opType args body
+    let rec bind_args : List (TSyntax `ident × TSyntax `term) → ℕ → MacroM (TSyntax `term)
+      | [], _ => return parsed_body
+      | ⟨name, out⟩ :: rest, n => do
+        `(term| let $name : Expr $opType $args [$out] := Expr.arg $(quote n);
+        $(← bind_args rest (n + 1)))
+    bind_args (argnames.toList.zip argtypes.toList) 0
+
+inductive SimpleOp : List TensorType → TensorType → Type where
+  | iota (n : ℕ) : SimpleOp [] ⟨.float, [n]⟩
+  | add {σ : TensorType} : SimpleOp [σ, σ] σ
+
+def SimpleOp.expr_add {args : List TensorType} {σ : TensorType} (x y : Expr SimpleOp args [σ]) :
+    Expr SimpleOp args [σ] :=
+  let feedin : Expr SimpleOp args [σ, σ] := Expr.append x y
+  Expr.bind SimpleOp.add feedin
+
+def foobar (n : ℕ) :=
+  define_expr using SimpleOp with
+    x : ⟨.float, [n]⟩
+  begin
+    return SimpleOp.expr_add x x
+
+#print foobar
+
+/-
 open Lean in macro_rules
   | `(xla with $[$argnames : $argdtypes $argshapes],*
       returns $[$retdtypes $retshapes],*
@@ -358,7 +232,6 @@ open Lean in macro_rules
     | ⟨name, dtype, shape, id⟩ :: args =>
       do `(let $name : Expr $arglist ⟨.$dtype, $shape⟩ := .arg $id; $(← bind_args args))
     `(term| ( $(← bind_args args) : ExprGroup $arglist $retlist) )
-
 -/
 
 end Jax
