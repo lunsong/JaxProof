@@ -1,7 +1,4 @@
 import JaxProof.Tensor
-import Mathlib.Data.Real.Basic
-import Mathlib.Data.Fin.Tuple.Basic
-import Mathlib.Data.ENat.Defs
 
 /-!
 This file contains the inductive type `JAX.Expr`, which represents a jaxpr, and `JAX.Expr.code`
