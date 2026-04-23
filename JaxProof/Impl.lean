@@ -1,21 +1,22 @@
 import JaxProof.Eval
+import JaxProof.XlaOp
 
 namespace Jax
 
-abbrev FloatAsReal : TensorType → Type
+abbrev NaiveImpl : TensorType → Type
   | ⟨.float, s⟩ => Tensor ℝ s
   | ⟨.int, s⟩ => Tensor ℤ s
 
-abbrev ArgList := DList FloatAsReal
+abbrev ArgList := DList NaiveImpl
 
-def FloatAsReal.zero {σ : TensorType} : FloatAsReal σ :=
+def NaiveImpl.zero {σ : TensorType} : NaiveImpl σ :=
   match σ with
   | ⟨.float, _⟩
   | ⟨.int, _⟩ => Tensor.zero
 
-instance (σ : TensorType) : Zero (FloatAsReal σ) := ⟨FloatAsReal.zero⟩
+instance (σ : TensorType) : Zero (NaiveImpl σ) := ⟨NaiveImpl.zero⟩
 
-def FloatAsReal.get {s : List ℕ} {R : Type} [Zero R]
+def NaiveImpl.get {s : List ℕ} {R : Type} [Zero R]
   (x : Tensor R s) (indices : ArgList (List.replicate s.length ⟨.int, []⟩)) : R :=
   match s with
   | [] => x
@@ -24,26 +25,34 @@ def FloatAsReal.get {s : List ℕ} {R : Type} [Zero R]
     | 0 => 0
     | _ + 1 =>
       let (.cons i₀ i) := indices
-      FloatAsReal.get (x (Fin.intCast i₀)) i
+      NaiveImpl.get (x (Fin.intCast i₀)) i
 
-def FloatAsReal.gather {α : DType} {s s' : List ℕ}
+/-
+def NaiveImpl.gather {α : DType} {s s' : List ℕ}
   (args : ArgList (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩))
-  : FloatAsReal ⟨α, s'⟩ :=
+  : NaiveImpl ⟨α, s'⟩ :=
   let (.cons x indices) := args
   match α with
   | .float | .int =>
     match s' with
     | [] =>
-      FloatAsReal.get x indices
+      NaiveImpl.get x indices
     | _ :: _ => fun i₀ => 
       let indices := feed i₀ indices
-      FloatAsReal.gather (.cons x indices)
+      NaiveImpl.gather (.cons x indices)
 where feed {n : ℕ} {s₀ : ℕ} {s : List ℕ} (i₀ : Fin s₀) :
   ArgList (List.replicate n ⟨.int, s₀ :: s⟩) →
   ArgList (List.replicate n ⟨.int, s⟩) :=
   match n with
   | 0 => id
   | _ + 1 => fun (.cons a₀ as) => .cons (a₀ i₀) <| feed i₀ as
+-/
+
+def NaiveImpl.gather {α : DType} {s s' : Shape} :
+    TensorImpl.implType NaiveImpl (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩ :=
+  match s with
+  | [] => fun x => match α with | .float | .int => Tensor.const x
+  | s₀ :: s => fun x i₀ => by
 
 instance (s : Shape) : DecidableEq (ValidIdx s) :=
   inferInstanceAs (DecidableEq (∀ i : Fin s.length, Fin s[i]))
@@ -64,7 +73,7 @@ def ValidIdx.intCast {s : Shape} (h : ∀ i : Fin s.length, s[i] ≠ 0) (idx : F
     have : NeZero s[r] := ⟨h r⟩
     Fin.intCast (idx r)
 
-def FloatAsReal.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Tensor R [n])
+def NaiveImpl.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Tensor R [n])
   (indices : ArgList (List.replicate s.length ⟨.int, [n]⟩)) :
     Tensor R s :=
   if h : ∀ i : Fin s.length, s[i] ≠ 0 then
@@ -76,34 +85,34 @@ def FloatAsReal.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : T
   else
     x
 
-noncomputable instance : TensorImpl FloatAsReal where
+noncomputable instance : TensorImpl Op NaiveImpl where
   ofNat i := Int.ofNat i
   toInt x := x
   impl {args} {out} op := match op with
-  | .abs => fun *[x] => match out with
+  | .abs => fun x => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => x.map abs
-  | .acos => fun *[x] => x.map Real.arccos
+  | .acos => fun x => x.map Real.arccos
   -- `Real.Arcosh` isn't available in this lean version
-  | .acosh => fun *[x] => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
-  | .add => fun *[x, y] => match out with
+  | .acosh => fun x => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
+  | .add => fun x y => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.add x y
-  | .mul => fun *[x, y] => match out with
+  | .mul => fun x y => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· * ·) x y
-  | .div => fun *[x, y] => match out with
+  | .div => fun x y => match out with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· / ·) x y
-  | .sum (α := α) n => fun *[x] => match α with
+  | .sum (α := α) n => fun x => match α with
     | .float
     | .int => x.sumN n
-  | .sqrt => fun *[x] => x.map Real.sqrt
-  | .transpose (α := α) σ => fun *[x] => match α with
+  | .sqrt => fun x => x.map Real.sqrt
+  | .transpose (α := α) σ => fun x => match α with
     | .float | .int => x.transpose σ
-  | .broadcast (α := α) s => fun *[x] => match α with
+  | .broadcast (α := α) s => fun x => match α with
     | .float | .int => x.broadcast
-  | .dot_general (α := α) batch contract lhs rhs => fun *[x,y] =>
+  | .dot_general (α := α) batch contract lhs rhs => fun x y =>
     match α with
     | .float
     | .int =>
@@ -113,7 +122,11 @@ noncomputable instance : TensorImpl FloatAsReal where
       let y : Tensor _ (contract ++ batch ++ lhs ++ rhs) := y.cast <| by simp
       let z := (Tensor.map₂ (· * ·) x y).sumN (contract.length)
       z.cast <| by simp
-  | .gather (α := α) (s := s) => FloatAsReal.gather
+  | .gather (α := α) (s := s) =>
+    by
+      sorry
+    --NaiveImpl.gather
+/-
   | .sorted (α := α) => fun *[x] => match α with
     | .int =>
       Tensor.uncurry' <|
@@ -124,7 +137,7 @@ noncomputable instance : TensorImpl FloatAsReal where
         x.curry'.map fun (x : Fin _ → ℝ) i =>
           ((List.ofFn x).mergeSort).get <| i.cast <| by simp
   | .scatter (α := α) => fun (.cons x (.cons y indices)) =>
-    match α with | .int | .float => FloatAsReal.scatter x y indices
+    match α with | .int | .float => NaiveImpl.scatter x y indices
   | .iota => fun _ => fun i => (i.val : ℤ)
   | .zeros => 0
   | .choice (α := α) => fun *[c, x, y]=>
@@ -171,5 +184,6 @@ noncomputable instance : TensorImpl FloatAsReal where
 --      sorry
   | _ => 0
 
+-/
 
 end Jax

@@ -5,16 +5,16 @@ import Mathlib.Algebra.Ring.Defs
 import Mathlib.Data.Nat.ModEq
 import Mathlib.GroupTheory.Perm.Cycle.Concrete
 import Batteries.Data.Fin.Lemmas
+import JaxProof.Curry
 
 namespace Jax
 
-def curryType (α : Type) : Nat → Type
-  | 0 => α
-  | n + 1 => α → curryType α n
+--def Tensor (R : Type) : List ℕ → Type
+--  | [] => R
+--  | n₀ :: ns => Fin n₀ → Tensor R ns
 
-def Tensor (R : Type) : List ℕ → Type
-  | [] => R
-  | n₀ :: ns => Fin n₀ → Tensor R ns
+def Tensor (R : Type) (shape : List ℕ) : Type :=
+  Curry (shape.map Fin) R
 
 variable {R : Type}
 
@@ -28,7 +28,7 @@ def Tensor.cast {s s' : List ℕ} (h : s = s') : Tensor R s → Tensor R s' :=
   | s₀ :: s₁, s₀' :: s₁' =>
     have h₀ : s₀ = s₀' := by injection h
     have h₁ : s₁ = s₁' := by injection h
-    fun x i ↦ (x (i.cast h₀.symm)).cast h₁
+    fun x i ↦ cast h₁ (x (i.cast h₀.symm))
 
 --def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
 --  (h₀ : s₀ = s₀') (h : s = s') (i : Fin s₀) (i' : Fin s₀') :
@@ -61,72 +61,10 @@ def Tensor.einprod [Mul R] [One R] (s : List ℕ)
     let xs' := xs.map fun ⟨i, x⟩ ↦ ⟨filter_pred i, filter i x⟩
     einprod s' xs'
 
-def Tensor.add [Add R] {s : List ℕ} (A B : Tensor R s) : Tensor R s :=
-  match s with
-  | [] => @id R A + @id R B
-  | _ :: _ => fun i ↦ add (A i) (B i)
-
-def Tensor.zero [Zero R] {s : List ℕ} : Tensor R s :=
-  match s with
-  | [] => (0 : R)
-  | _ :: _ => fun _ ↦ zero
-
-def Tensor.const {s : List ℕ} (x : R) : Tensor R s :=
-  match s with
-  | [] => x
-  | _ :: _ => fun _ ↦ const x
-
-instance [Add R] {s : List ℕ} : Add (Tensor R s) := ⟨Tensor.add⟩
-instance [Zero R] {s : List ℕ} : Zero (Tensor R s) := ⟨Tensor.zero⟩
-
-@[simp]
-theorem Tensor.add_apply [Add R] (s₀ : ℕ) {s : List ℕ} {x y : Tensor R (s₀ :: s)} {i : Fin s₀} :
-    (x + y) i = x i + y i := by
-  simp [HAdd.hAdd, Add.add, add]
-
-@[simp]
-theorem Tensor.zero_apply [Zero R] (s₀ : ℕ) {s : List ℕ} {i : Fin s₀} :
-    (0 : Tensor R (s₀ :: s)) i = (0 : Tensor R s) := by
-  simp[OfNat.ofNat, Zero.zero, zero]
-
-theorem Tensor.zero_add [AddCommMonoid R] {s : List ℕ} : ∀ x : Tensor R s, 0 + x = x := by
-  induction s with
-  | nil => simp
-  | cons s₀ s ih =>
-    intro x
-    ext i
-    simp [ih]
-
-theorem Tensor.add_zero [AddCommMonoid R] {s : List ℕ} : ∀ x : Tensor R s, x + 0 = x := by
-  induction s with
-  | nil => simp
-  | cons s₀ s ih =>
-    intro x
-    ext i
-    simp [ih]
-
-theorem Tensor.add_assoc [AddCommMonoid R] {s : List ℕ} (x y z : Tensor R s) :
-    x + y + z = x + (y + z) := by
-  induction s with
-  | nil => simp [_root_.add_assoc]
-  | cons s₀ s ih =>
-    ext i
-    simp [ih]
-
-theorem Tensor.add_comm [AddCommMonoid R] {s : List ℕ} (x y : Tensor R s) :
-    x + y = y + x := by
-  induction s with
-  | nil => simp [_root_.add_comm]
-  | cons s₀ s ih =>
-    ext i
-    simp [ih]
-
-instance [AddCommMonoid R] (s : List ℕ) : AddCommMonoid (Tensor R s) where
-  nsmul n x := Nat.repeat (· + x) n 0
-  zero_add := Tensor.zero_add
-  add_zero := Tensor.add_zero
-  add_assoc := Tensor.add_assoc
-  add_comm := Tensor.add_comm
+instance [Add R] {s : List ℕ} : Add (Tensor R s) := inferInstanceAs (Add (Curry (s.map Fin) R))
+instance [Zero R] {s : List ℕ} : Zero (Tensor R s) := inferInstanceAs (Zero (Curry (s.map Fin) R))
+instance [AddCommMonoid R] (s : List ℕ) : AddCommMonoid (Tensor R s) :=
+  inferInstanceAs (AddCommMonoid (Curry (s.map Fin) R))
 
 @[simp]
 def Tensor.sumFirst [AddCommMonoid R] {s : List ℕ} (x : Tensor R s) : Tensor R s.tail :=
@@ -146,7 +84,7 @@ def Tensor.cumsum [AddCommMonoid R] {s : List ℕ} (x : Tensor R s) : Tensor R s
   match s with
   | [] => x
   | [_] => fun i => ∑ j with j ≤ i, x j
-  | _ :: _ :: _ => fun i => (x i).cumsum
+  | _ :: _ :: _ => fun i => cumsum (x i)
 
 def Tensor.einsum [AddCommMonoid R] [Mul R] [One R] (s : List ℕ)
   (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get))) (nsum : ℕ) :
@@ -234,7 +172,7 @@ def Tensor.broadcast (s : List (ℕ × Bool)) :
     Tensor R (preBroadcast s) → Tensor R (s.map Prod.fst) :=
   match s with
   | [] => id
-  | (_, true) :: s => fun x i ↦ (x i).broadcast s
+  | (_, true) :: s => fun x i ↦ broadcast s (x i)
   | (_, false) :: s => fun x _ ↦ x.broadcast s
     
 
@@ -260,12 +198,12 @@ def Tensor.curry' {s s' : List ℕ} : Tensor R (s ++ s') → Tensor (Tensor R s'
 def Tensor.uncurry {s₀ : ℕ} {s : List ℕ} : Tensor (Tensor R [s₀]) s → Tensor R (s₀ :: s) :=
   match s with
   | [] => id
-  | _ :: _ => fun x i₀ i₁ ↦ (x i₁).uncurry i₀
+  | _ :: _ => fun x i₀ i₁ ↦ uncurry (x i₁) i₀
 
 def Tensor.uncurry' {s s' : List ℕ} : Tensor (Tensor R s') s → Tensor R (s ++ s') :=
   match s with
   | [] => id
-  | _ :: _ => fun x i => (x i).uncurry'
+  | _ :: _ => fun x i => uncurry' (x i)
 
 def Tensor.map₃ {s : List ℕ} {α β γ μ : Type} (f : α → β → γ → μ) :
     Tensor α s → Tensor β s → Tensor γ s → Tensor μ s :=
@@ -312,17 +250,17 @@ def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0)
 
 def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
 
-def Tensor.get {s : List ℕ} : Tensor R s → Jax.ValidIdx s → R :=
+def Tensor.get {s : List ℕ} : Tensor R s → ValidIdx s → R :=
   match s with
   | [] => fun x _ ↦ x
   | n₀ :: ns => fun x i ↦ Tensor.get (x (i ⟨0, by simp⟩)) fun j ↦ i j.succ
 
-def Tensor.of {s : List ℕ} : (Jax.ValidIdx s → R) → Tensor R s :=
+def Tensor.of {s : List ℕ} : (ValidIdx s → R) → Tensor R s :=
   match s with
   | [] => fun x ↦ x (fun i ↦ nomatch i)
   | n₀ :: ns => fun x i₀ ↦
-    let x' : Jax.ValidIdx ns → R := fun is ↦
-      let i : Jax.ValidIdx (n₀ :: ns) := fun r ↦
+    let x' : ValidIdx ns → R := fun is ↦
+      let i : ValidIdx (n₀ :: ns) := fun r ↦
         match r with
         | Fin.mk 0 _ => i₀
         | Fin.mk (r + 1) h => is <| Fin.mk r <| by simp at h; omega
@@ -330,7 +268,7 @@ def Tensor.of {s : List ℕ} : (Jax.ValidIdx s → R) → Tensor R s :=
     Tensor.of x'
 
 @[simp]
-theorem Tensor.get_of {s : List ℕ} {x : Jax.ValidIdx s → R} : (Tensor.of x).get = x := by
+theorem Tensor.get_of {s : List ℕ} {x : ValidIdx s → R} : (Tensor.of x).get = x := by
   ext i
   induction s with
   | nil =>
