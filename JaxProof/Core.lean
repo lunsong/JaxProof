@@ -1,11 +1,18 @@
+import JaxProof.Curry
+
+/-!
+# The Core of the SSA framework
+
+This file contains definitions for code generation and native evaluation
+-/
+
 namespace SSA
 
+/-- `OpType` specifies the primitive ops. First-order and second-order ops are put together. -/
 def OpType (data : Type) : Type 1 := List (List data × List data) → List data → List data → Type
 
-/-- 
-`Expr` represent and SSA expression with multiput input and multiple output, using `data`
-as the data type, `op` as primitive operators and `ho` as supported higher order functions.
--/
+/-- `Expr` represent an SSA expression with multiput input and multiple output, using `data`
+as the data type and `op` as primitive ops. -/
 inductive Expr {data : Type} (op : OpType data) :
     List data → List data → Type where
   | append {args outs outs' : List data} :
@@ -24,7 +31,8 @@ abbrev Cached (α : Type) : Type := List (USize × α)
 abbrev Expr.CodeM (α : Type) : Type :=
   StateM (Nat × Cached (List Nat × String) × Cached String) α
 
-unsafe def Expr.addVars {args outs : List data} (expr : Expr op args outs) (code : String) : CodeM (List Nat) :=
+unsafe def Expr.addVars {args outs : List data} (expr : Expr op args outs) (code : String) :
+    CodeM (List Nat) :=
   let n_new_var : Nat := outs.length
   fun ⟨n_var, codes, libs⟩ ↦
     let new_var_ids := List.ofFn fun (i : Fin n_new_var) ↦ n_var + i.val
@@ -119,57 +127,40 @@ open Lean in macro_rules
         $(← bind_args rest (n + 1)))
     bind_args (argnames.toList.zip argtypes.toList) 0
 
+def Impl.bindType_simple {data : Type} (impl : data → Type) (args outs : List data) : Type :=
+  Curry (args.map impl) (Index (outs.map impl))
+
+def Impl.bindType {data : Type} (impl : data → Type)
+  (exprs : List (List data × List data)) (args outs : List data) :=
+  Curry (exprs.map fun ⟨a, b⟩ => bindType_simple impl a b) (bindType_simple impl args outs)
+
+class Impl (data : Type) (impl : data → Type) (op : OpType data) where
+  bind (expr : List (List data × List data)) (args outs : List data) : 
+    op expr args outs → Impl.bindType impl expr args outs
 
 inductive SimpleOp (data : Type) : List (List data × List data) → List data → List data → Type
   | call {α β : List data} : SimpleOp data [(α, β)] α β
   | node {α : data} : SimpleOp data [] [α, α] [α]
+
+instance (exprs : List (List String × List String)) (args outs : List String) :
+    ToString (SimpleOp String exprs args outs) where
+  toString op :=
+    match op with
+    | .call => "call"
+    | .node => "node"
 
 def foobar :=
   ssa SimpleOp String with x : "Float", y : "Float" begin
   let_expr z : ["Float"] := .bind .node (fun i => nomatch i) (.append x y);
   return z
 
+def barfoo :=
+  ssa SimpleOp String with x : "Float", y : "Float" begin
+  let_expr z : ["Float"] := .bind .call (fun i => match i with | .mk 0 _ => foobar) (x.append y);
+  return z
+
+#eval IO.println barfoo.code
 
 end SSA
 
-/-
-inductive SimpleOp : List data → data → Type where
-  | iota (n : Nat) : SimpleOp [] ⟨.float, [n]⟩
-  | add {σ : data} : SimpleOp [σ, σ] σ
 
-instance (args : List data) (out : data) : ToString (SimpleOp args out) where
-  toString x :=
-    match x with
-    | .iota n => s!"iota {n}"
-    | .add => s!"add"
-
-def SimpleOp.expr_add {args : List data} {σ : data} (x y : Expr SimpleOp args [σ]) :
-    Expr SimpleOp args [σ] :=
-  let feedin : Expr SimpleOp args [σ, σ] := Expr.append x y
-  Expr.bind SimpleOp.add feedin
-
-def SimpleOp.expr_iota {args : List data} (n : Nat) :
-    Expr SimpleOp args [⟨.float, [n]⟩] :=
-  Expr.bind (SimpleOp.iota n) Expr.nil
-
-def foobar (n : Nat) :=
-  define_expr using SimpleOp with
-    x : ⟨.float, [n]⟩
-  begin
-    let_expr y : [⟨.float, [n]⟩] := SimpleOp.expr_add x (SimpleOp.expr_iota n);
-    return (SimpleOp.expr_add y x).append y
-
-
-def barfoo (n : Nat) :=
-  define_expr using SimpleOp with
-    x : ⟨.float, [n]⟩
-  begin
-    let y := (foobar n).apply x;
-    return y
-
-#print foobar
-
-#eval IO.println (barfoo 10).code
-
-end Jax
--/
