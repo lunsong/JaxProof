@@ -9,37 +9,34 @@ inductive Expr {data : Type}
     (ho : List (List data × List data) → List data → List data → Type) :
     List data → List data → Type where
   | nil {args : List data} : Expr op ho args []
-  | arg {args : List data} (i : Fin args.length) : Expr op ho args [args[i]]
-  | call {args ins outs: List data} :
-    Expr op ho ins outs → Expr op ho args ins  → Expr op ho args outs
   | append {args outs outs' : List data} :
     Expr op ho args outs → Expr op ho args outs' → Expr op ho args (outs ++ outs')
   | select {args outs : List data} (i : List (Fin outs.length)) :
     Expr op ho args outs → Expr op ho args (i.map outs.get)
+  | arg {args : List data} (i : Fin args.length) : Expr op ho args [args[i]]
+  | call {args ins outs: List data} :
+    Expr op ho ins outs → Expr op ho args ins  → Expr op ho args outs
   | bindOp {args ins outs: List data} :
     op ins outs → Expr op ho args ins → Expr op ho args outs
-  | bindHo {args outs : List data} {ins : List (List data × List data)} :
-    ho ins args outs → (∀ i : Fin ins.length, Expr op ho ins[i].1 ins[i].2) → Expr op ho args outs
+  | bindHo {args ins outs : List data} {exprs : List (List data × List data)} :
+    ho exprs ins outs →
+      (∀ i : Fin exprs.length, Expr op ho exprs[i].1 exprs[i].2) → Expr op ho args ins → Expr op ho args outs
 
 variable {data : Type}
 variable {op : List data → List data → Type} [∀ args, ∀ out, ToString (op args out)]
 variable {ho : List (List data × List data) → List data → List data → Type}
+variable [∀ ins, ∀ args, ∀ outs, ToString (ho ins args outs)]
 
 abbrev Cached (α : Type) : Type := List (USize × α)
 
 abbrev Expr.CodeM (α : Type) : Type :=
   StateM (Nat × Cached (List Nat × String) × Cached String) α
 
-unsafe def Expr.addLine {args outs : List data}
-  (expr : Expr op ho args outs) (code : String) : CodeM (List Nat) :=
+unsafe def Expr.addVars {args outs : List data} (expr : Expr op ho args outs) (code : String) : CodeM (List Nat) :=
+  let n_new_var : Nat := outs.length
   fun ⟨n_var, codes, libs⟩ ↦
-    match codes.find? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
-    | none =>
-      let out_ids : List Nat := List.ofFn fun (i : Fin outs.length) ↦ i.val + n_var
-      let new_codes := codes.concat ⟨ptrAddrUnsafe expr, out_ids, code⟩
-      ⟨out_ids, outs.length + n_var, new_codes, libs⟩
-    | some ⟨_, out_ids, _⟩ =>
-      ⟨out_ids, n_var, codes, libs⟩
+    let new_var_ids := List.ofFn fun (i : Fin n_new_var) ↦ n_var + i.val
+    ⟨new_var_ids, n_var + n_new_var, codes.concat ⟨ptrAddrUnsafe expr, new_var_ids, code⟩, libs⟩
 
 def Expr.processCode (out_names : List String) (codes : Cached (List Nat × String)) : String :=
   let body : String := "\n".intercalate <|
@@ -50,50 +47,56 @@ def Expr.processCode (out_names : List String) (codes : Cached (List Nat × Stri
 
 mutual
 
-unsafe def Expr.addLib {args outs : List data}
-  (expr : Expr op args outs) : CodeM Nat :=
+unsafe def Expr.addLib {args outs : List data} (expr : Expr op ho args outs) : CodeM Nat :=
   fun ⟨n_var, codes, libs⟩ ↦
     match libs.findIdx? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
     | none =>
-      let ⟨out_names, _, fn_codes, libs⟩ := expr.genCode ⟨0, [], libs⟩
-      let fn_code := processCode out_names fn_codes
-      ⟨libs.length, n_var, codes, libs.concat ⟨ptrAddrUnsafe expr, fn_code⟩⟩
+      let ⟨out_names, _, expr_codes, libs⟩ := expr.genCode ⟨0, [], libs⟩
+      let expr_code := processCode out_names expr_codes
+      ⟨libs.length, n_var, codes, libs.concat ⟨ptrAddrUnsafe expr, expr_code⟩⟩
     | some i =>
       ⟨i, n_var, codes, libs⟩
 
-unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
-    CodeM (List String) :=
-  match expr with
-  | nil => pure []
-  | arg i => pure [s!"${i}"]
-  | bind op xs => do
-    let xs ← xs.genCode
-    let out_id ← expr.addLine s!"{op} {",".intercalate xs}"
-    return out_id.map fun n ↦ s!"%{n}"
-  | apply fn xs => do
-    let fn_id ← fn.addLib
-    let xs ← xs.genCode
-    let out_id ← expr.addLine s!"call @{fn_id} {",".intercalate xs}"
-    return out_id.map fun n ↦ s!"%{n}"
-  | append xs ys => do
-    let xs ← xs.genCode
-    let ys ← ys.genCode
-    return xs ++ ys
-  | select is xs => do
-    let xs ← xs.genCode
-    return is.map fun i =>
-      match xs[i]? with
-      | none => ""
-      | some a => a
-  | fori_loop n fn init => do
-    let fn ← fn.addLib
-    let init ← init.genCode
-    let out_id ← expr.addLine s!"fori_loop {n} @{fn} {",".intercalate init}"
-    return out_id.map fun n ↦ s!"%{n}"
+unsafe def Expr.genCode {args outs : List data} (expr : Expr op ho args outs) :
+    CodeM (List String) := do
+  let ⟨_, codes, _⟩ ← get
+  match codes.find? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
+  | none =>
+    match expr with
+    | nil => return []
+    | arg i => return [s!"${i}"]
+    | bindOp op xs =>
+        let xs ← xs.genCode
+        let out_id ← expr.addVars s!"{op} {",".intercalate xs}"
+        return out_id.map fun n ↦ s!"%{n}"
+    | call fn xs => do
+      let fn_id ← fn.addLib
+      let xs ← xs.genCode
+      let out_id ← expr.addVars s!"call @{fn_id} {",".intercalate xs}"
+      return out_id.map fun n ↦ s!"%{n}"
+    | append xs ys => do
+      let xs ← xs.genCode
+      let ys ← ys.genCode
+      return xs ++ ys
+    | select is xs => do
+      let xs ← xs.genCode
+      return is.map fun i =>
+        match xs[i]? with
+        | none => ""
+        | some a => a
+    | bindHo ho exprs ins =>
+      let exprs ← (List.ofFn fun i => (exprs i).addLib).mapM id
+      let exprs := ",".intercalate (exprs.map fun i => s!"@{i}")
+      let ins ← ins.genCode
+      let out_ids ← expr.addVars s!"{ho} {exprs},{",".intercalate ins}"
+      return out_ids.map fun n ↦ s!"%{n}"
+      
+  | some ⟨_, out_ids, _⟩ =>
+    return out_ids.map fun n => s!"%{n}"
 
 end
 
-unsafe def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
+unsafe def Expr.code {args outs : List data} (expr : Expr op ho args outs) : String :=
   let ⟨out_names, _, codes, libs⟩ := expr.genCode ⟨0, [], []⟩
   let body := processCode out_names codes
   let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}\n{libs[i].2}"
@@ -101,7 +104,7 @@ unsafe def Expr.code {args outs : List data} (expr : Expr op args outs) : String
 
 declare_syntax_cat expr_builder
 
-syntax "define_expr" "using" term "with" ( ident ":" term ),*
+syntax "ssa" term "with" ( ident ":" term ),*
        "begin" expr_builder : term
 
 syntax "let_expr" ident ":" term ":=" term ";" expr_builder : expr_builder
@@ -110,29 +113,44 @@ syntax "let" ident ":=" term ";" expr_builder : expr_builder
 syntax "return" term : expr_builder
 
 open Lean in
-partial def parse_expr_builder (op args : TSyntax `term) :
+partial def parse_expr_builder (expr : TSyntax `term) :
     TSyntax `expr_builder → MacroM (TSyntax `term)
   | `(expr_builder| let_expr $name : $outs := $val; $content) => do
-    `(term| let $name : Expr $op $args $outs := $val;
-            $(← parse_expr_builder op args content))
+    `(term| let $name : $expr $outs := $val;
+            $(← parse_expr_builder expr content))
   | `(expr_builder| let $name : $type := $val; $content) => do
-    `(term| let $name : $type := $val; $(← parse_expr_builder op args content))
+    `(term| let $name : $type := $val; $(← parse_expr_builder expr content))
   | `(expr_builder| let $name := $val; $content) => do
-    `(term| let $name := $val; $(← parse_expr_builder op args content))
+    `(term| let $name := $val; $(← parse_expr_builder expr content))
   | `(expr_builder| return $rets) => pure rets
   | _ => Macro.throwUnsupported
 
 open Lean in macro_rules
-  | `(define_expr using $op with $[$argnames : $argtypes],* begin $body) => do
+  | `(ssa $expr with $[$argnames : $argtypes],* begin $body) => do
     let args : TSyntax `term ← `(term| [ $[$argtypes],* ])
-    let parsed_body : TSyntax `term ← parse_expr_builder op args body
+    let expr_head : TSyntax `term ← `(term| $expr $args)
+    let parsed_body : TSyntax `term ← parse_expr_builder expr_head body
     let rec bind_args : List (TSyntax `ident × TSyntax `term) → Nat → MacroM (TSyntax `term)
       | [], _ => return parsed_body
       | ⟨name, out⟩ :: rest, n => do
-        `(term| let $name : Expr $op $args [$out] := Expr.arg $(quote n);
+        `(term| let $name : $expr_head $args [$out] := Expr.arg $(quote n);
         $(← bind_args rest (n + 1)))
     bind_args (argnames.toList.zip argtypes.toList) 0
 
+
+inductive SimpleOp : List Nat → List Nat → Type where
+  | iota (n : Nat) : SimpleOp [] [n]
+  | add {n : Nat} : SimpleOp [n, n] [n] 
+
+inductive SimpleHo : List (List Nat × List Nat) → List Nat → List Nat → Type
+  | fori_loop {carry : Nat
+
+def foobar (n : Nat) :=
+  ssa Expr
+
+end SSA
+
+/-
 inductive SimpleOp : List data → data → Type where
   | iota (n : Nat) : SimpleOp [] ⟨.float, [n]⟩
   | add {σ : data} : SimpleOp [σ, σ] σ
@@ -172,3 +190,4 @@ def barfoo (n : Nat) :=
 #eval IO.println (barfoo 10).code
 
 end Jax
+-/
