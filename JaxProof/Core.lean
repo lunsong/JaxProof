@@ -1,3 +1,5 @@
+import JaxProof.Curry
+
 /-!
 # The Core of the SSA framework
 
@@ -130,42 +132,32 @@ open Lean in macro_rules
     bind_args (argnames.toList.zip argtypes.toList) 0
 
 def evalType {data : Type} (impl : data → Type) (args outs : List data) : Type :=
-  match args with
-  | [] => ∀ i : Fin outs.length, impl outs[i]
-  | arg :: args => impl arg → evalType impl args outs
+  Curry (args.map impl) (Index (outs.map impl))
 
 def Impl.bindType {data : Type} (impl : data → Type)
   (exprs : List (List data × List data)) (args outs : List data) :=
-  match exprs with
-  | [] => evalType impl args outs
-  | expr :: exprs => evalType impl expr.1 expr.2 → bindType impl exprs args outs
+  Curry (exprs.map fun ⟨a, b⟩ => evalType impl a b) (evalType impl args outs)
 
 class Impl {data : Type} (op : OpType data) (impl : data → Type) where
   bind (expr : List (List data × List data)) (args outs : List data) : 
     op expr args outs → Impl.bindType impl expr args outs
-
-def evalType.const {data : Type} {impl : data → Type} {args : List data} {outs : List data}
-  (x : ∀ i : Fin outs.length, impl outs[i]) : evalType impl args outs :=
-  match args with
-  | [] => x
-  | _ :: _ => fun _ => const x
 
 def evalType.arg {data : Type} {impl : data → Type} {args : List data} (i : Fin args.length) :
     evalType impl args [args[i]] :=
   match args with
   | _ :: _ =>
     match i with
-    | .mk 0 h => fun x => const fun r => match r with | .mk 0 _ => x
+    | .mk 0 h => fun x => Curry.pure fun r => match r with | .mk 0 _ => x
     | .mk (i + 1) hi => fun _ => arg <| .mk i <| by simpa using hi
 
-
-
 def evalType.append {data : Type} {impl : data → Type} {args outs outs' : List data} :
-    evalType impl args outs → evalType impl args outs' → evalType impl args (outs ++ outs') :=
-  match args with
-  | [] =>
+    evalType impl args outs → evalType impl args outs' → evalType impl args (outs ++ outs') := by
+  intro x y
+  refine Curry.map₂ ?_ x y
 
-  | _ => sorry
+
+
+
 
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
