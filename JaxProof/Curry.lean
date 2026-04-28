@@ -2,6 +2,14 @@ import Mathlib.Algebra.Group.Defs
 
 def Index (γ : List Type) : Type := ∀ i : Fin γ.length, γ[i]
 
+def Index.append {γ γ' : List Type} : Index γ → Index γ' → Index (γ ++ γ') :=
+  match γ with
+  | [] => fun x y => y
+  | γ₀ :: γ => fun x y r =>
+    match r with
+    | .mk 0 h => x <| .mk 0 <| by simp
+    | .mk (r + 1) h => append (fun r => x r.succ) y <| .mk r <| by simpa using h
+
 def Curry (γ : List Type) (α : Type) : Type :=
   match γ with
   | [] => α
@@ -44,10 +52,27 @@ def Curry.pure {γ : List Type} {α : Type} (x : α) : Curry γ α :=
   | [] => x
   | _ :: _ => fun _ => pure x
 
+def Curry.map {γ : List Type} {α β : Type} (f : α → β) : Curry γ α → Curry γ β :=
+  match γ with
+  | [] => f
+  | _ :: _ => fun a x => (a x).map f
+
+def Curry.map₂ {γ : List Type} {α β μ : Type} (f : α → β → μ) : Curry γ α → Curry γ β → Curry γ μ :=
+  match γ with
+  | [] => f
+  | _ :: _ => fun x y a => map₂ f (x a) (y a)
+
 def Curry.bind {γ : List Type} {α β : Type} (x : Curry γ α) (f : α → Curry γ β) : Curry γ β :=
   match γ with
   | [] => f x
   | _ :: _ => fun a => bind (x a) fun b => f b a
+
+def Curry.arg {γ : List Type} (i : Fin γ.length) : Curry γ γ[i] :=
+  match γ with
+  | γ₀ :: γs =>
+    match i with
+    | .mk 0 _ => fun x => pure x
+    | .mk (i + 1) hi => fun _ => arg <| .mk i <| by simpa using hi
 
 instance Curry.instMonad (γ : List Type) : Monad (Curry γ) where
   pure := Curry.pure
