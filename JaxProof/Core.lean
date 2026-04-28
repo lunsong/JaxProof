@@ -1,5 +1,3 @@
-import JaxProof.Curry
-
 /-!
 # The Core of the SSA framework
 
@@ -23,6 +21,8 @@ inductive Expr {data : Type} (op : OpType data) :
   | bind {args ins outs : List data} {exprs : List (List data × List data)} :
     op exprs ins outs →
       (∀ i : Fin exprs.length, Expr op exprs[i].1 exprs[i].2) → Expr op args ins → Expr op args outs
+
+section
 
 variable {data : Type} {op : OpType data} [∀ exprs, ∀ ins, ∀ outs, ToString (op exprs ins outs)]
 
@@ -92,6 +92,8 @@ unsafe def Expr.code {args outs : List data} (expr : Expr op args outs) : String
   let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}\n{libs[i].2}"
   s!"{body}\n\n{libs}"
 
+end
+
 declare_syntax_cat expr_builder
 
 syntax "ssa" term "with" ( ident ":" term ),*
@@ -127,16 +129,52 @@ open Lean in macro_rules
         $(← bind_args rest (n + 1)))
     bind_args (argnames.toList.zip argtypes.toList) 0
 
-def Impl.bindType_simple {data : Type} (impl : data → Type) (args outs : List data) : Type :=
-  Curry (args.map impl) (Index (outs.map impl))
+def evalType {data : Type} (impl : data → Type) (args outs : List data) : Type :=
+  match args with
+  | [] => ∀ i : Fin outs.length, impl outs[i]
+  | arg :: args => impl arg → evalType impl args outs
 
 def Impl.bindType {data : Type} (impl : data → Type)
   (exprs : List (List data × List data)) (args outs : List data) :=
-  Curry (exprs.map fun ⟨a, b⟩ => bindType_simple impl a b) (bindType_simple impl args outs)
+  match exprs with
+  | [] => evalType impl args outs
+  | expr :: exprs => evalType impl expr.1 expr.2 → bindType impl exprs args outs
 
-class Impl (data : Type) (impl : data → Type) (op : OpType data) where
+class Impl {data : Type} (op : OpType data) (impl : data → Type) where
   bind (expr : List (List data × List data)) (args outs : List data) : 
     op expr args outs → Impl.bindType impl expr args outs
+
+def evalType.const {data : Type} {impl : data → Type} {args : List data} {outs : List data}
+  (x : ∀ i : Fin outs.length, impl outs[i]) : evalType impl args outs :=
+  match args with
+  | [] => x
+  | _ :: _ => fun _ => const x
+
+def evalType.arg {data : Type} {impl : data → Type} {args : List data} (i : Fin args.length) :
+    evalType impl args [args[i]] :=
+  match args with
+  | _ :: _ =>
+    match i with
+    | .mk 0 h => fun x => const fun r => match r with | .mk 0 _ => x
+    | .mk (i + 1) hi => fun _ => arg <| .mk i <| by simpa using hi
+
+
+
+def evalType.append {data : Type} {impl : data → Type} {args outs outs' : List data} :
+    evalType impl args outs → evalType impl args outs' → evalType impl args (outs ++ outs') :=
+  match args with
+  | [] =>
+
+  | _ => sorry
+
+def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
+  (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
+  | arg i => evalType.arg i
+  | append x y =>  by sorry
+  | _ => sorry
+  --| bind (exprs := exprs) op libs ins =>
+  --  let op := Impl.bind exprs args outs op
+  --  by sorry
 
 inductive SimpleOp (data : Type) : List (List data × List data) → List data → List data → Type
   | call {α β : List data} : SimpleOp data [(α, β)] α β
