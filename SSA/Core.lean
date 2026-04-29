@@ -223,25 +223,6 @@ def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
     evalType.apply op (xs.eval impl)
   | apply f xs => evalType.apply (f.eval impl) (xs.eval impl)
 
-inductive SimpleOp (data : Type) : List (List data × List data) → List data → List data → Type
-  | node {α : data} : SimpleOp data [] [α, α] [α]
-
-instance (exprs : List (List String × List String)) (args outs : List String) :
-    ToString (SimpleOp String exprs args outs) where
-  toString _ := "node"
-
-def foobar :=
-  ssa SimpleOp String with x : "Float", y : "Float" begin
-  let_expr z : ["Float"] := .bind .node (fun i => nomatch i) (.append x y);
-  return z
-
-def barfoo :=
-  ssa SimpleOp String with x : "Float", y : "Float" begin
-  let_expr z : ["Float"] := foobar.apply (x.append y);
-  return z
-
-#eval IO.println barfoo.code
-
 end SSA
 
 
