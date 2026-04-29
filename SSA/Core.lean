@@ -172,6 +172,15 @@ inductive SimpleOp {data : Type} (op : List data → data → Type) :
     List (List data × List data) → List data → List data → Type where
   | simple {args : List data} {out : data} : op args out → SimpleOp op [] args [out]
 
+class SimpleImpl {data : Type} (op : List data → data → Type) (impl : data → Type) where
+  bind {args : List data} {out : data} : op args out → Curry impl args (impl out)
+
+instance SimpleOp.instImpl {data : Type} (op : List data → data → Type) (impl : data → Type)
+  [SimpleImpl op impl] : Impl (SimpleOp op) impl where
+  bind op :=
+    match op with
+    | simple op => (SimpleImpl.bind op).map Index.single
+
 inductive CombineOp {data : Type} (op₀ op₁ : OpType data) :
     List (List data × List data) → List data → List data → Type where
   | left {exprs : List (List data × List data)} {args outs : List data} :

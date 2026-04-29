@@ -1,7 +1,9 @@
-import JaxProof.Eval
-import JaxProof.XlaOp
+import SSA.Core
+import SSA.XlaOp
 
-namespace Jax
+namespace XLA
+
+open SSA
 
 abbrev NaiveImpl : TensorType → Type
   | ⟨.float, s⟩ => Tensor ℝ s
@@ -85,13 +87,11 @@ def NaiveImpl.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Ten
   else
     x
 
-noncomputable instance : TensorImpl Op NaiveImpl where
-  ofNat i := Int.ofNat i
-  toInt x := x
-  impl {args} {out} op := match op with
-  | .abs => fun x => match out with
-    | ⟨.float, _⟩
-    | ⟨.int, _⟩ => x.map abs
+noncomputable instance : Impl (SimpleOp Op) NaiveImpl where
+  bind op := match op with
+  | .simple (.abs => fun x => match out with
+    | [⟨.float, _⟩]
+    | [⟨.int, _⟩] => by sorry
   | .acos => fun x => x.map Real.arccos
   -- `Real.Arcosh` isn't available in this lean version
   | .acosh => fun x => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
@@ -186,4 +186,4 @@ noncomputable instance : TensorImpl Op NaiveImpl where
 
 -/
 
-end Jax
+end XLA
