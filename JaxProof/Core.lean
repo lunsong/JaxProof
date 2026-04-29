@@ -77,7 +77,7 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
         | some a => a
     | bind op exprs ins =>
       let exprs ← (List.ofFn fun i => (exprs i).addLib).mapM id
-      let exprs := ",".intercalate (exprs.map fun i => s!"@{i}")
+      let exprs := ",".intercalate (exprs.map fun i => s!"&{i}")
       let ins ← ins.genCode
       let out_ids ← expr.addVars s!"{op} {exprs},{",".intercalate ins}"
       return out_ids.map fun n ↦ s!"%{n}"
@@ -95,7 +95,7 @@ end
 unsafe def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
   let ⟨out_names, _, codes, libs⟩ := expr.genCode ⟨0, [], []⟩
   let body := processCode out_names codes
-  let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}\n{libs[i].2}"
+  let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"&{i}\n{libs[i].2}"
   s!"{body}\n\n{libs}"
 
 end
@@ -224,15 +224,11 @@ def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   | apply f xs => evalType.apply (f.eval impl) (xs.eval impl)
 
 inductive SimpleOp (data : Type) : List (List data × List data) → List data → List data → Type
-  | call {α β : List data} : SimpleOp data [(α, β)] α β
   | node {α : data} : SimpleOp data [] [α, α] [α]
 
 instance (exprs : List (List String × List String)) (args outs : List String) :
     ToString (SimpleOp String exprs args outs) where
-  toString op :=
-    match op with
-    | .call => "call"
-    | .node => "node"
+  toString _ := "node"
 
 def foobar :=
   ssa SimpleOp String with x : "Float", y : "Float" begin
@@ -241,7 +237,7 @@ def foobar :=
 
 def barfoo :=
   ssa SimpleOp String with x : "Float", y : "Float" begin
-  let_expr z : ["Float"] := .bind .call (fun i => match i with | .mk 0 _ => foobar) (x.append y);
+  let_expr z : ["Float"] := foobar.apply (x.append y);
   return z
 
 #eval IO.println barfoo.code
