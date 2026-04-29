@@ -5,16 +5,16 @@ import Mathlib.Algebra.Ring.Defs
 import Mathlib.Data.Nat.ModEq
 import Mathlib.GroupTheory.Perm.Cycle.Concrete
 import Batteries.Data.Fin.Lemmas
-import JaxProof.Curry
+import SSA.Curry
 
-namespace Jax
+namespace SSA
 
 --def Tensor (R : Type) : List ℕ → Type
 --  | [] => R
 --  | n₀ :: ns => Fin n₀ → Tensor R ns
 
-def Tensor (R : Type) (shape : List ℕ) : Type :=
-  Curry (shape.map Fin) R
+abbrev Tensor (R : Type) (shape : List ℕ) : Type :=
+  Curry Fin shape R
 
 variable {R : Type}
 
@@ -61,10 +61,10 @@ def Tensor.einprod [Mul R] [One R] (s : List ℕ)
     let xs' := xs.map fun ⟨i, x⟩ ↦ ⟨filter_pred i, filter i x⟩
     einprod s' xs'
 
-instance [Add R] {s : List ℕ} : Add (Tensor R s) := inferInstanceAs (Add (Curry (s.map Fin) R))
-instance [Zero R] {s : List ℕ} : Zero (Tensor R s) := inferInstanceAs (Zero (Curry (s.map Fin) R))
+instance [Add R] {s : List ℕ} : Add (Tensor R s) := inferInstanceAs (Add (Curry Fin s R))
+instance [Zero R] {s : List ℕ} : Zero (Tensor R s) := inferInstanceAs (Zero (Curry Fin s R))
 instance [AddCommMonoid R] (s : List ℕ) : AddCommMonoid (Tensor R s) :=
-  inferInstanceAs (AddCommMonoid (Curry (s.map Fin) R))
+  inferInstanceAs (AddCommMonoid (Curry Fin s R))
 
 @[simp]
 def Tensor.sumFirst [AddCommMonoid R] {s : List ℕ} (x : Tensor R s) : Tensor R s.tail :=
@@ -248,61 +248,9 @@ def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0)
       (by simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at hs; exact hs.2)
       (x i₀')
 
-def ValidIdx (s : List ℕ) : Type := ∀ i : Fin s.length, Fin (s.get i)
-
-def Tensor.get {s : List ℕ} : Tensor R s → ValidIdx s → R :=
-  match s with
-  | [] => fun x _ ↦ x
-  | n₀ :: ns => fun x i ↦ Tensor.get (x (i ⟨0, by simp⟩)) fun j ↦ i j.succ
-
-def Tensor.of {s : List ℕ} : (ValidIdx s → R) → Tensor R s :=
-  match s with
-  | [] => fun x ↦ x (fun i ↦ nomatch i)
-  | n₀ :: ns => fun x i₀ ↦
-    let x' : ValidIdx ns → R := fun is ↦
-      let i : ValidIdx (n₀ :: ns) := fun r ↦
-        match r with
-        | Fin.mk 0 _ => i₀
-        | Fin.mk (r + 1) h => is <| Fin.mk r <| by simp at h; omega
-      x i
-    Tensor.of x'
-
-@[simp]
-theorem Tensor.get_of {s : List ℕ} {x : ValidIdx s → R} : (Tensor.of x).get = x := by
-  ext i
-  induction s with
-  | nil =>
-    simp only [get, of, List.length_nil, List.get_eq_getElem]
-    congr
-    apply funext
-    intro r
-    nomatch r
-  | cons s₀ s ih =>
-    simp only [get, of, List.length_cons, List.get_eq_getElem, Fin.zero_eta, ih, Fin.succ_mk]
-    congr
-    conv_lhs =>
-      intro r
-      equals i r =>
-        match r with
-        | 0 => rfl
-        | .mk (_ + 1) _ => rfl
-
-@[simp]
-theorem Tensor.of_get {s : List ℕ} {x : Tensor R s} : Tensor.of x.get = x := by
-  induction s with
-  | nil => rfl
-  | cons s₀ s ih =>
-    simp only [of, get, List.length_cons, List.get_eq_getElem]
-    conv_lhs =>
-      intro i₀; arg 1
-      equals (x i₀).get =>
-        ext is
-        congr
-    simp [ih]
-
 def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     Tensor R s → Tensor R (List.ofFn fun i ↦ s.get (σ i)) :=
-  fun x ↦ Tensor.of fun i ↦ x.get fun μ ↦ 
+  fun x ↦ Curry.of fun i ↦ x.get fun μ ↦ 
     let j := i <| (σ.symm μ).cast <| by simp
     j.cast <| by simp
 
@@ -341,14 +289,7 @@ noncomputable def softmax {n₁ n₂ : ℕ} (x : Tensor ℝ [n₁, n₂]) : Tens
 
 example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
     softmax x i j = x i j / ∑ k, x i k := by
-  simp only [softmax, Tensor.broadcast, Tensor.einsum, Tensor.sumN, Tensor.sumFirst, Tensor.einprod,
-    List.length_nil, List.map_nil, List.length_cons, Nat.reduceAdd, Fin.mk_one, Fin.isValue,
-    Fin.zero_eta, List.map_cons, filter_pred, Tensor.einprod.filter, List.get_eq_getElem,
-    Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, List.prod_cons, List.prod_nil,
-    mul_one, List.tail_cons, id_eq, div_def, Tensor.map₂]
-  apply congrArg
-  conv_lhs =>
-    change (∑ j, fun i ↦ x i j) i
-  rw [Finset.sum_apply]
+  simp [softmax, Tensor.broadcast, Tensor.einsum, Tensor.einprod]
 
-end Jax
+
+end SSA

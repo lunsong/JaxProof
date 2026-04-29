@@ -1,3 +1,4 @@
+import SSA.Curry
 /-!
 # The Core of the SSA framework
 
@@ -136,9 +137,7 @@ open Lean in macro_rules
     bind_args (argnames.toList.zip argtypes.toList) 0
 
 def evalType {data : Type} (impl : data → Type) (args outs : List data) : Type :=
-  match args with
-  | [] => ∀ i : Fin outs.length, impl outs[i]
-  | arg :: args => impl arg → evalType impl args outs
+  Curry impl args (Index impl outs)
 
 def Impl.bindType {data : Type} (impl : data → Type)
   (exprs : List (List data × List data)) (args outs : List data) :=
@@ -150,79 +149,40 @@ class Impl {data : Type} (op : OpType data) (impl : data → Type) where
   bind {expr : List (List data × List data)} {args outs : List data} : 
     op expr args outs → Impl.bindType impl expr args outs
 
-def evalType.const {data : Type} {impl : data → Type} {args outs : List data}
-  (x : ∀ i : Fin outs.length, impl outs[i]) : evalType impl args outs :=
-  match args with
-  | [] => x
-  | _ :: _ => fun _ => const x
-
-def evalType.arg {data : Type} {impl : data → Type} {args : List data} (i : Fin args.length) :
-    evalType impl args [args[i]] :=
-  match args with
-  | _ :: _ =>
-    match i with
-    | .mk 0 h => fun x => const fun r => match r with | .mk 0 _ => x
-    | .mk (i + 1) hi => fun _ => arg <| .mk i <| by simpa using hi
-
-def evalType.append₀ {data : Type} {impl : data → Type} {outs outs' : List data}
-    (x : ∀ i : Fin outs.length, impl outs[i]) (y : ∀ i : Fin outs'.length, impl outs'[i])
-    (i : Fin (outs ++ outs').length) : impl (outs ++ outs')[i] := 
-  match outs with
-  | [] => y i
-  | out :: outs =>
-    match i with
-    | .mk 0 h => x <| .mk 0 <| by simp
-    | .mk (i + 1) h => append₀ (fun i => x i.succ) y <| .mk i <| by simpa using h
-
-def evalType.append {data : Type} {impl : data → Type} {args outs outs' : List data} :
-    evalType impl args outs → evalType impl args outs' → evalType impl args (outs ++ outs') :=
-  match args with
-  | [] => append₀
-  | _ :: _ => fun x y a => append (x a) (y a)
-
-def evalType.select₀ {data : Type} {impl : data → Type} {outs : List data} (i : List (Fin outs.length))
-  (x : ∀ i : Fin outs.length, impl outs[i]) (r : Fin (i.map outs.get).length) : impl (i.map outs.get)[r] :=
-  match i with
-  | i₀ :: i =>
-    match r with
-    | .mk 0 h => x i₀
-    | .mk (r + 1) h => select₀ i x <| .mk r <| by simpa using h
-
-def evalType.select {data : Type} {impl : data → Type} {args outs : List data} (i : List (Fin outs.length)) :
-    evalType impl args outs → evalType impl args (i.map outs.get) :=
-  match args with
-  | [] => select₀ i
-  | _ :: _ => fun x a => select i (x a)
-
-def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data × List data)} {args outs : List data} :
-    Impl.bindType impl exprs args outs → (∀ i : Fin exprs.length, evalType impl exprs[i].1 exprs[i].2) → evalType impl args outs :=
+def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data × List data)}
+  {args outs : List data} :
+    Impl.bindType impl exprs args outs →
+    (∀ i : Fin exprs.length, evalType impl exprs[i].1 exprs[i].2) → evalType impl args outs :=
   match exprs with
   | [] => fun x _ => x
   | expr :: exprs => fun op fs => bind (op (fs ⟨0, by simp⟩)) (fun i => fs i.succ)
 
-def evalType.apply₀ {data : Type} {impl : data → Type} {ins outs : List data} :
-    evalType impl ins outs → (∀ i : Fin ins.length, impl ins[i]) → (∀ i : Fin outs.length, impl outs[i]) :=
-  match ins with
-  | [] => fun x _ => x
-  | in₀ :: ins => fun f x => apply₀ (f (x ⟨0, by simp⟩)) fun i => x i.succ
-
-def evalType.apply {data : Type} {impl : data → Type} {args ins outs : List data} :
-    evalType impl ins outs → evalType impl args ins → evalType impl args outs :=
-  match args with
-  | [] => apply₀
-  | _ :: _ => fun f x a => apply f (x a)
-
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
-  | arg i => evalType.arg i
-  | append x y =>  evalType.append (x.eval impl) (y.eval impl)
-  | select i x => evalType.select i (x.eval impl)
+  | arg i => (Curry.arg i).map Index.single
+  | append x y =>  Curry.map₂ Index.append (x.eval impl) (y.eval impl)
+  | select i x => (x.eval impl).map (Index.select i)
   | bind op fs xs =>
     let op := Impl.bind (impl := impl) op
     let op := evalType.bind op fun i => (fs i).eval impl
-    evalType.apply op (xs.eval impl)
-  | apply f xs => evalType.apply (f.eval impl) (xs.eval impl)
+    (xs.eval impl).map op.get
+  | apply f xs => (xs.eval impl).map (f.eval impl).get
+
+inductive SimpleOp {data : Type} (op : List data → data → Type) :
+    List (List data × List data) → List data → List data → Type where
+  | simple {args : List data} {out : data} : op args out → SimpleOp op [] args [out]
+
+inductive CombineOp {data : Type} (op₀ op₁ : OpType data) :
+    List (List data × List data) → List data → List data → Type where
+  | left {exprs : List (List data × List data)} {args outs : List data} :
+    op₀ exprs args outs → CombineOp op₀ op₁ exprs args outs
+  | right {exprs : List (List data × List data)} {args outs : List data} :
+    op₁ exprs args outs → CombineOp op₀ op₁ exprs args outs
+
+instance CombineImpl {data : Type} (op₀ op₁ : OpType data) (impl : data → Type)
+  [Impl op₀ impl] [Impl op₁ impl] : Impl (CombineOp op₀ op₁) impl where
+  bind
+  | .left op
+  | .right op => Impl.bind op
 
 end SSA
-
-

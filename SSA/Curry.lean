@@ -1,8 +1,30 @@
 import Mathlib.Algebra.Group.Defs
 
-def Index (γ : List Type) : Type := ∀ i : Fin γ.length, γ[i]
+variable {ι : Type}
 
-def Index.append {γ γ' : List Type} : Index γ → Index γ' → Index (γ ++ γ') :=
+def Index (m : ι → Type) (γ : List ι) : Type := ∀ i : Fin γ.length, m γ[i]
+
+abbrev Curry (m : ι → Type) (γ : List ι) (α : Type) : Type :=
+  match γ with
+  | [] => α
+  | γ :: γs => m γ → Curry m γs α
+
+variable {m : ι → Type} {α β μ : Type}
+
+def Index.null : Index m [] := fun r => nomatch r
+
+def Index.single {γ : ι} : m γ → Index m [γ] :=
+  fun x r => match r with | .mk 0 _ => x
+
+def Index.select {γ : List ι} (i : List (Fin γ.length)) : Index m γ → Index m (i.map γ.get) :=
+  match i with
+  | [] => fun x => null
+  | i₀ :: i => fun x r =>
+    match r with
+    | .mk 0 h => x i₀
+    | .mk (r + 1) h => select i x <| .mk r <| by simpa using h
+
+def Index.append {γ γ' : List ι} : Index m γ → Index m γ' → Index m (γ ++ γ') :=
   match γ with
   | [] => fun x y => y
   | γ₀ :: γ => fun x y r =>
@@ -10,17 +32,12 @@ def Index.append {γ γ' : List Type} : Index γ → Index γ' → Index (γ ++ 
     | .mk 0 h => x <| .mk 0 <| by simp
     | .mk (r + 1) h => append (fun r => x r.succ) y <| .mk r <| by simpa using h
 
-def Curry (γ : List Type) (α : Type) : Type :=
-  match γ with
-  | [] => α
-  | γ :: γs => γ → Curry γs α
-
-def Curry.get {γ : List Type} {α : Type} (f : Curry γ α) (i : Index γ) : α :=
+def Curry.get {γ : List ι} (f : Curry m γ α) (i : Index m γ) : α :=
   match γ with
   | [] => f
   | γ :: γs => (f (i ⟨0, by simp⟩)).get fun r => i r.succ
 
-def Curry.of {γ : List Type} {α : Type} (f : Index γ → α) : Curry γ α :=
+def Curry.of {γ : List ι} (f : Index m γ → α) : Curry m γ α :=
   match γ with
   | [] => f fun r => nomatch r
   | γ :: γs => fun x => of fun a => f fun r =>
@@ -28,12 +45,12 @@ def Curry.of {γ : List Type} {α : Type} (f : Index γ → α) : Curry γ α :=
     | .mk 0 h => x
     | .mk (r + 1) h => a <| .mk r <| by simpa using h
 
-theorem Curry.of_get {γ : List Type} {α : Type} (x : Curry γ α) : of x.get = x := by
+theorem Curry.of_get {γ : List ι} (x : Curry m γ α) : of x.get = x := by
   induction γ with
   | nil => rfl
   | cons γ₀ γs ih => simp [of, get, ih, Fin.succ]
 
-theorem Curry.get_of {γ : List Type} {α : Type} (x : Index γ → α) : (of x).get = x := by
+theorem Curry.get_of {γ : List ι} (x : Index m γ → α) : (of x).get = x := by
   ext i
   induction γ with
   | nil =>
@@ -47,49 +64,49 @@ theorem Curry.get_of {γ : List Type} {α : Type} (x : Index γ → α) : (of x)
     refine funext fun r => ?_
     match r with | 0 | .mk (r + 1) h => rfl
 
-def Curry.pure {γ : List Type} {α : Type} (x : α) : Curry γ α :=
+def Curry.pure {γ : List ι} (x : α) : Curry m γ α :=
   match γ with
   | [] => x
   | _ :: _ => fun _ => pure x
 
-def Curry.map {γ : List Type} {α β : Type} (f : α → β) : Curry γ α → Curry γ β :=
+def Curry.map {γ : List ι} (f : α → β) : Curry m γ α → Curry m γ β :=
   match γ with
   | [] => f
   | _ :: _ => fun a x => (a x).map f
 
-def Curry.map₂ {γ : List Type} {α β μ : Type} (f : α → β → μ) : Curry γ α → Curry γ β → Curry γ μ :=
+def Curry.map₂ {γ : List ι} (f : α → β → μ) : Curry m γ α → Curry m γ β → Curry m γ μ :=
   match γ with
   | [] => f
   | _ :: _ => fun x y a => map₂ f (x a) (y a)
 
-def Curry.bind {γ : List Type} {α β : Type} (x : Curry γ α) (f : α → Curry γ β) : Curry γ β :=
+def Curry.bind {γ : List ι} (x : Curry m γ α) (f : α → Curry m γ β) : Curry m γ β :=
   match γ with
   | [] => f x
   | _ :: _ => fun a => bind (x a) fun b => f b a
 
-def Curry.arg {γ : List Type} (i : Fin γ.length) : Curry γ γ[i] :=
+def Curry.arg {γ : List ι} (i : Fin γ.length) : Curry m γ (m γ[i]) :=
   match γ with
   | γ₀ :: γs =>
     match i with
     | .mk 0 _ => fun x => pure x
     | .mk (i + 1) hi => fun _ => arg <| .mk i <| by simpa using hi
 
-instance Curry.instMonad (γ : List Type) : Monad (Curry γ) where
+instance Curry.instMonad (γ : List ι) : Monad (Curry m γ) where
   pure := Curry.pure
   bind := Curry.bind
 
-instance Curry.instZero (γ : List Type) (α : Type) [Zero α] : Zero (Curry γ α) where
+instance Curry.instZero (γ : List ι) [Zero α] : Zero (Curry m γ α) where
   zero := pure 0
 
-instance Curry.instHAdd (γ : List Type) (α β μ : Type) [HAdd α β μ] :
-    HAdd (Curry γ α) (Curry γ β) (Curry γ μ) where
+instance Curry.instHAdd (γ : List ι) [HAdd α β μ] :
+    HAdd (Curry m γ α) (Curry m γ β) (Curry m γ μ) where
   hAdd x y := do return (← x) + (← y)
 
-instance Curry.instAdd (γ : List Type) (α : Type) [Add α] : Add (Curry γ α) where
+instance Curry.instAdd (γ : List ι) [Add α] : Add (Curry m γ α) where
   add x y := do return (← x) + (← y)
 
-instance Curry.instAddCommMonoid (γ : List Type) (α : Type) [AddCommMonoid α] :
-    AddCommMonoid (Curry γ α) where
+instance Curry.instAddCommMonoid (γ : List ι) [AddCommMonoid α] :
+    AddCommMonoid (Curry m γ α) where
   zero_add x := by
     induction γ with
     | nil => simp
