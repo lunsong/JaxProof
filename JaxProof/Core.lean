@@ -194,6 +194,18 @@ def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data 
   | [] => fun x _ => x
   | expr :: exprs => fun op fs => bind (op (fs ⟨0, by simp⟩)) (fun i => fs i.succ)
 
+def evalType.apply₀ {data : Type} {impl : data → Type} {ins outs : List data} :
+    evalType impl ins outs → (∀ i : Fin ins.length, impl ins[i]) → (∀ i : Fin outs.length, impl outs[i]) :=
+  match ins with
+  | [] => fun x _ => x
+  | in₀ :: ins => fun f x => apply₀ (f (x ⟨0, by simp⟩)) fun i => x i.succ
+
+def evalType.apply {data : Type} {impl : data → Type} {args ins outs : List data} :
+    evalType impl ins outs → evalType impl args ins → evalType impl args outs :=
+  match args with
+  | [] => apply₀
+  | _ :: _ => fun f x a => apply f (x a)
+
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
   | arg i => evalType.arg i
@@ -201,10 +213,8 @@ def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   | select i x => evalType.select i (x.eval impl)
   | bind op fs xs =>
     let op := Impl.bind (impl := impl) op
-    evalType.bind op fs 
-  --| bind (exprs := exprs) op libs ins =>
-  --  let op := Impl.bind exprs args outs op
-  --  by sorry
+    let op := evalType.bind op fun i => (fs i).eval impl
+    evalType.apply op (xs.eval impl)
 
 inductive SimpleOp (data : Type) : List (List data × List data) → List data → List data → Type
   | call {α β : List data} : SimpleOp data [(α, β)] α β
