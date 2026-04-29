@@ -18,6 +18,7 @@ inductive Expr {data : Type} (op : OpType data) :
   | select {args outs : List data} (i : List (Fin outs.length)) :
     Expr op args outs → Expr op args (i.map outs.get)
   | arg {args : List data} (i : Fin args.length) : Expr op args [args[i]]
+  | apply {args ins outs : List data} : Expr op ins outs → Expr op args ins → Expr op args outs
   | bind {args ins outs : List data} {exprs : List (List data × List data)} :
     op exprs ins outs →
       (∀ i : Fin exprs.length, Expr op exprs[i].1 exprs[i].2) → Expr op args ins → Expr op args outs
@@ -79,6 +80,11 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
       let exprs := ",".intercalate (exprs.map fun i => s!"@{i}")
       let ins ← ins.genCode
       let out_ids ← expr.addVars s!"{op} {exprs},{",".intercalate ins}"
+      return out_ids.map fun n ↦ s!"%{n}"
+    | apply f x =>
+      let f ← f.addLib
+      let x ← x.genCode
+      let out_ids ← expr.addVars s!"call &{f},{",".intercalate x}"
       return out_ids.map fun n ↦ s!"%{n}"
       
   | some ⟨_, out_ids, _⟩ =>
@@ -215,6 +221,7 @@ def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
     let op := Impl.bind (impl := impl) op
     let op := evalType.bind op fun i => (fs i).eval impl
     evalType.apply op (xs.eval impl)
+  | apply f xs => evalType.apply (f.eval impl) (xs.eval impl)
 
 inductive SimpleOp (data : Type) : List (List data × List data) → List data → List data → Type
   | call {α β : List data} : SimpleOp data [(α, β)] α β
