@@ -1,14 +1,15 @@
 import SSA.Core
-import SSA.XlaOp
+import SSA.Xla.Op
 
 namespace XLA
 
 open SSA
 
-abbrev NaiveImpl : TensorType → Type
+abbrev DirectImpl : TensorType → Type
   | ⟨.float, s⟩ => Tensor ℝ s
   | ⟨.int, s⟩ => Tensor ℤ s
 
+/-
 abbrev ArgList := DList NaiveImpl
 
 def NaiveImpl.zero {σ : TensorType} : NaiveImpl σ :=
@@ -29,7 +30,6 @@ def NaiveImpl.get {s : List ℕ} {R : Type} [Zero R]
       let (.cons i₀ i) := indices
       NaiveImpl.get (x (Fin.intCast i₀)) i
 
-/-
 def NaiveImpl.gather {α : DType} {s s' : List ℕ}
   (args : ArgList (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩))
   : NaiveImpl ⟨α, s'⟩ :=
@@ -48,7 +48,6 @@ where feed {n : ℕ} {s₀ : ℕ} {s : List ℕ} (i₀ : Fin s₀) :
   match n with
   | 0 => id
   | _ + 1 => fun (.cons a₀ as) => .cons (a₀ i₀) <| feed i₀ as
--/
 
 def NaiveImpl.gather {α : DType} {s s' : Shape} :
     TensorImpl.implType NaiveImpl (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩ :=
@@ -86,22 +85,25 @@ def NaiveImpl.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Ten
       | some i => y i
   else
     x
+-/
 
-noncomputable instance : Impl (SimpleOp Op) NaiveImpl where
+noncomputable instance : SimpleImpl XlaOp DirectImpl where
   bind op := match op with
+  /-
   | .simple (.abs => fun x => match out with
     | [⟨.float, _⟩]
     | [⟨.int, _⟩] => by sorry
+  -/
   | .acos => fun x => x.map Real.arccos
   -- `Real.Arcosh` isn't available in this lean version
   | .acosh => fun x => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
-  | .add => fun x y => match out with
+  | .add (σ := σ) => fun x y => match σ with
     | ⟨.float, _⟩
-    | ⟨.int, _⟩ => Tensor.add x y
-  | .mul => fun x y => match out with
+    | ⟨.int, _⟩ => Tensor.map₂ (· + ·) x y
+  | .mul (σ := σ) => fun x y => match σ with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· * ·) x y
-  | .div => fun x y => match out with
+  | .div (σ := σ) => fun x y => match σ with
     | ⟨.float, _⟩
     | ⟨.int, _⟩ => Tensor.map₂ (· / ·) x y
   | .sum (α := α) n => fun x => match α with
@@ -116,15 +118,19 @@ noncomputable instance : Impl (SimpleOp Op) NaiveImpl where
     match α with
     | .float
     | .int =>
-      let x : Tensor _ (contract ++ batch ++ lhs ++ rhs) := Tensor.uncurry' (x.map Tensor.const)
+      let x : Tensor _ (contract ++ batch ++ lhs ++ rhs) := Tensor.uncurry' (x.map Curry.pure)
       let y : Tensor _ (contract ++ batch ++ (lhs ++ rhs)) :=
-        Tensor.uncurry' <| (y.curry'.map Tensor.const).map Tensor.uncurry'
+        Tensor.uncurry' <| (y.curry'.map Curry.pure).map Tensor.uncurry'
       let y : Tensor _ (contract ++ batch ++ lhs ++ rhs) := y.cast <| by simp
       let z := (Tensor.map₂ (· * ·) x y).sumN (contract.length)
       z.cast <| by simp
   | .gather (α := α) (s := s) =>
     by
       sorry
+  | _ => sorry
+
+#synth Impl (SimpleOp XlaOp) DirectImpl
+
     --NaiveImpl.gather
 /-
   | .sorted (α := α) => fun *[x] => match α with
