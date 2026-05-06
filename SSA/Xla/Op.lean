@@ -18,6 +18,8 @@ structure TensorType where
   dtype : DType
   shape : Shape
 
+def TensorType.scalar : DType → TensorType := fun α ↦ ⟨α, []⟩
+
 inductive XlaOp : List TensorType → TensorType → Type where
   | abs {σ : TensorType} : XlaOp [σ] σ
   | acos {s : Shape} : XlaOp [⟨.float, s⟩] ⟨.float, s⟩
@@ -99,6 +101,10 @@ inductive XlaOp : List TensorType → TensorType → Type where
   --| tuple : XlaOp none
   --| tupleGet : ℕ → XlaOp (some 1)
   --| anonTuple : XlaOp none
+
+inductive XlaHo : SSA.OpType TensorType where
+  | repeat {carry aux : List TensorType} :
+    XlaHo [⟨carry ++ aux, carry⟩] (TensorType.scalar .int :: carry ++ aux) carry
 
 def XlaOp.toString {args : List TensorType} {out : TensorType} : XlaOp args out → String
   | add => "add"

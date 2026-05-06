@@ -145,6 +145,7 @@ def Impl.bindType {data : Type} (impl : data → Type)
   | [] => evalType impl args outs
   | expr :: exprs => evalType impl expr.1 expr.2 → bindType impl exprs args outs
 
+/-- Logical implementation of the op -/
 class Impl {data : Type} (op : OpType data) (impl : data → Type) where
   bind {expr : List (List data × List data)} {args outs : List data} : 
     op expr args outs → Impl.bindType impl expr args outs
@@ -157,6 +158,7 @@ def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data 
   | [] => fun x _ => x
   | expr :: exprs => fun op fs => bind (op (fs ⟨0, by simp⟩)) (fun i => fs i.succ)
 
+/-- We can evaluate an expression using some implementation -/
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
   | arg i => (Curry.arg i).map Index.single

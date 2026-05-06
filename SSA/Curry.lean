@@ -32,6 +32,16 @@ def Index.append {γ γ' : List ι} : Index m γ → Index m γ' → Index m (γ
     | .mk 0 h => x <| .mk 0 <| by simp
     | .mk (r + 1) h => append (fun r => x r.succ) y <| .mk r <| by simpa using h
 
+def Index.replicate {i : ι} {n : ℕ} : Index m (List.replicate n i) → Fin n → m i :=
+  match n with
+  | 0 => fun _ r => nomatch r
+  | n + 1 => fun x r =>
+    match r with
+    | .mk 0 h => x <| .mk 0 <| by simp
+    | .mk (r + 1) h =>
+      let x' : Index m (List.replicate n i) := fun r => x r.succ
+      replicate x' <| .mk r <| by simpa using h
+
 def Curry.get {γ : List ι} (f : Curry m γ α) (i : Index m γ) : α :=
   match γ with
   | [] => f
@@ -144,4 +154,20 @@ instance Curry.instAddCommMonoid (γ : List ι) [AddCommMonoid α] :
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i)
+
+def Curry.curry {γ γ' : List ι} : Curry m (γ ++ γ') α → Curry m γ (Curry m γ' α) := 
+  match γ with
+  | [] => id
+  | _ :: _ => fun x a => (x a).curry
+
+def Curry.uncurry {γ γ' : List ι} : Curry m γ (Curry m γ' α) → Curry m (γ ++ γ') α :=
+  match γ with
+  | [] => id
+  | _ :: _ => fun x a => (x a).uncurry
+
+def Curry.transpose {γ γ' : List ι} : Curry m (γ ++ γ') α → Curry m (γ' ++ γ) α :=
+  fun x => uncurry <| of <| fun i => of <| fun j => (x.curry.get j).get i
+
+def Curry.transposeFirst {γ₀ : ι} {γ : List ι} : Curry m (γ₀ :: γ) α → Curry m γ (m γ₀ → α) :=
+  fun x => curry (γ' := [γ₀]) <| transpose x
 

@@ -9,83 +9,26 @@ abbrev DirectImpl : TensorType → Type
   | ⟨.float, s⟩ => Tensor ℝ s
   | ⟨.int, s⟩ => Tensor ℤ s
 
-/-
-abbrev ArgList := DList NaiveImpl
-
-def NaiveImpl.zero {σ : TensorType} : NaiveImpl σ :=
-  match σ with
-  | ⟨.float, _⟩
-  | ⟨.int, _⟩ => Tensor.zero
-
-instance (σ : TensorType) : Zero (NaiveImpl σ) := ⟨NaiveImpl.zero⟩
-
-def NaiveImpl.get {s : List ℕ} {R : Type} [Zero R]
-  (x : Tensor R s) (indices : ArgList (List.replicate s.length ⟨.int, []⟩)) : R :=
-  match s with
-  | [] => x
-  | s₀ :: _ =>
-    match s₀ with
-    | 0 => 0
-    | _ + 1 =>
-      let (.cons i₀ i) := indices
-      NaiveImpl.get (x (Fin.intCast i₀)) i
-
-def NaiveImpl.gather {α : DType} {s s' : List ℕ}
-  (args : ArgList (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩))
-  : NaiveImpl ⟨α, s'⟩ :=
-  let (.cons x indices) := args
+def DirectImpl.gather {α : DType} {s s' : Shape} :
+    Curry DirectImpl (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) (DirectImpl ⟨α, s'⟩) :=
   match α with
-  | .float | .int =>
-    match s' with
-    | [] =>
-      NaiveImpl.get x indices
-    | _ :: _ => fun i₀ => 
-      let indices := feed i₀ indices
-      NaiveImpl.gather (.cons x indices)
-where feed {n : ℕ} {s₀ : ℕ} {s : List ℕ} (i₀ : Fin s₀) :
-  ArgList (List.replicate n ⟨.int, s₀ :: s⟩) →
-  ArgList (List.replicate n ⟨.int, s⟩) :=
-  match n with
-  | 0 => id
-  | _ + 1 => fun (.cons a₀ as) => .cons (a₀ i₀) <| feed i₀ as
+  | .int =>
+    match s with
+    | [] => Curry.pure
+    | s₀ :: _ => fun x i => Curry.of <| fun r => Curry.of <| fun r' =>
+        if hs : s₀ = 0 then 0 else
+          have : NeZero s₀ := ⟨hs⟩
+          let x  := x <| Fin.intCast (i.get r');
+          Curry.get ((gather (α := .int) x).get r) r'
+  | .float =>
+    match s with
+    | [] => Curry.pure
+    | s₀ :: _ => fun x i => Curry.of <| fun r => Curry.of <| fun r' =>
+        if hs : s₀ = 0 then 0 else
+          have : NeZero s₀ := ⟨hs⟩
+          let x := x <| Fin.intCast (i.get r');
+          Curry.get ((gather (α := .float) x).get r) r'
 
-def NaiveImpl.gather {α : DType} {s s' : Shape} :
-    TensorImpl.implType NaiveImpl (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩ :=
-  match s with
-  | [] => fun x => match α with | .float | .int => Tensor.const x
-  | s₀ :: s => fun x i₀ => by
-
-instance (s : Shape) : DecidableEq (ValidIdx s) :=
-  inferInstanceAs (DecidableEq (∀ i : Fin s.length, Fin s[i]))
-
-def DList.unfold_replicate {α : Type} {γ : α → Type} {n : ℕ} {a : α} :
-    DList γ (List.replicate n a) → Fin n → γ a :=
-  match n with
-  | 0 => fun _ i => nomatch i
-  | n + 1 => fun xs i =>
-    let (.cons x xs) := xs
-    match i with
-    | 0 => x
-    | .mk (i + 1) h => xs.unfold_replicate <| .mk i <| by omega
-
-def ValidIdx.intCast {s : Shape} (h : ∀ i : Fin s.length, s[i] ≠ 0) (idx : Fin s.length → ℤ) :
-    ValidIdx s :=
-  fun r =>
-    have : NeZero s[r] := ⟨h r⟩
-    Fin.intCast (idx r)
-
-def NaiveImpl.scatter {R : Type} {s : Shape} {n : ℕ} (x : Tensor R s) (y : Tensor R [n])
-  (indices : ArgList (List.replicate s.length ⟨.int, [n]⟩)) :
-    Tensor R s :=
-  if h : ∀ i : Fin s.length, s[i] ≠ 0 then
-    let indices := (ValidIdx.intCast h) ∘ (Function.swap indices.unfold_replicate)
-    Tensor.of fun idx =>
-      match Fin.find? (fun i => idx = indices i) with
-      | none => x.get idx
-      | some i => y i
-  else
-    x
--/
 
 noncomputable instance : SimpleImpl XlaOp DirectImpl where
   bind op := match op with
@@ -124,12 +67,18 @@ noncomputable instance : SimpleImpl XlaOp DirectImpl where
       let y : Tensor _ (contract ++ batch ++ lhs ++ rhs) := y.cast <| by simp
       let z := (Tensor.map₂ (· * ·) x y).sumN (contract.length)
       z.cast <| by simp
-  | .gather (α := α) (s := s) =>
-    by
-      sorry
+  | .gather  => DirectImpl.gather
+  | .sorted (α := α) => fun x => match α with
+    | .int =>
+      Tensor.uncurry' <|
+        x.curry'.map fun (x : Fin _ → ℤ) i =>
+          ((List.ofFn x).mergeSort).get <| i.cast <| by simp
+    | .float =>
+      Tensor.uncurry' <|
+        x.curry'.map fun (x : Fin _ → ℝ) i =>
+          ((List.ofFn x).mergeSort).get <| i.cast <| by simp
+  | .scatter
   | _ => sorry
-
-#synth Impl (SimpleOp XlaOp) DirectImpl
 
     --NaiveImpl.gather
 /-
@@ -191,5 +140,14 @@ noncomputable instance : SimpleImpl XlaOp DirectImpl where
   | _ => 0
 
 -/
+
+
+instance : Impl XlaHo DirectImpl where
+  bind op := match op with
+  | .repeat => fun exprs n => by sorry
+
+#synth Impl (SimpleOp XlaOp) DirectImpl
+
+
 
 end XLA
