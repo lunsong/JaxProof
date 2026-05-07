@@ -1,14 +1,17 @@
-import JaxProof.Expr
-import JaxProof.Eval
+import SSA
 
-namespace Jax
+namespace XLA
+
+open SSA
+
+variable {op : SSA.OpType TensorType}
 
 variable {args : List TensorType} {out : TensorType}
 
 def transpose {α : DType} {s : Shape}
-  (σ : Equiv.Perm (Fin s.length)) (x : Expr args ⟨α, s⟩) :
-    Expr args ⟨α, List.ofFn fun i => s[σ i]⟩ :=
-  .bind (.transpose σ) *[x]
+  (σ : Equiv.Perm (Fin s.length)) (x : Expr op args [⟨α, s⟩]) :
+    Expr op args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
+  Expr.bind (.transpose σ) x
 
 def dot_general {α : DType} (batch contract lhs rhs : Shape)
   (x : Expr args ⟨α, contract ++ batch ++ lhs⟩)
@@ -38,4 +41,4 @@ def choice {α : DType} {s : Shape} (c : Expr args ⟨.int, s⟩) (x y : Expr ar
     Expr args ⟨α, s⟩ :=
   .bind .choice *[c, x, y]
 
-end Jax
+end XLA

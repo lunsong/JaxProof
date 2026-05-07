@@ -29,15 +29,35 @@ def DirectImpl.gather {α : DType} {s s' : Shape} :
           let x := x <| Fin.intCast (i.get r');
           Curry.get ((gather (α := .float) x).get r) r'
 
+def DirectImpl.setElem {R : Type} {s : Shape} (x : Tensor R s) (i : Fin s.length → ℤ) (y : R) :
+    Tensor R s :=
+  if hs : ∀ i : Fin s.length, s[i] ≠ 0 then
+    have (i : Fin s.length) : NeZero s[i] := ⟨hs i⟩
+    let i : Index Fin s := fun axis ↦ Fin.intCast (i axis)
+    Curry.of <| Function.update x.get i y
+  else
+    x
 
-noncomputable instance : SimpleImpl XlaOp DirectImpl where
+def DirectImpl.scatter {α : DType} {s : Shape} {n : ℕ}
+  (x : DirectImpl ⟨α, s⟩) (y : DirectImpl ⟨α, [n]⟩) :
+    Curry DirectImpl (List.replicate s.length ⟨.int, [n]⟩) (DirectImpl ⟨α, s⟩) :=
+  match α with
+  | .int
+  | .float =>
+    Curry.of <| fun i =>
+      let i : Fin n → Fin s.length → ℤ := Function.swap i.replicate
+      Fin.foldr (init := x) n <| fun n x => setElem x (i n) (y n)
+
+def DirectImpl.zero {args : List TensorType} {out : TensorType} :
+    Curry DirectImpl args (DirectImpl out) :=
+  Curry.pure <|
+    match out with
+    | ⟨.int, _⟩
+    | ⟨.float, _⟩ => Curry.pure 0
+
+noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
   bind op := match op with
-  /-
-  | .simple (.abs => fun x => match out with
-    | [⟨.float, _⟩]
-    | [⟨.int, _⟩] => by sorry
-  -/
-  | .acos => fun x => x.map Real.arccos
+  |.abs (σ := ⟨α, n⟩) => fun x => match α with | .float | .int => x.map abs
   -- `Real.Arcosh` isn't available in this lean version
   | .acosh => fun x => x.map fun x => Real.log (x + Real.sqrt (x^2 + 1))
   | .add (σ := σ) => fun x y => match σ with
@@ -77,77 +97,26 @@ noncomputable instance : SimpleImpl XlaOp DirectImpl where
       Tensor.uncurry' <|
         x.curry'.map fun (x : Fin _ → ℝ) i =>
           ((List.ofFn x).mergeSort).get <| i.cast <| by simp
-  | .scatter
-  | _ => sorry
-
-    --NaiveImpl.gather
-/-
-  | .sorted (α := α) => fun *[x] => match α with
-    | .int =>
-      Tensor.uncurry' <|
-        x.curry'.map fun (x : Fin _ → ℤ) i =>
-          ((List.ofFn x).mergeSort).get <| i.cast <| by simp
-    | .float =>
-      Tensor.uncurry' <|
-        x.curry'.map fun (x : Fin _ → ℝ) i =>
-          ((List.ofFn x).mergeSort).get <| i.cast <| by simp
-  | .scatter (α := α) => fun (.cons x (.cons y indices)) =>
-    match α with | .int | .float => NaiveImpl.scatter x y indices
-  | .iota => fun _ => fun i => (i.val : ℤ)
-  | .zeros => 0
-  | .choice (α := α) => fun *[c, x, y]=>
+  | .scatter => DirectImpl.scatter
+  | .iota => fun i => i
+  | .zeros (σ := σ) => match σ with | ⟨.int, _⟩ | ⟨.float, _⟩ => Curry.pure 0
+  | .choice (α := α) => fun c x y=>
     match α with | .int | .float => Tensor.map₃ (fun c x y => if c != 0 then x else y) c x y
-  | .cumsum (σ := σ) => fun *[x] =>
+  | .cumsum (σ := σ) => fun x =>
     let ⟨α, s⟩ := σ
     match α with | .int | .float => x.cumsum
-  | .ofNat (σ := ⟨α, s⟩) n => fun _ =>
-    match α with | .int | .float => Tensor.const n
-  | .neg (σ := ⟨α, s⟩) => fun *[x] =>
+  | .ofNat (σ := ⟨α, s⟩) n => match α with | .int | .float => Curry.pure (m := Fin) n
+  | .neg (σ := ⟨α, s⟩) => fun x =>
     match α with | .int | .float => x.map (fun x => - x)
-  | .sub (σ := ⟨α, s⟩) => fun *[x, y] =>
+  | .sub (σ := ⟨α, s⟩) => fun x y =>
     match α with | .int | .float => Tensor.map₂ (fun x y => x - y) x y
-    --match α with
-    --| .float =>
-    --  match s with
-    --  | [] => fun *[x] => Tensor.const x
-    --  | s :: s' => 
---  | .dot_general (α := α) batch contract lhs rhs => fun ⟨x, y, _⟩ =>
---    match α with
---    | .float =>
---      let real_indices (x : List ℕ) : List (ℕ × Bool) := x.map (Prod.mk · true) 
---      let virt_indices (x : List ℕ) : List (ℕ × Bool) := x.map (Prod.mk · false) 
---      have preBroadcast_real (x : List ℕ) : Tensor.preBroadcast (real_indices x) = x := by
---        induction x with
---        | nil => rfl
---        | cons x xs ih =>
---          unfold real_indices
---          simp [Tensor.preBroadcast]
---          exact ih
---      have preBroadcast_virt (x : List ℕ) : Tensor.preBroadcast (virt_indices x) = [] := by
---        induction x with
---        | nil => rfl
---        | cons x xs ih =>
---          unfold virt_indices
---          simp [Tensor.preBroadcast]
---      let lhs_broadcast := real_indices (contract ++ batch ++ lhs) ++ virt_indices rhs
---      have preBroadcast_lhs : Tensor.preBroadcast lhs_broadcast = contract ++ batch ++ lhs := by
---        unfold lhs_broadcast
---        rw [Tensor.preBroadcast_append, preBroadcast_real, preBroadcast_virt, List.append_nil]
---      let x' := (x.cast preBroadcast_lhs.symm).broadcast lhs_broadcast
---      by
---
---      sorry
-  | _ => 0
+  | _ => DirectImpl.zero
 
--/
-
-
-instance : Impl XlaHo DirectImpl where
+instance : Impl XlaRepeatOp DirectImpl where
   bind op := match op with
-  | .repeat => fun exprs n => by sorry
-
-#synth Impl (SimpleOp XlaOp) DirectImpl
-
-
+  | .repeat => fun fn n => Curry.uncurry <| Curry.of <| fun x => Curry.of <| fun aux =>
+    let n : ℕ := n.natAbs
+    let fn := (fn.transpose.curry.get aux).get
+    Nat.repeat fn n x
 
 end XLA

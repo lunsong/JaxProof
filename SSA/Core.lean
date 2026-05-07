@@ -183,6 +183,12 @@ instance SimpleOp.instImpl {data : Type} (op : List data → data → Type) (imp
     match op with
     | simple op => (SimpleImpl.bind op).map Index.single
 
+instance SimpleOp.instToString {data : Type} (op : List data → data → Type)
+  [∀ args, ∀ outs, ToString (op args outs)] (exprs : List (List data × List data))
+  (args outs : List data) : ToString (SimpleOp op exprs args outs) where
+    toString op := match op with
+    | .simple op => toString op
+
 inductive CombineOp {data : Type} (op₀ op₁ : OpType data) :
     List (List data × List data) → List data → List data → Type where
   | left {exprs : List (List data × List data)} {args outs : List data} :
@@ -190,10 +196,18 @@ inductive CombineOp {data : Type} (op₀ op₁ : OpType data) :
   | right {exprs : List (List data × List data)} {args outs : List data} :
     op₁ exprs args outs → CombineOp op₀ op₁ exprs args outs
 
-instance CombineImpl {data : Type} (op₀ op₁ : OpType data) (impl : data → Type)
+instance CombineOp.instImpl {data : Type} (op₀ op₁ : OpType data) (impl : data → Type)
   [Impl op₀ impl] [Impl op₁ impl] : Impl (CombineOp op₀ op₁) impl where
   bind
   | .left op
   | .right op => Impl.bind op
+
+instance CombineOp.instToString {data : Type} {op₀ op₁ : OpType data}
+  [∀ exprs, ∀ args outs, ToString (op₀ exprs args outs)]
+  [∀ exprs, ∀ args outs, ToString (op₁ exprs args outs)] :
+  ∀ exprs, ∀ args outs, ToString ((CombineOp op₀ op₁) exprs args outs) :=
+  fun _ _ _ => {
+    toString x := match x with | .left op | .right op => toString op
+  }
 
 end SSA

@@ -2,7 +2,7 @@ import Mathlib.Algebra.Group.Defs
 
 variable {ι : Type}
 
-def Index (m : ι → Type) (γ : List ι) : Type := ∀ i : Fin γ.length, m γ[i]
+abbrev Index (m : ι → Type) (γ : List ι) : Type := ∀ i : Fin γ.length, m γ[i]
 
 abbrev Curry (m : ι → Type) (γ : List ι) (α : Type) : Type :=
   match γ with
