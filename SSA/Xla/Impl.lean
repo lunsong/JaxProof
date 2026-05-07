@@ -1,7 +1,7 @@
 import SSA.Core
 import SSA.Xla.Op
 
-namespace XLA
+namespace Xla
 
 open SSA
 
@@ -29,24 +29,21 @@ def DirectImpl.gather {α : DType} {s s' : Shape} :
           let x := x <| Fin.intCast (i.get r');
           Curry.get ((gather (α := .float) x).get r) r'
 
-def DirectImpl.setElem {R : Type} {s : Shape} (x : Tensor R s) (i : Fin s.length → ℤ) (y : R) :
-    Tensor R s :=
-  if hs : ∀ i : Fin s.length, s[i] ≠ 0 then
-    have (i : Fin s.length) : NeZero s[i] := ⟨hs i⟩
-    let i : Index Fin s := fun axis ↦ Fin.intCast (i axis)
-    Curry.of <| Function.update x.get i y
-  else
-    x
-
 def DirectImpl.scatter {α : DType} {s : Shape} {n : ℕ}
   (x : DirectImpl ⟨α, s⟩) (y : DirectImpl ⟨α, [n]⟩) :
     Curry DirectImpl (List.replicate s.length ⟨.int, [n]⟩) (DirectImpl ⟨α, s⟩) :=
   match α with
   | .int
   | .float =>
-    Curry.of <| fun i =>
-      let i : Fin n → Fin s.length → ℤ := Function.swap i.replicate
-      Fin.foldr (init := x) n <| fun n x => setElem x (i n) (y n)
+    if hs : ∀ i : Fin s.length, s[i] ≠ 0 then
+      have (i : Fin s.length) : NeZero s[i] := ⟨hs i⟩
+      Curry.of <| fun i =>
+      let i : Fin n → Index Fin s := fun n r => Fin.intCast <| i.replicate r n
+      Curry.of fun r => match Fin.find? fun n => i n = r with
+      | some n => y n
+      | none => x.get r
+   else
+      Curry.pure x
 
 def DirectImpl.zero {args : List TensorType} {out : TensorType} :
     Curry DirectImpl args (DirectImpl out) :=
@@ -119,4 +116,4 @@ instance : Impl XlaRepeatOp DirectImpl where
     let fn := (fn.transpose.curry.get aux).get
     Nat.repeat fn n x
 
-end XLA
+end Xla

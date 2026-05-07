@@ -1,7 +1,7 @@
 import SSA.Core
 import SSA.Tensor
 
-namespace XLA
+namespace Xla
 
 inductive DType : Type where
   | int : DType
@@ -140,6 +140,6 @@ instance (exprs : List (List TensorType × List TensorType)) (args outs : List T
     ToString (XlaRepeatOp exprs args outs) where
   toString _ := "repeat"
 
-def XlaOp : SSA.OpType TensorType := SSA.CombineOp (SSA.SimpleOp XlaPrimOp) XlaRepeatOp
+abbrev XlaOp : SSA.OpType TensorType := SSA.CombineOp (SSA.SimpleOp XlaPrimOp) XlaRepeatOp
 
-end XLA
+end Xla

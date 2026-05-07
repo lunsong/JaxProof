@@ -14,6 +14,7 @@ def OpType (data : Type) : Type 1 := List (List data × List data) → List data
 as the data type and `op` as primitive ops. -/
 inductive Expr {data : Type} (op : OpType data) :
     List data → List data → Type where
+  | nil {args : List data} : Expr op args []
   | append {args outs outs' : List data} :
     Expr op args outs → Expr op args outs' → Expr op args (outs ++ outs')
   | select {args outs : List data} (i : List (Fin outs.length)) :
@@ -65,6 +66,7 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
   match codes.find? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
   | none =>
     match expr with
+    | nil =>  return []
     | arg i => return [s!"${i}"]
     | append xs ys => do
       let xs ← xs.genCode
@@ -78,14 +80,14 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
         | some a => a
     | bind op exprs ins =>
       let exprs ← (List.ofFn fun i => (exprs i).addLib).mapM id
-      let exprs := ",".intercalate (exprs.map fun i => s!"&{i}")
+      let exprs := ";".intercalate (exprs.map fun i => s!"&{i}")
       let ins ← ins.genCode
-      let out_ids ← expr.addVars s!"{op} {exprs},{",".intercalate ins}"
+      let out_ids ← expr.addVars s!"{op};{exprs};{";".intercalate ins}"
       return out_ids.map fun n ↦ s!"%{n}"
     | apply f x =>
       let f ← f.addLib
       let x ← x.genCode
-      let out_ids ← expr.addVars s!"call &{f},{",".intercalate x}"
+      let out_ids ← expr.addVars s!"call;&{f};{";".intercalate x}"
       return out_ids.map fun n ↦ s!"%{n}"
       
   | some ⟨_, out_ids, _⟩ =>
@@ -132,7 +134,7 @@ open Lean in macro_rules
     let rec bind_args : List (TSyntax `ident × TSyntax `term) → Nat → MacroM (TSyntax `term)
       | [], _ => return parsed_body
       | ⟨name, out⟩ :: rest, n => do
-        `(term| let $name : $expr_head [$out] := Expr.arg ⟨$(quote n), by decide⟩;
+        `(term| let $name : $expr_head [$out] := Expr.arg ⟨$(quote n), by simp +decide⟩;
         $(← bind_args rest (n + 1)))
     bind_args (argnames.toList.zip argtypes.toList) 0
 
@@ -161,6 +163,7 @@ def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data 
 /-- We can evaluate an expression using some implementation -/
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
+  | nil => Curry.pure Index.null
   | arg i => (Curry.arg i).map Index.single
   | append x y =>  Curry.map₂ Index.append (x.eval impl) (y.eval impl)
   | select i x => (x.eval impl).map (Index.select i)
@@ -209,5 +212,11 @@ instance CombineOp.instToString {data : Type} {op₀ op₁ : OpType data}
   fun _ _ _ => {
     toString x := match x with | .left op | .right op => toString op
   }
+
+def Expr.join {data : Type} {op : OpType data} {args outs : List data} :
+    Curry (fun α ↦ Expr op args [α]) outs (Expr op args outs) :=
+  match outs with
+  | [] => .nil
+  | _ :: _ => fun x => Curry.of <| fun xs => x.append <| join.get xs
 
 end SSA

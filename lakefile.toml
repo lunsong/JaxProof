@@ -19,4 +19,4 @@ rev = "v4.28.0"
 name = "SSA"
 
 [[lean_lib]]
-name = "SSATests"
+name = "Tests"

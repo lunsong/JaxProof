@@ -30,14 +30,21 @@ def Tensor.cast {s s' : List ℕ} (h : s = s') : Tensor R s → Tensor R s' :=
     have h₁ : s₁ = s₁' := by injection h
     fun x i ↦ cast h₁ (x (i.cast h₀.symm))
 
---def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
---  (h₀ : s₀ = s₀') (h : s = s') (i : Fin s₀) (i' : Fin s₀') :
---    i.val = i'.val → (x i).cast h = (x.cast (List.cons_eq_cons.mpr (.intro h₀ h))) i' := by
---  intro hi
---  cases h₀
---  cases h
---  rfl
+def Tensor.cast_rfl {s : List ℕ} (x : Tensor R s) : x.cast rfl = x :=
+  match s with
+  | [] => rfl
+  | _ :: _ => Tensor.ext <| fun i => cast_rfl (x i)
 
+def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
+  (h₀ : s₀ = s₀') (h : s = s') (i : Fin s₀) (i' : Fin s₀') :
+    i.val = i'.val → cast h (x i) = (x.cast (List.cons_eq_cons.mpr (.intro h₀ h))) i' := by
+  intro hi
+  obtain ⟨i, hi⟩ := i
+  obtain ⟨i', hi'⟩ := i'
+  cases h₀
+  cases h
+  cases hi
+  rfl
 
 @[simp]
 def filter_pred {n : ℕ} : List (Fin (n + 1)) → List (Fin n)
