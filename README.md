@@ -3,7 +3,6 @@
 > **Verified XLA Code Generation from Lean 4**
 
 [![Lean](https://img.shields.io/badge/Lean-4-blue)](https://lean-lang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 Write mathematically correct GPU/TPU code. Prove it before running it. Never waste GPU hours on bugs again.
 
@@ -25,40 +24,37 @@ Write mathematically correct GPU/TPU code. Prove it before running it. Never was
 ### Matrix Multiplication
 
 ```lean
-import JaxProof
+import SSA
 
 def matmul {n m l : ℕ} :=
-  xla with
-    x : float [n, m],
-    y : float [m, l]
-  returns
-    float [n, l]
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n, m]⟩,
+    y : ⟨.float, [m, l]⟩
   begin
-    let_expr x : float [m, n] := Jax.transpose [0,1].formPerm x;
-    let_expr z : float [n, l] := Jax.dot_general [] [m] [n] [l] x y;
+    let_expr x : [⟨.float, [m, n]⟩] := Xla.transpose [0,1].formPerm x;
+    let_expr z : [⟨.float, [n, l]⟩] := Xla.dot_general [] [m] [n] [l] x y;
     return z
 
 -- Generate XLA IR
-#eval IO.println (matmul (n:=10) (m:=20) (l:=30)).pretty_print
+#eval IO.println (matmul (n:=10) (m:=20) (l:=30)).code
 ```
 
 Output:
 ```
-%0: transpose [1, 0] $0
-%1: dot_general 1 0 %0 $1
-return %1, 
+%0 = transpose [1, 0];;$0
+%1 = dot_general 1 0;;%0;$1
+return %1
 ```
 
 ### Prove Correctness
 
 ```lean
 example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
-    matmul.eval Jax.FloatAsReal *[x, y] = *[x * y] := by
-  simp [matmul, Jax.ExprGroup.eval]
-  apply funext; intro i
-  apply funext; intro j
-  conv_lhs => change (∑ k, fun i j => x i k * y k j) i j
-  simp [Matrix.mul_apply, Finset.sum_apply]
+    matmul.eval Xla.DirectImpl x y = Index.single (x * y) := by
+  simp [matmul, Xla.dot_general, Xla.bindPrim, SSA.Expr.eval]
+  congr
+  ext i j
+  simp [Matrix.mul_apply]
 ```
 
 💡 **The proof guarantees** that the generated XLA code computes the exact mathematical matrix product.
@@ -73,32 +69,29 @@ Square a vector `m` times:
 
 ```lean
 def power_loop {n : ℕ} :=
-  xla with
-    x : float [n],
-    m : int []
-  returns
-    float [n]
+  let body :=
+    ssa Xla.XlaOp with
+      x : ⟨.float, [n]⟩
+    begin
+      return Xla.mul x x
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩,
+    m : ⟨.int, []⟩
   begin
-    let loop_fn :=
-      xla with
-        i : int [],
-        x : float [n]
-      returns
-        float [n]
-      begin
-        return .bind .mul *[x, x];
-    fori_loop loop_fn, m, (.cons x .nil), .nil
+    return Xla.fori_loop body m x .nil
 ```
 
 **Generated IR:**
 ```
-return fori_loop($1, , @0, ($0, ), ())
-@0:
-%0: mul $1 $1
-returns %0, 
+%0 = repeat;&0;$1;$0
+return %0
+
+&0
+%0 = mul;;$0;$0
+return %0
 ```
 
-**Theorem:** `(power_loop.eval Jax.FloatAsReal) *[x, m] = *[x ^ (2 ^ m)]`
+**Theorem:** `(power_loop (n := n)).eval Xla.DirectImpl x (m : ℤ) = Index.single (x ^ (2 ^ m))`
 
 ---
 
@@ -107,31 +100,24 @@ returns %0,
 Compute L2 norm and normalize a vector:
 
 ```lean
-def norm_xla {n : ℕ} :=
-  xla with
-    x : float [n]
-  returns
-    float []
+def norm {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
   begin
-    let_expr x2 : float [n] := .bind .mul *[x, x];
-    let_expr x2_sumed : float [] := .bind (.sum 1) *[x2];
-    return .bind .sqrt *[x2_sumed]
+    let_expr x2 : [⟨.float, [n]⟩] := Xla.mul x x;
+    let_expr x2_sumed : [⟨.float, []⟩] := Xla.bindPrim (.sum 1) x2;
+    return Xla.bindPrim .sqrt x2_sumed
 
-def normalize_xla {n : ℕ} :=
-  let f₀ := Jax.ExprGroup.cons (Jax.Expr.arg 0) (norm_xla (n := n))
-  let f₁ :=
-    xla with
-      x : float [n],
-      norm_x : float []
-    returns
-      float [n]
-    begin
-      let_expr norm_x : float [n] := .bind (.broadcast [(n, false)]) *[norm_x];
-      return .bind .div *[x, norm_x]
-  Jax.ExprGroup.apply f₀ f₁
+def normalize {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
+  begin
+    let_expr nrm : [⟨.float, []⟩] := norm (n := n);
+    let_expr nrm_bc : [⟨.float, [n]⟩] := Xla.bindPrim (.broadcast [(n, false)]) nrm;
+    return Xla.bindPrim .div (x.append nrm_bc)
 ```
 
-**Proof:** `normalize_xla.eval Jax.FloatAsReal *[x] = *[x / ‖x‖₂]`
+**Proof:** `normalize.eval Xla.DirectImpl x = Index.single (fun i => x i / √(∑ j, (x j)²))`
 
 ---
 
@@ -139,32 +125,13 @@ def normalize_xla {n : ℕ} :=
 
 ```lean
 def inv_permutation {n : ℕ} :=
-  xla with
-    x : int [n]
-  returns
-    int [n]
+  ssa Xla.XlaOp with
+    x : ⟨.int, [n]⟩
   begin
-    return .bind .scatter *[0, Jax.iota, x]
+    return Xla.scatter (s := [n]) 0 Xla.iota x
 ```
 
 If `x` represents a permutation `σ`, this computes `σ⁻¹`.
-
----
-
-### 🔍 Index of Nonzero Elements
-
-```lean
-def idxOfNonzero {n : ℕ} :=
-  xla with
-    x : int [n]
-  returns
-    int [n]
-  begin
-    let_expr mask : int [n] := Jax.choice x 1 0;      -- 1 where x≠0, else 0
-    let_expr counts : int [n] := Jax.cumsum mask;     -- running count
-    let_expr result : int [n] := Jax.choice x counts 0; -- keep counts where x≠0
-    return result
-```
 
 ---
 
@@ -229,7 +196,7 @@ def idxOfNonzero {n : ℕ} :=
 
 - `choice cond x y` — conditional selection (`where`)
 - `sorted` — sort along axis
-- `fori_loop fn n init aux` — counted loop with state
+- `fori_loop body n init aux` — counted loop with carried and auxiliary state
 
 </details>
 
@@ -243,18 +210,15 @@ def idxOfNonzero {n : ℕ} :=
 
 ---
 
-## 🎓 The `xla with` DSL
+## 🎓 The `ssa` DSL
 
 ```lean
-xla with
+ssa XlaOp with
   arg1 : dtype [shape],    -- argument declarations
   arg2 : dtype [shape]
-returns
-  dtype [shape]            -- return type
 begin
   let_expr name : dtype [shape] := expr;   -- bind intermediate values
   let name := expr;                        -- generic let binding
-  fori_loop fn, count, init, aux           -- counted loop
   return expr                              -- return expression
 ```
 
@@ -267,20 +231,22 @@ begin
 ## 🏗️ Project Structure
 
 ```
-JaxProof/
-├── JaxProof/
-│   ├── Expr.lean      📝 XLA AST & code generation
-│   ├── Eval.lean      ⚙️  Evaluation framework
-│   ├── Impl.lean      🔧 FloatAsReal implementation
-│   ├── Lib.lean       📦 Helper functions
-│   └── Tensor.lean    🔲 Tensor type & operations
-├── Test/              ✅ Example proofs
+SSA/
+├── SSA/
+│   ├── Core.lean      📝 SSA AST & code generation
+│   ├── Curry.lean     🔗 Curried tensor types
+│   ├── Tensor.lean    🔲 Tensor operations
+│   ├── Xla/
+│   │   ├── Op.lean    ⚡ XLA primitive ops
+│   │   ├── Impl.lean  🔧 DirectImpl semantics
+│   │   └── Libs.lean  📦 Helpers & DSL sugar
+│   └── ...
+├── Tests/             ✅ Example proofs
 │   ├── matmul.lean
 │   ├── fori_loop.lean
-│   ├── normalize.lean
-│   ├── scatter.lean
-│   └── index_nonzero.lean
-└── README.md          📖 This file
+│   └── scatter.lean
+├── README.md          📖 This file
+└── lakefile.toml      📦 Lean package config
 ```
 
 ---
@@ -289,7 +255,8 @@ JaxProof/
 
 - [x] Core XLA expression DSL
 - [x] Code generation (XLA IR)
-- [x] `FloatAsReal` interpreter with proofs
+- [x] `DirectImpl` interpreter with proofs
+- [x] `fori_loop` higher-order primitive
 - [x] 40+ XLA primitives
 - [ ] Interval arithmetic mode (for numerical error bounds)
 - [ ] Probabilistic interpretation (for randomized algorithms)
@@ -309,13 +276,11 @@ Contributions are welcome! Whether it's:
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License
 
 ---
 
 <div align="center">
-
-**[⭐ Star this repo](https://github.com/yourusername/JaxProof)** if you find it useful!
 
 Built with ❤️ using [Lean 4](https://lean-lang.org/)
 
