@@ -1,53 +1,48 @@
-import JaxProof
+import SSA
 
-def fn {n : ℕ} :=
-  xla with
-    x : float [n],
-    m : int []
-  returns
-    float [n]
+def power_loop_body {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
   begin
-    let loop_fn :=
-      xla with
-        i : int [],
-        x : float [n]
-      returns
-        float [n]
-      begin
-        return .bind .mul *[x, x];
-    fori_loop loop_fn, m, (.cons x .nil), .nil
+    return Xla.mul x x
 
-#eval IO.println (fn (n := 10)).pretty_print
+def power_loop {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩,
+    m : ⟨.int, []⟩
+  begin
+    return Xla.fori_loop power_loop_body m x .nil
+
+#eval IO.println (power_loop (n := 10)).code
 /-
-return fori_loop($1, , @0, ($0, ), ())
-@0:
-%0: mul $1 $1
-returns %0, 
+%0 = repeat;&0;$1;$0
+return %0
+
+&0
+%0 = mul;;$0;$0
+return %0
 -/
 
 example (m n : ℕ) (x : Fin n → ℝ) :
-    (fn (n := n).eval Jax.FloatAsReal) *[x, (m : ℤ)] = *[x ^ (2 ^ m)] := by
-  simp only [fn, Fin.isValue, Jax.ExprGroup.eval, List.cons_append, List.nil_append, List.append_eq]
+    (power_loop (n := n)).eval Xla.DirectImpl x (m : ℤ) = Index.single (x ^ (2 ^ m)) := by
+  simp only [power_loop, Xla.fori_loop, List.cons_append, List.nil_append, List.length_cons,
+    List.length_nil, Nat.reduceAdd, Fin.getElem_fin, power_loop_body, Xla.mul, Xla.bindPrim,
+    Fin.zero_eta, Fin.isValue, Fin.mk_one, SSA.Expr.eval, Curry.map, Curry.get, SSA.evalType.bind,
+    SSA.Impl.bind, Curry.uncurry, Curry.of, Curry.curry, Curry.transpose, Fin.coe_ofNat_eq_mod,
+    Nat.zero_mod, List.getElem_cons_zero, SSA.SimpleImpl.bind, SSA.Tensor.map₂,
+    Fin.succ_zero_eq_one, Index.append, Curry.arg, Curry.pure, Curry.map₂, Index.single, id_eq,
+    Int.natAbs_natCast]
+  ext r
+  fin_cases r
   induction m with
   | zero =>
-    simp [Jax.Expr.eval]
-    rfl
+    simp; rfl
   | succ m ih =>
-    conv_lhs at ih =>
-      arg 3
-      change Int.natAbs ↑m
-    conv_lhs =>
-      arg 3
-      change Int.natAbs ↑m + 1
-    conv_lhs at ih =>
-      arg 1
-      change *[x]
-    conv_lhs =>
-      arg 1
-      change *[x]
-    simp only [ih]
-    simp only [Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval, Int.natAbs_natCast,
-      Jax.Tensor.map₂, Jax.DList.cons.injEq, and_true]
-    rw [pow_add, pow_one, pow_mul, pow_two]
-    rfl
-
+    simp only [List.length_cons, List.length_nil, Nat.reduceAdd, Fin.zero_eta, Fin.isValue,
+      Fin.getElem_fin, Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, Nat.repeat]
+    congr
+    simp [Index.single] at ih
+    simp only [Fin.isValue, ih, Pi.pow_apply]
+    ext i
+    simp only [Pi.pow_apply]
+    rw [pow_succ, pow_mul, pow_two]

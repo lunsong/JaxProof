@@ -41,4 +41,17 @@ def scatter {α : DType} {s : Shape} {n : ℕ}
   Curry.of fun i =>
     bindPrim (.scatter (α := α) (s := s) (n := n)) <| (x.append y).append <| Expr.join.get i
 
+def mul {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
+  bindPrim .mul (x.append y)
+
+def fori_loop {args carry aux : List TensorType}
+  (body : Expr XlaOp (carry ++ aux) carry)
+  (n : Expr XlaOp args [TensorType.scalar .int])
+  (init : Expr XlaOp args carry)
+  (aux_val : Expr XlaOp args aux) :
+  Expr XlaOp args carry :=
+  Expr.bind (.right .repeat)
+    (fun i => match i with | ⟨0, _⟩ => body)
+    ((n.append init).append aux_val)
+
 end Xla
