@@ -11,9 +11,9 @@ def matmul {n m l : ℕ} :=
 
 #eval IO.println (matmul (n:=10) (m:=20) (l:=30)).code
 /-
-%0: transpose [1, 0] $0
-%1: dot_general 1 0 %0 $1
-return %1, 
+%0 = transpose [1, 0];;$0
+%1 = dot_general 1 0;;%0;$1
+return %1
 -/
 
 example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
