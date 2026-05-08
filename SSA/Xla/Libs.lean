@@ -44,7 +44,10 @@ def scatter {α : DType} {s : Shape} {n : ℕ}
 def mul {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .mul (x.append y)
 
-def fori_loop {args carry aux : List TensorType}
+def div {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
+  bindPrim .div (x.append y)
+
+def fori_loop {carry aux : List TensorType}
   (body : Expr XlaOp (carry ++ aux) carry)
   (n : Expr XlaOp args [TensorType.scalar .int])
   (init : Expr XlaOp args carry)
@@ -53,5 +56,17 @@ def fori_loop {args carry aux : List TensorType}
   Expr.bind (.right .repeat)
     (fun i => match i with | ⟨0, _⟩ => body)
     ((n.append init).append aux_val)
+
+def sum {α : DType} {s : Shape} (n : ℕ) :
+    Expr XlaOp args [⟨α, s⟩] → Expr XlaOp args [⟨α, s.drop n⟩] :=
+  bindPrim (.sum n)
+
+
+def broadcast {α : DType} (s : List (ℕ × Bool)) :
+    Expr XlaOp args [⟨α, Tensor.preBroadcast s⟩] → Expr XlaOp args [⟨α, s.map Prod.fst⟩] :=
+  bindPrim (.broadcast s)
+
+def sqrt {s : Shape} : Expr XlaOp args [⟨.float, s⟩] → Expr XlaOp args [⟨.float, s⟩] :=
+  bindPrim .sqrt
 
 end Xla

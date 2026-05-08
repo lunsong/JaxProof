@@ -1,67 +1,52 @@
-import JaxProof
+import SSA
 
-namespace Example
-
-def norm_xla_verion {n : ℕ} :=
-  xla with
-    x : float [n]
-  returns
-    float []
+def norm_xla {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
   begin
-    let_expr x2 : float [n] := .bind .mul *[x, x];
-    let_expr x2_sumed : float [] := .bind (.sum 1) *[x2];
-    return .bind .sqrt *[x2_sumed]
+    let x2  := Xla.mul x x;
+    let x2_sumed  := Xla.sum 1 x2;
+    return Xla.sqrt x2_sumed
 
-def normalize_xla_verion {n : ℕ} :=
-  let f₀ := Jax.ExprGroup.cons (Jax.Expr.arg 0) (norm_xla_verion (n := n))
-  let f₁ :=
-    xla with
-      x : float [n],
-      norm_x : float []
-    returns
-      float [n]
-    begin
-      let_expr norm_x : float [n] := .bind (.broadcast [(n, false)]) *[norm_x];
-      return .bind .div *[x, norm_x]
-  Jax.ExprGroup.apply f₀ f₁
+def normalize_xla {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
+  begin
+    let x_norm := norm_xla.apply x;
+    let x_norm_broadcasted := Xla.broadcast [⟨n, false⟩] x_norm;
+    return Xla.div x x_norm_broadcasted
 
-#eval IO.println (normalize_xla_verion (n := 12)).pretty_print
+#eval IO.println (normalize_xla (n := 12)).code
 /-
-%0: mul $0 $0
-%1: sum 1 %0
-%2: sqrt %1
-return apply(@0, $0, %2, )
-@0:
-%0: braodcast [false] $1
-%1: div $0 %0
-returns %1, 
+%0 = call;&0;$0
+%1 = braodcast [false];;%0
+%2 = div;;$0;%1
+return %2
+
+&0
+%0 = mul;;$0;$0
+%1 = sum 1;;%0
+%2 = sqrt;;%1
+return %2
 -/
 
-noncomputable def norm {n : ℕ} (x : Fin n → ℝ) : ℝ := √(∑ i, (x i)^2)
-
-noncomputable def normalize {n : ℕ} (x : Fin n → ℝ) (i : Fin n) : ℝ :=
-  x i / norm x
-
 theorem norm_def (n : ℕ) (x : Fin n → ℝ) :
-    norm_xla_verion.eval Jax.FloatAsReal *[x] = *[norm x] := by
-  simp only [norm_xla_verion, Fin.isValue, Jax.ExprGroup.eval, Jax.Expr.eval, Jax.TensorImpl.impl,
-    Jax.Expr.eval.recursive_eval, Jax.Tensor.map₂, Jax.Tensor.sumN, Jax.Tensor.sumFirst,
-    List.tail_cons, Jax.Tensor.map, norm, Jax.DList.cons.injEq, and_true]
+    norm_xla.eval Xla.DirectImpl x = Index.single √(∑ i, (x i)^2) := by
+  simp [norm_xla, Xla.sqrt, Xla.bindPrim, SSA.Expr.eval, Curry.map, Curry.get, SSA.evalType.bind,
+    SSA.Impl.bind, SSA.SimpleImpl.bind, SSA.Tensor.map]
   congr
-  ext i
-  rw [pow_two]
-  rfl
+  simp [SSA.Expr.eval, Xla.sum, Xla.bindPrim, Curry.map, Curry.get, SSA.Impl.bind,
+    SSA.evalType.bind, Index.single, SSA.SimpleImpl.bind, Xla.mul, SSA.Tensor.map₂, Curry.map₂,
+    Curry.arg, Curry.pure, Index.append, pow_two]
 
 theorem normalize_def (n : ℕ) (x : Fin n → ℝ) : 
-    normalize_xla_verion.eval Jax.FloatAsReal *[x] = *[normalize x] := by
-  simp only [normalize_xla_verion, List.length_cons, List.length_nil, Nat.reduceAdd, Fin.isValue,
-    Jax.ExprGroup.eval, Jax.Expr.eval, Jax.TensorImpl.impl, Jax.Expr.eval.recursive_eval,
-    Jax.Tensor.map₂, Jax.DList.cons.injEq, and_true]
-  apply funext
-  intro i
-  conv_lhs =>
-    arg 2
-    rw [norm_def]
-  rfl
-
-end Example
+    normalize_xla.eval Xla.DirectImpl x = Index.single (fun i => x i / √(∑ j, (x j)^2)) := by
+  simp only [normalize_xla, Xla.div, Xla.bindPrim, List.length_nil, Fin.getElem_fin,
+    List.length_cons, Nat.reduceAdd, Fin.zero_eta, Fin.isValue, Xla.broadcast, List.map_cons,
+    List.map_nil, List.drop_succ_cons, List.drop_zero, SSA.Expr.eval, Curry.map, Curry.get,
+    SSA.evalType.bind, SSA.Impl.bind, SSA.SimpleImpl.bind, SSA.Tensor.map₂, Curry.map₂,
+    Index.append, Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, Curry.arg, Curry.pure,
+    Fin.succ_zero_eq_one, SSA.Tensor.broadcast, id_eq, List.nil_append]
+  congr
+  ext i
+  simp [Index.single, norm_def]
