@@ -1,141 +1,64 @@
-# 🔬 JaxProof
+# SSA — Verified XLA for Scientific Computing
 
-> **Verified XLA Code Generation from Lean 4**
+> **When AI writes your GPU kernels, how do you know they're correct?**
 
 [![Lean](https://img.shields.io/badge/Lean-4-blue)](https://lean-lang.org/)
 
-Write mathematically correct GPU/TPU code. Prove it before running it. Never waste GPU hours on bugs again.
+AI can now generate XLA kernels for molecular dynamics, Monte Carlo sampling, and neural-network-potential training. The code compiles, converges, and looks reasonable — yet a single transposed dimension in a scatter index, a broadcast mismatch in a force kernel, or an off-by-one in a reweighting loop corrupts the physics without ever raising an error.
+
+**SSA** is a formal verification framework that bridges AI-generated high-performance code and mathematical proof. Write the specification in Lean 4, generate XLA intermediate representation, and obtain a machine-checked guarantee that the compiled kernel computes *exactly* what the mathematics demands — not approximately, not on a few test cases, but by proof.
 
 ---
 
-## ✨ What is JaxProof?
+## Why Tests Are Not Enough
 
-**JaxProof** is a formal verification framework that bridges the gap between mathematical specifications and high-performance XLA (Accelerated Linear Algebra) code. It allows you to:
+In scientific computing, three properties are essential and fundamentally untestable:
 
-- 📝 Write XLA programs in Lean 4 using an elegant DSL
-- 🎯 Generate XLA intermediate representation (IR)
-- ✅ Formally prove that your code matches mathematical specifications
-- 🚀 Run with confidence on JAX/XLA backends
+| Property | Can you unit-test it? | Why not? |
+|----------|----------------------|----------|
+| **Continuity** | ❌ | A discontinuity lies at a measure-zero boundary; every pointwise test passes, yet the kernel injects an unphysical force spike. |
+| **Gradient correctness** | ❌ | Finite-difference checks are too expensive for large models and miss discontinuities. A transposed Jacobian or missing chain-rule term produces forces that are not the gradient of anything. |
+| **Stochastic convergence** | ❌ | Systematic bias from an incorrect transition kernel or reweighting formula is hidden under sampling noise. Every pointwise sample looks reasonable, yet the ensemble converges to the wrong distribution. |
 
----
-
-## 🚀 Quick Start
-
-### Matrix Multiplication
-
-```lean
-import SSA
-
-def matmul {n m l : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n, m]⟩,
-    y : ⟨.float, [m, l]⟩
-  begin
-    let_expr x : [⟨.float, [m, n]⟩] := Xla.transpose [0,1].formPerm x;
-    let_expr z : [⟨.float, [n, l]⟩] := Xla.dot_general [] [m] [n] [l] x y;
-    return z
-
--- Generate XLA IR
-#eval IO.println (matmul (n:=10) (m:=20) (l:=30)).code
-```
-
-Output:
-```
-%0 = transpose [1, 0];;$0
-%1 = dot_general 1 0;;%0;$1
-return %1
-```
-
-### Prove Correctness
-
-```lean
-example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
-    matmul.eval Xla.DirectImpl x y = Index.single (x * y) := by
-  simp [matmul, Xla.dot_general, Xla.bindPrim, SSA.Expr.eval]
-  congr
-  ext i j
-  simp [Matrix.mul_apply]
-```
-
-💡 **The proof guarantees** that the generated XLA code computes the exact mathematical matrix product.
+Regression tests only catch bugs you have already seen. Code review does not scale with AI-generated volume. Formal proof is the only verification strategy that reasons about *all* inputs, all configurations, and all sample paths.
 
 ---
 
-## 📚 Examples Gallery
+## How We Solve It
 
-### 🔁 Counted Loops with `fori_loop`
+SSA replaces testing with proof. The workflow is simple:
 
-Square a vector `m` times:
+1. **Specification**: The human writes the mathematical object — a Hamiltonian, a loss function, a reweighting formula, a transition kernel.
+2. **Generation**: An LLM or DSL writes the XLA kernel.
+3. **Verification**: Lean 4 proves the generated kernel computes *exactly* the specified object.
 
-```lean
-def power_loop {n : ℕ} :=
-  let body :=
-    ssa Xla.XlaOp with
-      x : ⟨.float, [n]⟩
-    begin
-      return Xla.mul x x
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n]⟩,
-    m : ⟨.int, []⟩
-  begin
-    return Xla.fori_loop body m x .nil
-```
+The proof catches transposed dimensions, broadcast mismatches, scatter mis-indexing, and formula errors that no test suite could find.
 
-**Generated IR:**
-```
-%0 = repeat;&0;$1;$0
-return %0
+### Not Tied to XLA
 
-&0
-%0 = mul;;$0;$0
-return %0
-```
+The framework is designed for flexibility. The core SSA expression language is generic over operations and data types. You can:
 
-**Theorem:** `(power_loop (n := n)).eval Xla.DirectImpl x (m : ℤ) = Index.single (x ^ (2 ^ m))`
+- **Add new primitives easily.** An ODE solver, a stochastic differential equation integrator, or a custom reweighting kernel can be introduced as a new primitive operation with its own code-generation rule and mathematical semantics.
+- **Swap the semantic model.** The same expression can be evaluated under different interpretations: model floats as real numbers (`DirectImpl`) for exact mathematical proofs, as intervals for rigorous error bounds, or as random variables for stochastic correctness proofs.
+- **Target different backends.** The current backend generates XLA IR, but the code generator is pluggable. The same verified expression can be retargeted to LLVM, CUDA, or a custom DSL.
+
+This means the framework grows with your needs. Today you verify deterministic force kernels. Tomorrow you add a `solve_ode` primitive and prove your MD integrator conserves energy. The next day you add a probabilistic interpretation and prove your Monte Carlo sampler targets the Boltzmann distribution — all within the same expression language.
 
 ---
 
-### 📐 Vector Normalization
+## Gallery
 
-Compute L2 norm and normalize a vector:
+| Lean definition | Generated code | Proved theorem |
+|-----------------|----------------|----------------|
+| <pre>def permInv {n : ℕ} :=<br>  ssa Xla.XlaOp with<br>    x : ⟨.int, [n]⟩<br>  begin<br>    return Xla.scatter (s := [n]) 0 Xla.iota x</pre> | <pre>%0 = const int [10] 0;;<br>%1 = iota 10;;<br>%2 = scatter;;%0;%1;$0<br>return %2</pre> | `permInv.eval Xla.DirectImpl (fun i => σ i) = Index.single (fun i => (σ.symm i : ℤ))` |
+| <pre>def idxOfNonzero {n : ℕ} :=<br>  ssa Xla.XlaOp with<br>    x : ⟨.int, [n]⟩<br>  begin<br>    let_expr x_nonzero : [⟨.int, [n]⟩] := Xla.choice x 1 0;<br>    let x_id := Xla.cumsum x_nonzero;<br>    return Xla.choice x x_id 0</pre> | <pre>%0 = const int [12] 1;;<br>%1 = const int [12] 0;;<br>%2 = where;;$0;%0;%1<br>%3 = cumsum;;%2<br>%4 = where;;$0;%3;%1<br>return %4</pre> | `idxOfNonzero.eval Xla.DirectImpl x = Index.single (idxOfNonzero_def x)` |
+| <pre>def power_loop {n : ℕ} :=<br>  let body :=<br>    ssa Xla.XlaOp with<br>      x : ⟨.float, [n]⟩<br>    begin<br>      return Xla.mul x x<br>  ssa Xla.XlaOp with<br>    x : ⟨.float, [n]⟩,<br>    m : ⟨.int, []⟩<br>  begin<br>    return Xla.fori_loop body m x .nil</pre> | <pre>%0 = repeat;&0;$1;$0<br>return %0<br><br>&0<br>%0 = mul;;$0;$0<br>return %0</pre> | `(power_loop (n := n)).eval Xla.DirectImpl x (m : ℤ) = Index.single (x ^ (2 ^ m))` |
 
-```lean
-def norm {n : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n]⟩
-  begin
-    let_expr x2 : [⟨.float, [n]⟩] := Xla.mul x x;
-    let_expr x2_sumed : [⟨.float, []⟩] := Xla.bindPrim (.sum 1) x2;
-    return Xla.bindPrim .sqrt x2_sumed
-
-def normalize {n : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n]⟩
-  begin
-    let_expr nrm : [⟨.float, []⟩] := norm (n := n);
-    let_expr nrm_bc : [⟨.float, [n]⟩] := Xla.bindPrim (.broadcast [(n, false)]) nrm;
-    return Xla.bindPrim .div (x.append nrm_bc)
-```
-
-**Proof:** `normalize.eval Xla.DirectImpl x = Index.single (fun i => x i / √(∑ j, (x j)²))`
+Each theorem states that the generated XLA code computes *exactly* the mathematical specification. The full proofs can be found in `Tests/scatter.lean`, `Tests/idxOfNonzero.lean`, and `Tests/fori_loop.lean`.
 
 ---
 
-### 🎯 Inverse Permutation with Scatter
-
-```lean
-def inv_permutation {n : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.int, [n]⟩
-  begin
-    return Xla.scatter (s := [n]) 0 Xla.iota x
-```
-
-If `x` represents a permutation `σ`, this computes `σ⁻¹`.
-
----
-
-## 🧮 Supported XLA Operations
+## 🧮 Supported Operations
 
 <details>
 <summary><b>⚡ Element-wise Operations</b></summary>
@@ -228,49 +151,58 @@ begin
 
 ---
 
+## 🔮 Roadmap: Verified AI-Generated Simulation Code
+
+We are building toward a world where **every GPU kernel in an AI-generated simulation pipeline carries a machine-checked proof of correctness.**
+
+| Milestone | Status | Impact |
+|-----------|--------|--------|
+| Core XLA expression DSL | ✅ Done | Write and verify force fields, descriptors, losses |
+| Code generation (XLA IR) | ✅ Done | JIT to GPU with zero overhead |
+| `DirectImpl` interpreter with proofs | ✅ Done | Prove kernels compute exact forces/energies/observables |
+| `fori_loop` higher-order primitive | ✅ Done | Verified iterative solvers and training updates |
+| 40+ XLA primitives | ✅ Done | Full coverage of dense linear algebra |
+| **Stochastic semantics** | 🔄 Next | **Prove MC samplers and reweighting kernels target exact distributions** |
+| **Gradient verification** | 🔄 Next | **Prove forces are exact gradients of the learned potential** |
+| **ODE solver primitive** | 🔄 Next | **Prove MD integrators conserve symplectic structure / energy** |
+| **Training loop verification** | 🔄 Next | **Prove loss kernels compute exact force-matching / energy-matching objectives** |
+| Interval arithmetic | 📋 Planned | Rigorous floating-point error bounds for long trajectories |
+| Direct JAX/Python bridge | 📋 Planned | Drop-in replacement for `jax.jit` with proof certificates |
+
+---
+
 ## 🏗️ Project Structure
 
 ```
 SSA/
 ├── SSA/
-│   ├── Core.lean      📝 SSA AST & code generation
-│   ├── Curry.lean     🔗 Curried tensor types
-│   ├── Tensor.lean    🔲 Tensor operations
+│   ├── Core.lean      📝 SSA AST, evaluation, and code generation
+│   ├── Curry.lean     🔗 Curried tensor types for arbitrary rank
+│   ├── Tensor.lean    🔲 Tensor operations (sum, broadcast, einsum, ...)
 │   ├── Xla/
-│   │   ├── Op.lean    ⚡ XLA primitive ops
-│   │   ├── Impl.lean  🔧 DirectImpl semantics
-│   │   └── Libs.lean  📦 Helpers & DSL sugar
+│   │   ├── Op.lean    ⚡ XLA primitive operations (40+ ops)
+│   │   ├── Impl.lean  🔧 DirectImpl: mathematical semantics
+│   │   └── Libs.lean  📦 DSL helpers and sugar
 │   └── ...
-├── Tests/             ✅ Example proofs
+├── Tests/             ✅ Machine-checked proof examples
 │   ├── matmul.lean
 │   ├── fori_loop.lean
-│   └── scatter.lean
+│   ├── idxOfNonzero.lean
+│   ├── scatter.lean
+│   └── normalize.lean
 ├── README.md          📖 This file
-└── lakefile.toml      📦 Lean package config
+└── lakefile.toml      📦 Lean package configuration
 ```
-
----
-
-## 🔮 Roadmap
-
-- [x] Core XLA expression DSL
-- [x] Code generation (XLA IR)
-- [x] `DirectImpl` interpreter with proofs
-- [x] `fori_loop` higher-order primitive
-- [x] 40+ XLA primitives
-- [ ] Interval arithmetic mode (for numerical error bounds)
-- [ ] Probabilistic interpretation (for randomized algorithms)
-- [ ] Direct JAX/Python bridge for hardware execution
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Whether it's:
-- 🐛 Bug fixes
-- ✨ New XLA primitives
-- 📖 Documentation improvements
-- 🧪 Additional examples and proofs
+We welcome contributions across the full stack:
+- 🐛 Bug fixes in primitives or proofs
+- ✨ New XLA primitives (especially MD-relevant ones: Ewald summation, PPPM, spherical harmonics, ...)
+- 🧪 Additional examples from molecular simulation and ML-potential training pipelines
+- 📖 Documentation and tutorials for the chemistry/physics community
 
 ---
 
