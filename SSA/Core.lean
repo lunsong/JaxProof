@@ -87,7 +87,7 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
     | apply f x =>
       let f ← f.addLib
       let x ← x.genCode
-      let out_ids ← expr.addVars s!"call @{f}; {",".intercalate x}"
+      let out_ids ← expr.addVars s!"call; {", ".intercalate (s!"@{f}" :: x)}"
       return out_ids.map fun n ↦ s!"%{n}"
       
   | some ⟨_, out_ids, _⟩ =>
