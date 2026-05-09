@@ -13,11 +13,11 @@ def idxOfNonzero {n : ℕ} :=
 
 #eval IO.println (idxOfNonzero (n := 12)).code
 /-
-%0 = const int [12] 1;;
-%1 = const int [12] 0;;
-%2 = where;;$0;%0;%1
-%3 = cumsum;;%2
-%4 = where;;$0;%3;%1
+%0 = const int [12] 1; 
+%1 = const int [12] 0; 
+%2 = where; $0, %0, %1
+%3 = cumsum; %2
+%4 = where; $0, %3, %1
 return %4
 -/
 

@@ -11,8 +11,8 @@ def matmul {n m l : ℕ} :=
 
 #eval IO.println (matmul (n:=10) (m:=20) (l:=30)).code
 /-
-%0 = transpose [1, 0];;$0
-%1 = dot_general 1 0;;%0;$1
+%0 = transpose [1, 0]; $0
+%1 = dot_general 1 0; %0, $1
 return %1
 -/
 

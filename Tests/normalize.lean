@@ -18,15 +18,15 @@ def normalize_xla {n : ℕ} :=
 
 #eval IO.println (normalize_xla (n := 12)).code
 /-
-%0 = call;&0;$0
-%1 = braodcast [false];;%0
-%2 = div;;$0;%1
+%0 = call @0; $0
+%1 = braodcast [false]; %0
+%2 = div; $0, %1
 return %2
 
 &0
-%0 = mul;;$0;$0
-%1 = sum 1;;%0
-%2 = sqrt;;%1
+%0 = mul; $0, $0
+%1 = sum 1; %0
+%2 = sqrt; %1
 return %2
 -/
 

@@ -15,11 +15,11 @@ def power_loop {n : ℕ} :=
 
 #eval IO.println (power_loop (n := 10)).code
 /-
-%0 = repeat;&0;$1;$0
+%0 = repeat; @0, $1, $0
 return %0
 
 &0
-%0 = mul;;$0;$0
+%0 = mul; $0, $0
 return %0
 -/
 

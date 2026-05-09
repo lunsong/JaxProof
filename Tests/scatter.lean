@@ -8,9 +8,9 @@ def permInv {n : ℕ} :=
 
 #eval IO.println (permInv (n := 10)).code
 /-
-%0 = const int [10] 0;;
-%1 = iota 10;;
-%2 = scatter;;%0;%1;$0
+%0 = const int [10] 0; 
+%1 = iota 10; 
+%2 = scatter; %0, %1, $0
 return %2
 -/
 

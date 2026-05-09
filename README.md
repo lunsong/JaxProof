@@ -40,11 +40,41 @@ This means the framework grows with your needs. Today you verify deterministic f
 
 | Lean definition | Generated code | Proved theorem |
 |-----------------|----------------|----------------|
-| <pre>def permInv {n : ℕ} :=<br>  ssa Xla.XlaOp with<br>    x : ⟨.int, [n]⟩<br>  begin<br>    return Xla.scatter (s := [n]) 0 Xla.iota x</pre> | <pre>%0 = const int [10] 0;;<br>%1 = iota 10;;<br>%2 = scatter;;%0;%1;$0<br>return %2</pre> | $\text{permInv} \,\sigma = \sigma^{-1}$ |
-| <pre>def idxOfNonzero {n : ℕ} :=<br>  ssa Xla.XlaOp with<br>    x : ⟨.int, [n]⟩<br>  begin<br>    let_expr x_nonzero : [⟨.int, [n]⟩] := Xla.choice x 1 0;<br>    let x_id := Xla.cumsum x_nonzero;<br>    return Xla.choice x x_id 0</pre> | <pre>%0 = const int [12] 1;;<br>%1 = const int [12] 0;;<br>%2 = where;;$0;%0;%1<br>%3 = cumsum;;%2<br>%4 = where;;$0;%3;%1<br>return %4</pre> | `idxOfNonzero` assign each nonzero element a unique index |
-| <pre>def power_loop {n : ℕ} :=<br>  let body :=<br>    ssa Xla.XlaOp with<br>      x : ⟨.float, [n]⟩<br>    begin<br>      return Xla.mul x x<br>  ssa Xla.XlaOp with<br>    x : ⟨.float, [n]⟩,<br>    m : ⟨.int, []⟩<br>  begin<br>    return Xla.fori_loop body m x .nil</pre> | <pre>%0 = repeat;&0;$1;$0<br>return %0<br><br>&0<br>%0 = mul;;$0;$0<br>return %0</pre> | $\text{power\_loop}(x, m) = x^{2^m}$ |
+| <pre>def permInv {n : ℕ} :=<br>  ssa Xla.XlaOp with<br>    x : ⟨.int, [n]⟩<br>  begin<br>    return Xla.scatter (s := [n]) 0 Xla.iota x</pre> | <pre>%0 = const int [10] 0; <br>%1 = iota 10; <br>%2 = scatter; %0, %1, $0<br>return %2</pre> | $\text{permInv} \,\sigma = \sigma^{-1}$ |
+| <pre>def idxOfNonzero {n : ℕ} :=<br>  ssa Xla.XlaOp with<br>    x : ⟨.int, [n]⟩<br>  begin<br>    let_expr x_nonzero : [⟨.int, [n]⟩] := Xla.choice x 1 0;<br>    let x_id := Xla.cumsum x_nonzero;<br>    return Xla.choice x x_id 0</pre> | <pre>%0 = const int [12] 1; <br>%1 = const int [12] 0; <br>%2 = where; $0, %0, %1<br>%3 = cumsum; %2<br>%4 = where; $0, %3, %1<br>return %4</pre> | `idxOfNonzero` assign each nonzero element a unique index |
+| <pre>def power_loop {n : ℕ} :=<br>  let body :=<br>    ssa Xla.XlaOp with<br>      x : ⟨.float, [n]⟩<br>    begin<br>      return Xla.mul x x<br>  ssa Xla.XlaOp with<br>    x : ⟨.float, [n]⟩,<br>    m : ⟨.int, []⟩<br>  begin<br>    return Xla.fori_loop body m x .nil</pre> | <pre>%0 = repeat; @0, $1, $0<br>return %0<br><br>&0<br>%0 = mul; $0, $0<br>return %0</pre> | $\text{power\_loop}(x, m) = x^{2^m}$ |
 
 Each theorem states that the generated XLA code computes *exactly* the mathematical specification. The full proofs can be found in `Tests/scatter.lean`, `Tests/idxOfNonzero.lean`, and `Tests/fori_loop.lean`.
+
+---
+
+## 🐍 JAX Evaluator
+
+A Python-based evaluator in `python/jax_eval.py` can execute the generated XLA IR using JAX. This provides a practical way to run verified kernels on GPU/TPU hardware.
+
+```python
+from python.jax_eval import evaluate
+import jax.numpy as jnp
+
+# Load IR generated from Lean
+ir = """%0 = const int [12] 1; 
+%1 = const int [12] 0; 
+%2 = where; $0, %0, %1
+%3 = cumsum; %2
+%4 = where; $0, %3, %1
+return %4"""
+
+x = jnp.array([0, 5, 0, 3, 0, 0, 7, 0, 1, 0, 0, 2], dtype=jnp.int32)
+result = evaluate(ir, x)
+# result: [0, 1, 0, 2, 0, 0, 3, 0, 4, 0, 0, 5]
+```
+
+Supported operations include: `const`, `zeros`, `iota`, `add`, `sub`, `mul`, `div`, `neg`, `sqrt`, `sin`, `cos`, `exp`, `log`, `tanh`, `ceil`, `floor`, `sum`, `cumsum`, `transpose`, `broadcast`, `dot_general`, `where`, `scatter`, `gather`, `concat`, `sorted`, `repeat` (fori_loop), and `call` (function application).
+
+Run the test suite:
+```bash
+python python/test_jax_eval.py
+```
 
 ## 🏗️ Project Structure
 
@@ -65,6 +95,9 @@ SSA/
 │   ├── idxOfNonzero.lean
 │   ├── scatter.lean
 │   └── normalize.lean
+├── python/            🐍 JAX evaluator for generated IR
+│   ├── jax_eval.py
+│   └── test_jax_eval.py
 ├── README.md          📖 This file
 └── lakefile.toml      📦 Lean package configuration
 ```
