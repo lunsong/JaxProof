@@ -42,21 +42,12 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 _OP_REGISTRY: Dict[str, Callable] = {}
-_OP_PREFIX_REGISTRY: List[Tuple[str, Callable]] = []
 
 
 def register_op(name: str):
-    """Decorator to register an operation handler by exact name."""
+    """Decorator to register an operation handler by its first word."""
     def decorator(fn: Callable):
         _OP_REGISTRY[name] = fn
-        return fn
-    return decorator
-
-
-def register_op_prefix(prefix: str):
-    """Decorator to register an operation handler by name prefix."""
-    def decorator(fn: Callable):
-        _OP_PREFIX_REGISTRY.append((prefix, fn))
         return fn
     return decorator
 
@@ -220,7 +211,7 @@ def _eval_gather(x, indices):
 
 # -- Constants & constructors ------------------------------------------------
 
-@register_op_prefix("const ")
+@register_op("const")
 def _eval_const_op(op_str, vals, lib_refs, libs, parent_args):
     m = re.match(r"const\s+(\S+)\s+(\[.*?\])\s+(\S+)", op_str)
     if not m:
@@ -229,7 +220,7 @@ def _eval_const_op(op_str, vals, lib_refs, libs, parent_args):
     return _eval_const(dtype, shape_str, val_str)
 
 
-@register_op_prefix("zeros ")
+@register_op("zeros")
 def _eval_zeros_op(op_str, vals, lib_refs, libs, parent_args):
     m = re.match(r"zeros\s+(\S+)\s+(\[.*?\])", op_str)
     if not m:
@@ -238,7 +229,7 @@ def _eval_zeros_op(op_str, vals, lib_refs, libs, parent_args):
     return _eval_zeros(dtype, shape_str)
 
 
-@register_op_prefix("iota ")
+@register_op("iota")
 def _eval_iota_op(op_str, vals, lib_refs, libs, parent_args):
     n = int(op_str.split()[1])
     return _eval_iota(n)
@@ -328,7 +319,7 @@ def _eval_min(op_str, vals, lib_refs, libs, parent_args):
 
 # -- Reductions & cumulative -------------------------------------------------
 
-@register_op_prefix("sum ")
+@register_op("sum")
 def _eval_sum(op_str, vals, lib_refs, libs, parent_args):
     n = int(op_str.split()[1])
     x, = vals()
@@ -345,21 +336,21 @@ def _eval_cumsum(op_str, vals, lib_refs, libs, parent_args):
 
 # -- Shape manipulation ------------------------------------------------------
 
-@register_op_prefix("transpose ")
+@register_op("transpose")
 def _eval_transpose_op(op_str, vals, lib_refs, libs, parent_args):
     perm_str = op_str[len("transpose "):]
     x, = vals()
     return _eval_transpose(perm_str, x)
 
 
-@register_op_prefix("braodcast ")
+@register_op("braodcast")
 def _eval_broadcast_typo(op_str, vals, lib_refs, libs, parent_args):
     bools_str = op_str[len("braodcast "):]
     x, = vals()
     return _eval_broadcast_impl(bools_str, x)
 
 
-@register_op_prefix("broadcast ")
+@register_op("broadcast")
 def _eval_broadcast(op_str, vals, lib_refs, libs, parent_args):
     bools_str = op_str[len("broadcast "):]
     x, = vals()
@@ -374,7 +365,7 @@ def _eval_concat(op_str, vals, lib_refs, libs, parent_args):
 
 # -- Linear algebra ----------------------------------------------------------
 
-@register_op_prefix("dot_general ")
+@register_op("dot_general")
 def _eval_dot_general_op(op_str, vals, lib_refs, libs, parent_args):
     parts = op_str.split()
     contract_len = int(parts[1])
@@ -437,9 +428,9 @@ def _eval_repeat(op_str, vals, lib_refs, libs, parent_args):
     return list(result)
 
 
-@register_op_prefix("call ")
+@register_op("call")
 def _eval_call(op_str, vals, lib_refs, libs, parent_args):
-    lib_idx = int(op_str.split()[1][1:])
+    lib_idx = lib_refs()[0]
     call_args = vals()
     lib_body = libs[lib_idx]
     result = eval_body(lib_body, libs, call_args)
@@ -497,13 +488,8 @@ def eval_body(
         def lib_refs():
             return [r[1] for r in resolved if isinstance(r, tuple) and r[0] == "lib"]
 
-        # Dispatch via registry
-        handler = _OP_REGISTRY.get(op_str)
-        if handler is None:
-            for prefix, prefix_handler in _OP_PREFIX_REGISTRY:
-                if op_str.startswith(prefix):
-                    handler = prefix_handler
-                    break
+        # Dispatch via registry (lookup by first word of op string)
+        handler = _OP_REGISTRY.get(op_str.split()[0])
 
         if handler is None:
             raise ValueError(f"Unknown or unimplemented operation: {op_str!r}")

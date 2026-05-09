@@ -18,7 +18,7 @@ def normalize_xla {n : ℕ} :=
 
 #eval IO.println (normalize_xla (n := 12)).code
 /-
-%0 = call @0; $0
+%0 = call; @0, $0
 %1 = braodcast [false]; %0
 %2 = div; $0, %1
 return %2
