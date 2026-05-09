@@ -80,14 +80,14 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
         | some a => a
     | bind op exprs ins =>
       let exprs ← (List.ofFn fun i => (exprs i).addLib).mapM id
-      let exprs := ";".intercalate (exprs.map fun i => s!"&{i}")
+      let exprs := exprs.map fun i => s!"@{i}"
       let ins ← ins.genCode
-      let out_ids ← expr.addVars s!"{op};{exprs};{";".intercalate ins}"
+      let out_ids ← expr.addVars s!"{op}; {", ".intercalate (exprs ++ ins)}"
       return out_ids.map fun n ↦ s!"%{n}"
     | apply f x =>
       let f ← f.addLib
       let x ← x.genCode
-      let out_ids ← expr.addVars s!"call;&{f};{";".intercalate x}"
+      let out_ids ← expr.addVars s!"call @{f}; {",".intercalate x}"
       return out_ids.map fun n ↦ s!"%{n}"
       
   | some ⟨_, out_ids, _⟩ =>
