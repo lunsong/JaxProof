@@ -50,10 +50,10 @@ Each theorem states that the generated XLA code computes *exactly* the mathemati
 
 ## 🐍 JAX Evaluator
 
-A Python-based evaluator in `python/jax_eval.py` can execute the generated XLA IR using JAX. This provides a practical way to run verified kernels on GPU/TPU hardware.
+A Python-based evaluator in `python/eval.py` can execute the generated XLA IR using JAX. This provides a practical way to run verified kernels on GPU/TPU hardware.
 
 ```python
-from python.jax_eval import evaluate
+from python.eval import evaluate
 import jax.numpy as jnp
 
 # Load IR generated from Lean
@@ -73,7 +73,7 @@ Supported operations include: `const`, `zeros`, `iota`, `add`, `sub`, `mul`, `di
 
 Run the test suite:
 ```bash
-python python/test_jax_eval.py
+python python/test_eval.py
 ```
 
 ## 🏗️ Project Structure
@@ -96,8 +96,8 @@ SSA/
 │   ├── scatter.lean
 │   └── normalize.lean
 ├── python/            🐍 JAX evaluator for generated IR
-│   ├── jax_eval.py
-│   └── test_jax_eval.py
+│   ├── eval.py
+│   └── test_eval.py
 ├── README.md          📖 This file
 └── lakefile.toml      📦 Lean package configuration
 ```

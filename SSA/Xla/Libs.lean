@@ -9,10 +9,25 @@ variable {args ins : List TensorType} {out : TensorType}
 def bindPrim (op : XlaPrimOp ins out) : Expr XlaOp args ins → Expr XlaOp args [out] :=
   fun xs => .bind (.left (.simple op)) (fun r => nomatch r) xs
 
+def makePerm {n : ℕ} (x : Fin n → Fin n) (h1 : Function.Surjective x) (h2 : Function.Injective x) :
+    Equiv.Perm (Fin n) where
+  toFun := x
+  invFun i := Fin.find (fun j => x j = i) (h1 i)
+  right_inv i := by simp [Fin.find_spec (h1 i)]
+  left_inv i := by simp only [Fin.find_eq_iff, true_and]; intro j hj hc; exact hj.ne (h2 hc)
+
 def transpose {α : DType} {s : Shape}
   (σ : Equiv.Perm (Fin s.length)) (x : Expr XlaOp args [⟨α, s⟩]) :
     Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
   bindPrim (.transpose σ) x
+
+def transpose' {α : DType} {s : Shape}
+  (x : Expr XlaOp args [⟨α, s⟩])
+  (σ : Fin s.length → Fin s.length)
+  (h1 : Function.Surjective σ := by decide)
+  (h2 : Function.Injective σ := by decide) :
+    Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
+  bindPrim (.transpose (makePerm σ h1 h2)) x
 
 def dot_general {α : DType} (batch contract lhs rhs : Shape)
   (x : Expr XlaOp args [⟨α, contract ++ batch ++ lhs⟩])
@@ -46,6 +61,9 @@ def mul {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
 
 def div {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .div (x.append y)
+
+def sub {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
+  bindPrim .sub (x.append y)
 
 def fori_loop {carry aux : List TensorType}
   (body : Expr XlaOp (carry ++ aux) carry)
