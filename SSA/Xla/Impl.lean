@@ -52,6 +52,7 @@ def DirectImpl.zero {args : List TensorType} {out : TensorType} :
     | ⟨.int, _⟩
     | ⟨.float, _⟩ => Curry.pure 0
 
+@[simps]
 noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
   bind op := match op with
   |.abs (σ := ⟨α, n⟩) => fun x => match α with | .float | .int => x.map abs

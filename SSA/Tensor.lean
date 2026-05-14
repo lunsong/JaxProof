@@ -35,7 +35,7 @@ def Tensor.cast_rfl {s : List ℕ} (x : Tensor R s) : x.cast rfl = x :=
   | [] => rfl
   | _ :: _ => Tensor.ext <| fun i => cast_rfl (x i)
 
-def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
+theorem Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :: s)}
   (h₀ : s₀ = s₀') (h : s = s') (i : Fin s₀) (i' : Fin s₀') :
     i.val = i'.val → cast h (x i) = (x.cast (List.cons_eq_cons.mpr (.intro h₀ h))) i' := by
   intro hi
@@ -296,7 +296,12 @@ noncomputable def softmax {n₁ n₂ : ℕ} (x : Tensor ℝ [n₁, n₂]) : Tens
 
 example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
     softmax x i j = x i j / ∑ k, x i k := by
-  simp [softmax, Tensor.broadcast, Tensor.einsum, Tensor.einprod]
-
+  simp only [softmax, Tensor.broadcast, Tensor.einsum, Tensor.sumN, Tensor.sumFirst, Tensor.einprod,
+    List.length_nil, List.map_nil, List.length_cons, Nat.reduceAdd, Fin.mk_one, Fin.isValue,
+    Fin.zero_eta, List.map_cons, filter_pred, Tensor.einprod.filter, List.get_eq_getElem,
+    Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, List.prod_cons, List.prod_nil,
+    mul_one, List.tail_cons, id_eq, Pi.div_apply]
+  congr
+  apply Finset.sum_apply
 
 end SSA

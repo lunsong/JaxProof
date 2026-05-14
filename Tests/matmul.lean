@@ -18,6 +18,8 @@ return %1
 
 example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin l) ℝ) :
     matmul.eval Xla.DirectImpl x y = Index.single (x * y) := by
+  simp [matmul, Xla.dot_general, Xla.bindPrim]
+/-
   simp only [matmul, Xla.dot_general, Xla.bindPrim, List.cons_append, List.nil_append,
     List.length_nil, Fin.getElem_fin, List.length_cons, Nat.reduceAdd, List.formPerm_cons_cons,
     List.formPerm_singleton, Fin.zero_eta, Fin.isValue, Fin.mk_one, SSA.Expr.eval, Curry.map,
@@ -30,3 +32,4 @@ example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin 
   ext i j
   simp [Matrix.mul_apply]
   congr
+-/

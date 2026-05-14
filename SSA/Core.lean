@@ -161,6 +161,7 @@ def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data 
   | expr :: exprs => fun op fs => bind (op (fs ⟨0, by simp⟩)) (fun i => fs i.succ)
 
 /-- We can evaluate an expression using some implementation -/
+@[simp]
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
   | nil => Curry.pure Index.null
@@ -180,6 +181,7 @@ inductive SimpleOp {data : Type} (op : List data → data → Type) :
 class SimpleImpl {data : Type} (op : List data → data → Type) (impl : data → Type) where
   bind {args : List data} {out : data} : op args out → Curry impl args (impl out)
 
+@[simps]
 instance SimpleOp.instImpl {data : Type} (op : List data → data → Type) (impl : data → Type)
   [SimpleImpl op impl] : Impl (SimpleOp op) impl where
   bind op :=
