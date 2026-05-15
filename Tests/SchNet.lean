@@ -1,13 +1,5 @@
 import SSA
 
-/-
-def SchNet (n_species embed_dim n_atom : ℕ) :=
-  ssa Xla.XlaOp with
-    Z : ⟨.int, [n_atom]⟩,
-    x : ⟨.float, [n_atom, 3]⟩,
-    θ₀ : ⟨.float, [embed
--/
-
 def embed (n_species embed_dim : ℕ) :=
   ssa Xla.XlaOp with
     x : ⟨.int, []⟩,
@@ -17,6 +9,92 @@ def embed (n_species embed_dim : ℕ) :=
     let_expr i : [⟨.int, [embed_dim]⟩] := Xla.iota;
     let y := Xla.gather θ (x.append i);
     return y
+
+def pairwise_offset {n_atom : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n_atom, 3]⟩
+  begin
+    let u := Xla.broadcast [⟨n_atom, true⟩, ⟨n_atom, false⟩, ⟨3, true⟩] x;
+    let v := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom, true⟩, ⟨3, true⟩] x;
+    return Xla.sub u v
+
+def periodic_distance :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [3]⟩,
+    lattice : ⟨.float, []⟩
+  begin
+    let lattice := Xla.broadcast [⟨3, false⟩] lattice;
+    let half_lattice := Xla.div lattice 2;
+    let x := Xla.add x half_lattice;
+    let x := Xla.mod x lattice;
+    let x := Xla.sub x half_lattice;
+    return Xla.sum 1 (Xla.mul x x)
+
+def periodic_distance_vmapped {n_atom : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n_atom, 3]⟩,
+    lattice : ⟨.float, []⟩
+  begin
+    return Xla.vmap (ins := [⟨.float, [3]⟩]) n_atom periodic_distance x lattice
+
+def pairwise_periodic_distance {n_atom : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n_atom, 3]⟩,
+    lattice : ⟨.float, []⟩
+  begin
+    let x := pairwise_offset.apply x;
+    let r := Xla.vmap (ins := [⟨.float, [n_atom, 3]⟩]) n_atom periodic_distance_vmapped x lattice;
+    return r
+
+def rbf {n_atom n_base n_filter : ℕ} :=
+  ssa Xla.XlaOp with
+    distance : ⟨.float, [n_atom, n_atom]⟩,
+    center : ⟨.float, [n_base]⟩,
+    width : ⟨.float, [n_base]⟩,
+    filter : ⟨.float, [n_base, n_filter]⟩
+  begin
+    let distance := Xla.broadcast [⟨n_atom, true⟩, ⟨n_atom, true⟩, ⟨n_base, false⟩] distance;
+    let center := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom, false⟩, ⟨n_base, true⟩] center;
+    let width := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom, false⟩, ⟨n_base, true⟩] width;
+    let rbf := Xla.sub distance center;
+    let rbf := Xla.div rbf width;
+    let rbf := Xla.mul rbf rbf;
+    let rbf := Xla.exp (Xla.neg rbf);
+    let rbf := Xla.einsum [n_base, n_atom, n_atom, n_filter] [[1,2,0], [0,3]] 1 (rbf.append filter);
+    return rbf
+ 
+def message_passing {n_atom n_filter n_feat : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n_atom, n_feat]⟩,
+    rbf : ⟨.float, [n_atom, n_atom, n_filter]⟩,
+    proj₀ : ⟨.float, [n_feat, n_filter]⟩,
+    proj₁ : ⟨.float, [n_feat, n_filter]⟩
+  begin
+    let args := x.append <| proj₀.append <| rbf.append <| proj₁;
+    let x := Xla.einsum [n_filter, n_feat, n_atom, n_atom, n_feat]
+      [[2, 1], [1, 0], [2, 3, 0], [4, 0]] 3 args;
+    return x
+
+def SchNet {n_atom n_species n_base n_filter n_feat : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n_atom, 3]⟩,
+    lattice : ⟨.float, []⟩,
+    Z : ⟨.int, [n_atom]⟩,
+    θ : ⟨.float, [n_species, n_feat]⟩,
+    center : ⟨.float, [n_base]⟩,
+    width : ⟨.float, [n_base]⟩,
+    filter : ⟨.float, [n_base, n_filter]⟩,
+    proj₀ : ⟨.float, [n_feat, n_filter]⟩,
+    proj₁ : ⟨.float, [n_feat, n_filter]⟩
+  begin
+    let d := pairwise_periodic_distance.apply (x.append lattice);
+    let x := Xla.vmap (ins := [⟨.int, []⟩]) n_atom (embed n_species n_feat) Z θ;
+    let w := rbf.apply <| d.append <| center.append <| width.append <| filter;
+    let y := message_passing.apply <| x.append <| w.append <| proj₀.append <| proj₁;
+    return y
+ 
+#eval IO.println
+  (SchNet (n_atom := 64) (n_species := 2) (n_base := 16) (n_filter := 8) (n_feat := 16)).code
 
 def embed_def (n_species embed_dim : ℕ) [NeZero n_species]
   (x : ℤ) (θ : Fin n_species → Fin embed_dim → ℝ) : Fin embed_dim → ℝ :=
@@ -36,14 +114,6 @@ theorem embed_eq_def (n_species embed_dim : ℕ) [inst : NeZero n_species] :
   simp [ne_zero_of_lt r.isLt, Fin.intCast]
   rfl
 
-def pairwise_offset {n_atom : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n_atom, 3]⟩
-  begin
-    let u := Xla.broadcast [⟨n_atom, true⟩, ⟨n_atom, false⟩, ⟨3, true⟩] x;
-    let v := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom, true⟩, ⟨3, true⟩] x;
-    return Xla.sub u v
-
 def pairwise_offset_def {n_atom : ℕ}
   (x : Fin n_atom → Fin 3 → ℝ) (i j : Fin n_atom) (k : Fin 3) : ℝ :=
   x i k - x j k
@@ -52,18 +122,6 @@ theorem pairwise_offset_eq_def {n_atom : ℕ} :
     Xla.simpleEval (pairwise_offset (n_atom := n_atom)) = pairwise_offset_def := by
   ext x
   rfl
-
-def periodic_distance :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [3]⟩,
-    lattice : ⟨.float, []⟩
-  begin
-    let lattice := Xla.broadcast [⟨3, false⟩] lattice;
-    let half_lattice := Xla.div lattice 2;
-    let x := Xla.add x half_lattice;
-    let x := Xla.mod x lattice;
-    let x := Xla.sub x half_lattice;
-    return Xla.sum 1 (Xla.mul x x)
 
 noncomputable def periodic_distance_def (x : Fin 3 → ℝ) (lattice : ℝ) : ℝ :=
   ∑ i, ((x i + lattice / 2) % lattice - lattice / 2) ^ 2
@@ -81,30 +139,14 @@ theorem periodic_distance_eq_def : Xla.simpleEval periodic_distance = periodic_d
   conv_rhs =>
     arg 2; intro i
     rw [pow_two]
-  
-
-def periodic_distance_vmapped {n_atom : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n_atom, 3]⟩,
-    lattice : ⟨.float, []⟩
-  begin
-    return Xla.vmap (ins := [⟨.float, [3]⟩]) n_atom periodic_distance x lattice
-
-def pairwise_periodic_distance {n_atom : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n_atom, 3]⟩,
-    lattice : ⟨.float, []⟩
-  begin
-    let x := pairwise_offset.apply x;
-    let r := Xla.vmap (ins := [⟨.float, [n_atom, 3]⟩]) n_atom periodic_distance_vmapped x lattice;
-    return r
-
+ 
 noncomputable def pairwise_periodic_distance_def {n_atom : ℕ}
   (x : Fin n_atom → Fin 3 → ℝ) (lattice : ℝ) (i j : Fin n_atom) : ℝ :=
   periodic_distance_def (fun k ↦ x i k - x j k) lattice
 
 theorem pairwise_periodic_distance_eq_def {n_atom : ℕ} :
-  Xla.simpleEval (pairwise_periodic_distance (n_atom := n_atom)) = pairwise_periodic_distance_def := by
+  let fn := (pairwise_periodic_distance (n_atom := n_atom))
+  Xla.simpleEval fn = pairwise_periodic_distance_def := by
   ext x L i j
   simp only [List.drop_succ_cons, List.drop_zero, Xla.simpleEval, Curry.map,
     pairwise_periodic_distance, Xla.vmap, List.map_cons, List.map_nil, List.cons_append,
@@ -126,24 +168,7 @@ theorem pairwise_periodic_distance_eq_def {n_atom : ℕ} :
     rw [funext_iff]
   simp [this]
   rfl
-
-def rbf {n_atom n_base n_filter : ℕ} :=
-  ssa Xla.XlaOp with
-    distance : ⟨.float, [n_atom, n_atom]⟩,
-    center : ⟨.float, [n_base]⟩,
-    width : ⟨.float, [n_base]⟩,
-    filter : ⟨.float, [n_base, n_filter]⟩
-  begin
-    let distance := Xla.broadcast [⟨n_atom, true⟩, ⟨n_atom, true⟩, ⟨n_base, false⟩] distance;
-    let center := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom, false⟩, ⟨n_base, true⟩] center;
-    let width := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom, false⟩, ⟨n_base, true⟩] width;
-    let rbf := Xla.sub distance center;
-    let rbf := Xla.div rbf width;
-    let rbf := Xla.mul rbf rbf;
-    let rbf := Xla.exp (Xla.neg rbf);
-    let rbf := Xla.einsum [n_base, n_atom, n_atom, n_filter] [[1,2,0], [0,3]] 1 (rbf.append filter);
-    return rbf
-    
+  
 noncomputable def rbf_def {n_atom n_base n_filter : ℕ}
   (distance : Fin n_atom → Fin n_atom → ℝ)
   (center width : Fin n_base → ℝ)
@@ -152,7 +177,8 @@ noncomputable def rbf_def {n_atom n_base n_filter : ℕ}
   ∑ b, Real.exp ( -((distance i j - center b) / width b) ^ 2) * filter b f
 
 theorem rbf_eq_def {n_atom n_base n_filter : ℕ} :
-    Xla.simpleEval (rbf (n_atom := n_atom) (n_base := n_base) (n_filter := n_filter)) = rbf_def := by
+    let fn := (rbf (n_atom := n_atom) (n_base := n_base) (n_filter := n_filter))
+    Xla.simpleEval fn = rbf_def := by
   ext r μ γ M
   unfold rbf_def
   conv_rhs =>
@@ -178,17 +204,6 @@ theorem rbf_eq_def {n_atom n_base n_filter : ℕ} :
   trans (∑ b, fun i j f ↦ Real.exp (-((r i j - μ b) / γ b * ((r i j - μ b) / γ b))) * M b f) i j f
   · rfl
   · simp [Finset.sum_apply]
-
-def message_passing {n_atom n_filter n_feat : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n_atom, n_feat]⟩,
-    rbf : ⟨.float, [n_atom, n_atom, n_filter]⟩,
-    proj₀ : ⟨.float, [n_feat, n_filter]⟩,
-    proj₁ : ⟨.float, [n_feat, n_filter]⟩
-  begin
-    let args := x.append <| proj₀.append <| rbf.append <| proj₁;
-    let x := Xla.einsum [n_filter, n_feat, n_atom, n_atom, n_feat] [[2, 1], [1, 0], [2, 3, 0], [4, 0]] 3 args;
-    return x
 
 def message_passing_def {n_atom n_filter n_feat : ℕ}
   (x : SSA.Tensor ℝ [n_atom, n_feat])
@@ -232,24 +247,6 @@ theorem message_passing_eq_def {n_atom n_filter n_feat : ℕ} :
   ext atom'
   nth_rw 1 [Finset.sum_comm]
   ac_nf
-
-def SchNet {n_atom n_species n_base n_filter n_feat : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.float, [n_atom, 3]⟩,
-    lattice : ⟨.float, []⟩,
-    Z : ⟨.int, [n_atom]⟩,
-    θ : ⟨.float, [n_species, n_feat]⟩,
-    center : ⟨.float, [n_base]⟩,
-    width : ⟨.float, [n_base]⟩,
-    filter : ⟨.float, [n_base, n_filter]⟩,
-    proj₀ : ⟨.float, [n_feat, n_filter]⟩,
-    proj₁ : ⟨.float, [n_feat, n_filter]⟩
-  begin
-    let d := pairwise_periodic_distance.apply (x.append lattice);
-    let x := Xla.vmap (ins := [⟨.int, []⟩]) n_atom (embed n_species n_feat) Z θ;
-    let w := rbf.apply <| d.append <| center.append <| width.append <| filter;
-    let y := message_passing.apply <| x.append <| w.append <| proj₀.append <| proj₁;
-    return y
 
 open SSA in
 theorem SchNet_permutation_equivariant
@@ -309,6 +306,4 @@ theorem SchNet_permutation_equivariant
   rw [Finset.sum_equiv σ]
   · simp
   · simp
-
-#eval IO.println (SchNet (n_atom := 64) (n_species := 2) (n_base := 16) (n_filter := 8) (n_feat := 16)).code
 
