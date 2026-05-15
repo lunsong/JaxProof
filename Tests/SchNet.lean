@@ -251,5 +251,64 @@ def SchNet {n_atom n_species n_base n_filter n_feat : ℕ} :=
     let y := message_passing.apply <| x.append <| w.append <| proj₀.append <| proj₁;
     return y
 
+open SSA in
+theorem SchNet_permutation_equivariant
+  {n_atom n_species n_base n_filter n_feat : ℕ}
+  [NeZero n_species]
+  (x : Tensor ℝ [n_atom, 3])
+  (lattice : ℝ)
+  (Z : Tensor ℤ [n_atom])
+  (θ : Tensor ℝ [n_species, n_feat])
+  (center width : Tensor ℝ [n_base])
+  (filter : Tensor ℝ [n_base, n_filter])
+  (proj₀ proj₁ : Tensor ℝ [n_feat, n_filter])
+  (σ : Equiv.Perm (Fin n_atom)) :
+    Xla.simpleEval SchNet (x ∘ σ) lattice (Z ∘ σ) θ center width filter proj₀ proj₁ = 
+    (Xla.simpleEval SchNet x lattice Z θ center width filter proj₀ proj₁) ∘ σ := by
+  simp only [List.drop_succ_cons, List.drop_zero, Xla.simpleEval, Curry.map, SchNet, List.map_cons,
+    List.map_nil, Xla.vmap, List.cons_append, List.nil_append, List.length_cons, List.length_nil,
+    Nat.reduceAdd, Fin.getElem_fin, Fin.reduceFinMk, Fin.isValue, Fin.zero_eta, Fin.mk_one,
+    Expr.eval, Curry.get, Curry.map₂, Index.append, evalType.bind, Impl.bind, Curry.of, Index.unmap,
+    Curry.curry, Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, Index.map,
+    Function.comp_apply, Index.cons, id_eq, Nat.reduceMod, List.getElem_cons_succ, Curry.arg,
+    Curry.pure, Index.single_zero, Fin.succ_zero_eq_one, Curry.uncurry, Fin.succ_one_eq_two,
+    Fin.reduceSucc]
+  have := embed_eq_def
+  simp only [Xla.simpleEval, Curry.map, funext_iff] at this
+  simp only [this]
+  have := rbf_eq_def (n_atom := n_atom) (n_base := n_base) (n_filter := n_filter)
+  simp only [Xla.simpleEval, Curry.map, funext_iff] at this
+  simp only [this]
+  have := pairwise_periodic_distance_eq_def (n_atom := n_atom)
+  simp only [Xla.simpleEval, Curry.map, funext_iff] at this
+  simp only [this]
+  have := message_passing_eq_def (n_atom := n_atom) (n_feat := n_feat) (n_filter := n_filter)
+  simp only [Xla.simpleEval, Curry.map, funext_iff] at this
+  simp only [this]
+  clear * -
+  have : pairwise_periodic_distance_def (x ∘ σ) lattice =
+    fun i j ↦ pairwise_periodic_distance_def x lattice (σ i) (σ j) := by
+    ext i j; simp [pairwise_periodic_distance_def]
+  rw [this]
+  have (d : Fin n_atom → Fin n_atom → ℝ) :
+    rbf_def (fun i j ↦ d (σ i) (σ j)) center width filter =
+    fun i j ↦ rbf_def d center width filter (σ i) (σ j) := by
+    ext i j f; simp [rbf_def]
+  rw [this]
+  generalize hx₀ : (fun i => embed_def n_species n_feat (Z i) θ) = x₀
+  conv_lhs =>
+    arg 1
+    equals x₀ ∘ σ =>
+      rw [← hx₀]; rfl
+  generalize rbf_def (pairwise_periodic_distance_def x lattice) center width filter = rbf
+  ext atom feat
+  simp only [message_passing_def]
+  congr
+  ext filter
+  congr 1
+  rw [Finset.sum_equiv σ]
+  · simp
+  · simp
+
 #eval IO.println (SchNet (n_atom := 64) (n_species := 2) (n_base := 16) (n_filter := 8) (n_feat := 16)).code
 
