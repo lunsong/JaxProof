@@ -16,6 +16,11 @@ def Index.null : Index m [] := fun r => nomatch r
 def Index.single {γ : ι} : m γ → Index m [γ] :=
   fun x r => match r with | .mk 0 _ => x
 
+def Index.cons {γ₀ : ι} {γ : List ι} : m γ₀ → Index m γ → Index m (γ₀ :: γ) :=
+  fun x₀ x r => match r with
+  | .mk 0 h => x₀
+  | .mk (r + 1) h => x <| .mk r <| by simpa using h
+
 def Index.select {γ : List ι} (i : List (Fin γ.length)) : Index m γ → Index m (i.map γ.get) :=
   match i with
   | [] => fun x => null
@@ -54,6 +59,16 @@ def Curry.of {γ : List ι} (f : Index m γ → α) : Curry m γ α :=
     match r with
     | .mk 0 h => x
     | .mk (r + 1) h => a <| .mk r <| by simpa using h
+
+def Index.map {γ : List μ} {f : μ → ι} : Index m (γ.map f) → Index (m ∘ f) γ :=
+  match γ with
+  | [] => fun _ r => nomatch r
+  | _ :: _ => Curry.get <| fun x₀ => Curry.of <| fun x => Index.cons x₀ x.map
+
+def Index.unmap {γ : List μ} {f : μ → ι} : Index (m ∘ f) γ → Index m (γ.map f) :=
+  match γ with
+  | [] => fun _ r => nomatch r
+  | _ :: _ => Curry.get <| fun x₀ => Curry.of <| fun x => Index.cons x₀ x.unmap
 
 theorem Curry.of_get {γ : List ι} (x : Curry m γ α) : of x.get = x := by
   induction γ with

@@ -4,3 +4,4 @@ import Tests.idxOfNonzero
 import Tests.scatter
 import Tests.normalize
 import Tests.Coulomb
+import Tests.SchNet

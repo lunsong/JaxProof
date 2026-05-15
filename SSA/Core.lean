@@ -219,4 +219,52 @@ def Expr.join {data : Type} {op : OpType data} {args outs : List data} :
   | [] => .nil
   | _ :: _ => fun x => Curry.of <| fun xs => x.append <| join.get xs
 
+def Expr.inlineApply {data : Type} {op : OpType data} {args ins outs : List data} :
+    Expr op ins outs → Expr op args ins → Expr op args outs
+  | .nil, _ => .nil
+  | .arg i, x => x.select [i]
+  | .append a b, x => (a.inlineApply x).append (b.inlineApply x)
+  | .apply f a, x => .apply f (a.inlineApply x)
+  | .select i a, x => (a.inlineApply x).select i
+  | .bind op fs as, x => .bind op fs (as.inlineApply x)
+
+def Expr.succ {data : Type} {op : OpType data} {a : data} {b c : List data} :
+    Expr op b c → Expr op (a :: b) c
+  | .nil => .nil
+  | .arg ⟨i, hi⟩ => .arg <| .mk (i + 1) <| by simpa
+  | .append a b => a.succ.append b.succ
+  | .apply f a => .apply f a.succ
+  | .select i a => a.succ.select i
+  | .bind op fs as => .bind op fs as.succ
+
+def Expr.ofAppend {data : Type} {op : OpType data} {a b c : List data} :
+    Expr op a b → Expr op (c ++ a) b :=
+  match c with
+  | [] => id
+  | _ :: _ => fun x ↦ x.ofAppend.succ
+
+def Expr.cast_arg {data : Type} {op : OpType data} {a b : List data} (i : Fin a.length) :
+    Expr op (a ++ b) [a[i]] :=
+  match a with
+  | a₀ :: a =>
+    match i with
+    | .mk 0 _ => .arg <| .mk 0 <| by simp
+    | .mk (i + 1) h => succ <| cast_arg <| .mk i <| by simpa using h
+
+def Expr.ofAppend' {data : Type} {op : OpType data} {a b c : List data} :
+    Expr op a b → Expr op (a ++ c) b
+  | .arg i => cast_arg i
+  | .nil => .nil
+  | .apply f a => .apply f a.ofAppend'
+  | .bind op fs as => .bind op fs as.ofAppend'
+  | .append a b => a.ofAppend'.append b.ofAppend'
+  | .select i a => a.ofAppend'.select i
+
+def Expr.id {data : Type} {op : OpType data} {args : List data} :
+    Expr op args args :=
+  match args with
+  | [] => .nil
+  | a :: args =>
+    .append (.arg ⟨0, by simp⟩) <| Expr.id.succ
+
 end SSA

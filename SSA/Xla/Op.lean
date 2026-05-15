@@ -81,7 +81,7 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | exp2 {σ : TensorType} : XlaPrimOp [σ] σ
   | expm1 {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   --| fft {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
-  | gather {α : DType} {s s' batch: Shape} :
+  | gather {α : DType} {s s' : Shape} :
     XlaPrimOp (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
   | scatter {α : DType} {s : Shape} {n : ℕ} :
     XlaPrimOp (⟨α, s⟩ :: ⟨α, [n]⟩ :: List.replicate s.length ⟨.int, [n]⟩) ⟨α, s⟩
@@ -95,6 +95,8 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | ofNat {σ : TensorType} (val : ℕ) : XlaPrimOp [] σ
   | neg {σ : TensorType} : XlaPrimOp [σ] σ
   | sub {σ : TensorType} : XlaPrimOp [σ, σ] σ
+  | einsum (s : Shape) (indices : List (List (Fin s.length))) (n : ℕ) :
+    XlaPrimOp (indices.map fun i ↦ ⟨.float, i.map s.get⟩) ⟨.float, s.drop n⟩
   --| lt : XlaPrimOp (some 2)
   --| select : XlaPrimOp (some 3)
   --| addIdx : XlaPrimOp (some 3)
@@ -106,15 +108,20 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   --| tupleGet : ℕ → XlaPrimOp (some 1)
   --| anonTuple : XlaPrimOp none
 
-inductive XlaRepeatOp : SSA.OpType TensorType where
+inductive XlaHigherOp : SSA.OpType TensorType where
   | repeat {carry aux : List TensorType} :
-    XlaRepeatOp [⟨carry ++ aux, carry⟩] (TensorType.scalar .int :: carry ++ aux) carry
+    XlaHigherOp [⟨carry ++ aux, carry⟩] (TensorType.scalar .int :: carry ++ aux) carry
+  | vmap {args aux outs : List TensorType} {batch : ℕ} :
+    XlaHigherOp [⟨args ++ aux, outs⟩]
+      ((args.map fun ⟨α, s⟩ ↦ ⟨α, batch :: s⟩) ++ aux)
+      (outs.map fun ⟨α, s⟩ ↦ ⟨α, batch :: s⟩)
 
 def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp args out → String
   | add => "add"
   | cos => "cos"
   | concat => "concat"
   | mul => "mul"
+  | mod => "mod"
   | transpose σ =>
     let σ : List ℕ := List.ofFn fun i => σ i
     s!"transpose {σ}"
@@ -131,15 +138,20 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | ofNat (σ := ⟨α, s⟩) n => s!"const {α} {s} {n}"
   | neg => "neg"
   | sub => "sub"
+  | einsum s indices n => s!"einsum {indices} {n}"
+  | gather => s!"gather"
+  | exp => "exp"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (XlaPrimOp args out) :=
   ⟨XlaPrimOp.toString⟩
 
 instance (exprs : List (List TensorType × List TensorType)) (args outs : List TensorType) :
-    ToString (XlaRepeatOp exprs args outs) where
-  toString _ := "repeat"
+    ToString (XlaHigherOp exprs args outs) where
+  toString op := match op with
+  | .repeat => "repeat"
+  | .vmap => "vmap"
 
-abbrev XlaOp : SSA.OpType TensorType := SSA.CombineOp (SSA.SimpleOp XlaPrimOp) XlaRepeatOp
+abbrev XlaOp : SSA.OpType TensorType := SSA.CombineOp (SSA.SimpleOp XlaPrimOp) XlaHigherOp
 
 end Xla
