@@ -141,6 +141,7 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | einsum s indices n => s!"einsum {indices} {n}"
   | gather => s!"gather"
   | exp => "exp"
+  | eq => "eq"
   | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (XlaPrimOp args out) :=

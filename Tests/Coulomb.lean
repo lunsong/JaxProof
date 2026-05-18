@@ -2,6 +2,29 @@ import SSA
 
 def A : Fin 3 → Fin 3 := ![2,0,1]
 
+def diag_mask {n : ℕ} :=
+  ssa Xla.XlaOp with
+  begin
+    let_expr idx : [⟨.int, [n]⟩] := Xla.iota;
+    let i := Xla.broadcast [⟨n, true⟩, ⟨n, false⟩] idx;
+    let j := Xla.broadcast [⟨n, false⟩, ⟨n, true⟩] idx;
+    return Xla.eq i j
+
+theorem diag_mask_def {n : ℕ} (i j : Fin n) :
+    Xla.simpleEval diag_mask i j = if i = j then (1 : ℤ) else 0 := by
+  simp only [List.map_nil, Xla.simpleEval, Curry.map, List.map_cons, diag_mask, Xla.eq,
+    Xla.bindPrim, List.length_nil, Fin.getElem_fin, Xla.broadcast, Xla.iota, Fin.isValue,
+    SSA.Expr.eval, Curry.get, SSA.evalType.bind, SSA.Impl.bind, Index.single, List.length_cons,
+    Nat.reduceAdd, SSA.SimpleImpl.bind, SSA.Tensor.map₂, Curry.map₂, Index.append,
+    SSA.Tensor.broadcast, Fin.zero_eta, id_eq, Fin.succ_zero_eq_one, List.nil_append, Nat.cast_inj]
+  conv_lhs =>
+    arg 3; intro h i j; arg 1
+    equals i = j =>
+      simp [Fin.val_eq_val]
+  rfl
+
+example : Function.Injective (![2, 0, 1] : Fin 3 → Fin 3) := by decide
+
 def Coulomb {n_atom : ℕ} :=
   ssa Xla.XlaOp with
     x  : ⟨.float, [n_atom, 3]⟩
@@ -10,58 +33,64 @@ def Coulomb {n_atom : ℕ} :=
     let receiver := Xla.broadcast [⟨n_atom, false⟩, ⟨n_atom,  true⟩, ⟨3, true⟩] x;
     let r := Xla.sub sender receiver;
     let r2 := Xla.mul r r;
-    let σ : Equiv.Perm (Fin 3) := {
-      toFun := ![2, 0, 1]
-      invFun := ![1, 2, 0]
-      right_inv := by decide
-      left_inv := by decide
-    };
-    let r2 := Xla.transpose (s := [n_atom, n_atom, 3]) σ r2;
+    let r2 := Xla.transpose' r2 (![2, 0, 1] : Fin 3 → Fin 3);
     let d := Xla.div 1 (Xla.sqrt (Xla.sum 1 r2));
+    let_expr mask : [⟨.int, [n_atom, n_atom]⟩] := diag_mask.apply .nil;
+    let d := Xla.choice mask 0 d;
     return Xla.sum 2 d
 
 #eval IO.println (Coulomb (n_atom := 12)).code
 
 open SSA in
 example {n_atom : ℕ} (x : Fin n_atom → Fin 3 → ℝ) :
-    Coulomb.eval Xla.DirectImpl x = Index.single (∑ i, ∑ j, 1 / √(∑ k, (x i k - x j k) ^ 2)) := by
-  ext r
-  fin_cases r
-  simp only [List.length_cons, List.length_nil, Nat.reduceAdd, Fin.isValue, Equiv.coe_fn_mk,
-    Fin.getElem_fin, Fin.zero_eta, Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero,
-    Coulomb, Xla.sum, Xla.bindPrim, Xla.div, Xla.sqrt, Xla.transpose, Xla.mul, List.map_cons,
-    List.map_nil, Xla.sub, Xla.broadcast, Expr.eval, Curry.map, Curry.get, evalType.bind, Impl.bind,
-    Index.single, SimpleImpl.bind, Curry.map₂, Index.append, Fin.succ_zero_eq_one, Tensor.transpose,
-    List.get_eq_getElem, Tensor.map₂, Tensor.broadcast, Curry.arg, Curry.pure, id_eq,
-    List.nil_append, Equiv.coe_fn_symm_mk, Matrix.cons_val_zero, Fin.cast_eq_self,
-    Matrix.cons_val_one, Nat.reduceMod, List.getElem_cons_succ, Fin.succ_one_eq_two,
-    Matrix.cons_val, Tensor.sumN, Tensor.sumFirst, Fin.mk_one, Fin.reduceFinMk, List.tail_cons,
+    Xla.simpleEval Coulomb x = ∑ i, ∑ j with i ≠ j, 1 / √(∑ k, (x i k - x j k) ^ 2) := by
+  have := diag_mask_def (n := n_atom)
+  simp only [List.map_nil, Xla.simpleEval, Curry.map, List.map_cons, Fin.isValue] at this
+  simp only [List.drop_succ_cons, List.drop_zero, Xla.simpleEval, Curry.map, Coulomb, Xla.sum,
+    Xla.bindPrim, List.length_nil, Fin.getElem_fin, Xla.choice, List.cons_append, List.nil_append,
+    List.map_cons, List.map_nil, Xla.div, List.length_cons, Nat.reduceAdd, Fin.isValue, Xla.sqrt,
+    Xla.transpose', Xla.mul, Xla.sub, Xla.broadcast, Fin.zero_eta, Expr.eval, Curry.get,
+    evalType.bind, Impl.bind, Index.single, SimpleImpl.bind, Tensor.sumN, Tensor.sumFirst,
+    Tensor.map₃, Curry.map₂, Index.append, this, bne_iff_ne, ne_eq, ite_eq_right_iff, one_ne_zero,
+    imp_false, Decidable.not_not, Fin.succ_zero_eq_one, Fin.succ_one_eq_two, Tensor.map,
+    Tensor.transpose, List.get_eq_getElem, Tensor.map₂, Tensor.broadcast, Curry.arg, Curry.pure,
+    id_eq, Fin.cast_eq_self, Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero,
+    Nat.reduceMod, List.getElem_cons_succ, Curry.of, Fin.mk_one, Fin.reduceFinMk,
+    Matrix.cons_val_one, Matrix.cons_val_zero, Matrix.cons_val, List.tail_cons, Finset.sum_apply,
     one_div]
   conv_lhs =>
-    arg 2; intro i j
+    arg 3; intro h; arg 2; intro i
     conv =>
-      arg 1
+      arg 2; intro j
       conv =>
         arg 2
-        simp [OfNat.ofNat]
-      simp [Expr.eval, Xla.bindPrim, Curry.map, Curry.get, evalType.bind, Impl.bind, Index.single,
-        SimpleImpl.bind, Curry.pure]
-    arg 2; arg 2; arg 2; intro r; arg 1; intro idx 
-    rw [← pow_two]
-    change (x (idx (1 : Fin 3)) (idx (0 : Fin 3)) - x (idx (2 : Fin 3)) (idx (0 : Fin 3)))^2
-  have {n m : ℕ} (x : Tensor ℝ [n, m]) : x.sumN 2 = ∑ j, ∑ i, x i j := by simp [Tensor.sumN]
-  simp only [Fin.isValue, Curry.of, Fin.mk_one, Matrix.cons_val_one, Matrix.cons_val_zero,
-    Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero, Fin.reduceFinMk, Matrix.cons_val,
-    Nat.reduceMod, List.getElem_cons_succ, one_div, this]
-  congr
-  ext i
-  congr
-  ext j
-  congr
-  simp only [Tensor.map, Fin.isValue, List.ofFn, Fin.foldr, Fin.foldr.loop, Fin.reduceFinMk,
-    Matrix.cons_val, Fin.coe_ofNat_eq_mod, Nat.reduceMod, List.getElem_cons_succ,
-    List.getElem_cons_zero, Fin.mk_one, Matrix.cons_val_one, Matrix.cons_val_zero, Nat.zero_mod,
-    Fin.zero_eta, List.drop_succ_cons, List.drop_zero, Curry.map, Finset.sum_apply]
-  congr
-  ext k
-  ring
+        simp [OfNat.ofNat, Expr.eval, Xla.bindPrim, Curry.map, Curry.get, evalType.bind,
+          Impl.bind, SimpleImpl.bind]
+        change 0
+      conv =>
+        arg 3; arg 1
+        simp [OfNat.ofNat, Expr.eval, Xla.bindPrim, Curry.map, Curry.get, evalType.bind,
+          Impl.bind, SimpleImpl.bind]
+        change 1
+      conv =>
+        arg 3; arg 2; arg 5
+        conv =>
+          arg 2; intro a b c
+          rw [← pow_two]
+      conv =>
+        arg 3; arg 2
+        change √(∑ a, (x j a - x i a) ^ 2)
+        equals √(∑ a, (x i a - x j a) ^ 2) =>
+          congr
+          ext a
+          exact sub_sq_comm (x j a) (x i a)
+    simp [Finset.sum_ite]
+    conv =>
+      arg 1
+      equals {x | ¬ i = x} =>
+        ext a
+        simp only [Finset.mem_filter, Finset.mem_univ, true_and]
+        exact Iff.intro Ne.symm Ne.symm
+  rfl
+    
+

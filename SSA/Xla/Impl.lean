@@ -68,6 +68,8 @@ noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
   | .sum (α := α) n => fun x => match α with
     | .float
     | .int => x.sumN n
+  | .eq (σ := ⟨α, s⟩) =>
+    match α with | .int | .float => Tensor.map₂ fun x y => if x = y then 1 else 0
   | .sqrt => fun x => x.map Real.sqrt
   | .transpose (α := α) σ => fun x => match α with
     | .float | .int => x.transpose σ

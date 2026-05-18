@@ -24,8 +24,8 @@ def transpose {α : DType} {s : Shape}
 def transpose' {α : DType} {s : Shape}
   (x : Expr XlaOp args [⟨α, s⟩])
   (σ : Fin s.length → Fin s.length)
-  (h1 : Function.Surjective σ := by decide)
-  (h2 : Function.Injective σ := by decide) :
+  (h1 : Function.Surjective σ := by simp; decide)
+  (h2 : Function.Injective σ := by simp; decide) :
     Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
   bindPrim (.transpose (makePerm σ h1 h2)) x
 
@@ -127,5 +127,8 @@ def gather {α : DType} {s s' : Shape}
   (indices : Expr XlaOp args (List.replicate s.length ⟨.int, s'⟩)) :
     Expr XlaOp args [⟨α, s'⟩] :=
   bindPrim .gather (x.append indices)
+
+def eq {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [⟨.int, σ.shape⟩] :=
+  bindPrim .eq (x.append y)
 
 end Xla
