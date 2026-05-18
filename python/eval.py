@@ -81,7 +81,7 @@ def _parse_body(section: str) -> List[Tuple[str, str]]:
         line = line.strip()
         if not line:
             continue
-        if line.startswith("&"):
+        if line.startswith("&") or re.match(r"^@\d+:$", line):
             continue
         if line.startswith("return"):
             body.append(("return", line[len("return "):].strip()))

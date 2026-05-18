@@ -204,6 +204,10 @@ def _eval_max(op_str, vals, lib_refs, libs, parent_args):
 def _eval_min(op_str, vals, lib_refs, libs, parent_args):
     x, y = vals; return jnp.minimum(x, y)
 
+@register_op("mod")
+def _eval_mod(op_str, vals, lib_refs, libs, parent_args):
+    x, y = vals; return jnp.mod(x, y)
+
 
 # -- Reductions & cumulative -------------------------------------------------
 
@@ -314,6 +318,74 @@ def _eval_repeat(op_str, vals, lib_refs, libs, parent_args):
     if carry_size == 1:
         return result
     return list(result)
+
+
+@register_op("vmap")
+def _eval_vmap(op_str, vals, lib_refs, libs, parent_args):
+    """Vectorize a library function over the leading axis of inputs."""
+    lib_idx = lib_refs[0]
+    inputs = vals
+    lib_body = libs[lib_idx]
+    
+    if not inputs:
+        return eval_body(lib_body, libs, [])
+    
+    batch_size = int(inputs[0].shape[0])
+    results = []
+    
+    for i in range(batch_size):
+        slice_args = [inp[i] for inp in inputs]
+        result = eval_body(lib_body, libs, slice_args)
+        if len(result) == 1:
+            results.append(result[0])
+        else:
+            results.append(tuple(result))
+    
+    if not results:
+        return results
+    if isinstance(results[0], tuple):
+        return [jnp.stack([r[j] for r in results], axis=0) for j in range(len(results[0]))]
+    return jnp.stack(results, axis=0)
+
+
+@register_op("einsum")
+def _eval_einsum(op_str, vals, lib_refs, libs, parent_args):
+    """Parse einsum spec and evaluate using JAX."""
+    # Format: einsum [[i,j,...], [k,l,...], ...] n; arg1, arg2, ...
+    m = re.match(r"einsum\s+(\[.*?\])\s+(\d+)", op_str)
+    if not m:
+        raise ValueError(f"Invalid einsum op: {op_str!r}")
+    
+    specs_str = m.group(1)
+    nsum = int(m.group(2))
+    
+    # Parse specs: [[2,1], [1,0], ...]
+    specs = []
+    # Split by ], [ patterns
+    parts = re.findall(r"\[(.*?)\]", specs_str)
+    for p in parts:
+        idxs = [int(x.strip()) for x in p.split(",") if x.strip()]
+        specs.append(idxs)
+    
+    args = vals
+    
+    # Find max axis index
+    max_idx = max((max(s) for s in specs if s), default=-1)
+    
+    # Map indices to letters: 0->'a', 1->'b', etc.
+    letters = [chr(ord('a') + i) for i in range(max_idx + 1)]
+    
+    # Build subscript for each arg
+    arg_subs = []
+    for spec in specs:
+        sub = "".join(letters[i] for i in spec)
+        arg_subs.append(sub)
+    
+    # Build output subscript: axes nsum, nsum+1, ..., max_idx
+    out_sub = "".join(letters[i] for i in range(nsum, max_idx + 1))
+    
+    einsum_str = ",".join(arg_subs) + "->" + out_sub
+    return jnp.einsum(einsum_str, *args)
 
 
 @register_op("call")
