@@ -98,7 +98,7 @@ end
 unsafe def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
   let ⟨out_names, _, codes, libs⟩ := expr.genCode ⟨0, [], []⟩
   let body := processCode out_names codes
-  let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"&{i}\n{libs[i].2}"
+  let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}:\n{libs[i].2}"
   s!"{body}\n\n{libs}"
 
 end

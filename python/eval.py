@@ -214,7 +214,3 @@ def evaluate_multi(code: str, *args: jnp.ndarray) -> List[jnp.ndarray]:
     """Evaluate and return all outputs as a list."""
     body, libs = parse_ir(code)
     return eval_body(body, libs, list(args))
-
-
-# Import ops to populate the registry
-import ops
