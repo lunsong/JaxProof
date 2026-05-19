@@ -461,6 +461,128 @@ example (n m : ℕ) (x : SSA.Tensor ℝ [n, 3]) (y : SSA.Tensor ℝ [m, 3]) :
   sorry
 ```
 
+Example 7 (Softmax over rows of a matrix — exp, einsum, broadcast, div):
+```lean
+import SSA
+
+def softmax {n m : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n, m]⟩
+  begin
+    let expx := Xla.exp x;
+    let_expr sum_expx : [⟨.float, [n]⟩] := Xla.einsum [m, n] [[1, 0]] 1 expx;
+    let sum_broadcasted := Xla.broadcast [⟨n, true⟩, ⟨m, false⟩] sum_expx;
+    return Xla.div expx sum_broadcasted
+
+#eval IO.println (softmax (n:=3) (m:=4)).code
+
+example (n m : ℕ) (x : SSA.Tensor ℝ [n, m]) :
+    Xla.simpleEval softmax x = fun i j => Real.exp (x i j) / (∑ k, Real.exp (x i k)) := by
+  sorry
+```
+
+Example 8 (RBF / Gaussian kernel — broadcast, sub, mul, einsum, div, neg, exp):
+```lean
+import SSA
+
+def rbf_kernel {n m : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n, 3]⟩,
+    y : ⟨.float, [m, 3]⟩,
+    gamma : ⟨.float, []⟩
+  begin
+    let x_broadcast := Xla.broadcast [⟨n, true⟩, ⟨m, false⟩, ⟨3, true⟩] x;
+    let y_broadcast := Xla.broadcast [⟨n, false⟩, ⟨m, true⟩, ⟨3, true⟩] y;
+    let diff := Xla.sub x_broadcast y_broadcast;
+    let diff2 := Xla.mul diff diff;
+    let_expr dist2 : [⟨.float, [n, m]⟩] := Xla.einsum [3, n, m] [[1, 2, 0]] 1 diff2;
+    let gamma_broadcasted := Xla.broadcast [⟨n, false⟩, ⟨m, false⟩] gamma;
+    let scaled := Xla.div dist2 gamma_broadcasted;
+    let neg_scaled := Xla.neg scaled;
+    return Xla.exp neg_scaled
+
+#eval IO.println (rbf_kernel (n:=4) (m:=5)).code
+
+example (n m : ℕ) (x : SSA.Tensor ℝ [n, 3]) (y : SSA.Tensor ℝ [m, 3]) (γ : ℝ) :
+    Xla.simpleEval rbf_kernel x y γ = fun i j => Real.exp (-(∑ k, (x i k - y j k) ^ 2) / γ) := by
+  sorry
+```
+
+Example 9 (L1 norm — abs, einsum):
+```lean
+import SSA
+
+def l1_norm {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
+  begin
+    let ax := Xla.abs x;
+    let_expr s : [⟨.float, []⟩] := Xla.einsum [n] [[0]] 1 ax;
+    return s
+
+#eval IO.println (l1_norm (n:=8)).code
+
+example (n : ℕ) (x : SSA.Tensor ℝ [n]) :
+    Xla.simpleEval l1_norm x = ∑ i, |x i| := by
+  sorry
+```
+
+Example 10 (Outer product of two vectors — broadcast, mul):
+```lean
+import SSA
+
+def outer_product {n m : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩,
+    y : ⟨.float, [m]⟩
+  begin
+    let x_broadcast := Xla.broadcast [⟨n, true⟩, ⟨m, false⟩] x;
+    let y_broadcast := Xla.broadcast [⟨n, false⟩, ⟨m, true⟩] y;
+    return Xla.mul x_broadcast y_broadcast
+
+#eval IO.println (outer_product (n:=4) (m:=5)).code
+
+example (n m : ℕ) (x : SSA.Tensor ℝ [n]) (y : SSA.Tensor ℝ [m]) :
+    Xla.simpleEval outer_product x y = fun i j => x i * y j := by
+  sorry
+```
+
+Example 11 (Gram matrix — all pairwise dot products via einsum):
+```lean
+import SSA
+
+def gram_matrix {n m : ℕ} :=
+  ssa Xla.XlaOp with
+    A : ⟨.float, [n, m]⟩
+  begin
+    let_expr G : [⟨.float, [n, n]⟩] := Xla.einsum [m, n, n] [[1, 0], [2, 0]] 1 (A.append A);
+    return G
+
+#eval IO.println (gram_matrix (n:=4) (m:=5)).code
+
+example (n m : ℕ) (A : SSA.Tensor ℝ [n, m]) :
+    Xla.simpleEval gram_matrix A = fun i j => ∑ k, A i k * A j k := by
+  sorry
+```
+
+Example 12 (Element-wise sinc function — sin, div):
+```lean
+import SSA
+
+def sinc {n : ℕ} :=
+  ssa Xla.XlaOp with
+    x : ⟨.float, [n]⟩
+  begin
+    let sx := Xla.sin x;
+    return Xla.div sx x
+
+#eval IO.println (sinc (n:=8)).code
+
+example (n : ℕ) (x : SSA.Tensor ℝ [n]) :
+    Xla.simpleEval sinc x = fun i => Real.sin (x i) / (x i) := by
+  sorry
+```
+
 Now implement the following theorem. Use default small sizes (like 4 or 8) for the #eval.
 Use `sorry` for all proof bodies. Do NOT write any proof tactics.
 
