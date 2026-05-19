@@ -6,7 +6,7 @@ def embed (n_species embed_dim : ℕ) :=
     θ : ⟨.float, [n_species, embed_dim]⟩
   begin
     let x := Xla.broadcast [⟨embed_dim, false⟩] x;
-    let_expr i : [⟨.int, [embed_dim]⟩] := Xla.iota;
+    let_expr i : [⟨.int, [embed_dim]⟩] := Xla.iota embed_dim;
     let y := Xla.gather θ (x.append i);
     return y
 

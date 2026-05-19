@@ -235,9 +235,9 @@ def _eval_transpose_op(op_str, vals, lib_refs, libs, parent_args):
     return _eval_transpose(perm_str, x)
 
 
-@register_op("braodcast")
+@register_op("broadcast")
 def _eval_broadcast_typo(op_str, vals, lib_refs, libs, parent_args):
-    bools_str = op_str[len("braodcast "):]
+    bools_str = op_str[len("broadcast "):]
     x, = vals
     return _eval_broadcast_impl(bools_str, x)
 

@@ -4,7 +4,7 @@ def permInv {n : ℕ} :=
   ssa Xla.XlaOp with
     x : ⟨.int, [n]⟩
   begin
-    return Xla.scatter (s := [n]) 0 Xla.iota x
+    return Xla.scatter (Xla.const_int [n] 0) (Xla.iota n) x
 
 #eval IO.println (permInv (n := 10)).code
 /-

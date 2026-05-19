@@ -130,7 +130,7 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | zeros (σ := σ) => s!"zeros {σ.dtype} {σ.shape}"
   | iota (n := n) => s!"iota {n}"
   | sum n => s!"sum {n}"
-  | broadcast s => s!"braodcast {s.map Prod.snd}"
+  | broadcast s => s!"broadcast {s.map Prod.snd}"
   | div => "div"
   | sqrt => "sqrt"
   | cumsum => "cumsum"

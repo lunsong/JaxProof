@@ -5,7 +5,7 @@ def A : Fin 3 → Fin 3 := ![2,0,1]
 def diag_mask {n : ℕ} :=
   ssa Xla.XlaOp with
   begin
-    let_expr idx : [⟨.int, [n]⟩] := Xla.iota;
+    let_expr idx : [⟨.int, [n]⟩] := Xla.iota n;
     let i := Xla.broadcast [⟨n, true⟩, ⟨n, false⟩] idx;
     let j := Xla.broadcast [⟨n, false⟩, ⟨n, true⟩] idx;
     return Xla.eq i j

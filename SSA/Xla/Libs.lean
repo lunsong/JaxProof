@@ -37,9 +37,13 @@ def dot_general {α : DType} (batch contract lhs rhs : Shape)
 
 instance : Zero (Expr XlaOp args [out]) := ⟨bindPrim .zeros .nil⟩
 
-def iota {n : ℕ} : Expr XlaOp args [⟨.int, [n]⟩] := bindPrim .iota .nil
+def iota (n : ℕ) : Expr XlaOp args [⟨.int, [n]⟩] := bindPrim .iota .nil
 
 instance (n : ℕ) : OfNat (Expr XlaOp args [out]) n := .mk <| bindPrim (.ofNat n) .nil
+
+def const_float (s : Shape) (val : ℕ) : Expr XlaOp args [⟨.float, s⟩] := OfNat.ofNat val
+
+def const_int (s : Shape) (val : ℕ) : Expr XlaOp args [⟨.int, s⟩] := OfNat.ofNat val
 
 instance : Sub (Expr XlaOp args [out]) := .mk fun x y => bindPrim .sub (x.append y)
 
