@@ -80,6 +80,8 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | exp {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | exp2 {σ : TensorType} : XlaPrimOp [σ] σ
   | expm1 {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
+  | log {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
+  | sin {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   --| fft {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | gather {α : DType} {s s' : Shape} :
     XlaPrimOp (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
@@ -100,9 +102,9 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   --| lt : XlaPrimOp (some 2)
   --| select : XlaPrimOp (some 3)
   --| addIdx : XlaPrimOp (some 3)
-  --| sin : XlaPrimOp (some 1)
-  --| log : XlaPrimOp (some 1)
-  --| sqrt : XlaPrimOp (some 1)
+  --| lt : XlaPrimOp (some 2)
+  --| select : XlaPrimOp (some 3)
+  --| addIdx : XlaPrimOp (some 3)
   --| einsum (s : List ℕ) : List (List (Fin s.length)) → ℕ → XlaPrimOp none
   --| tuple : XlaPrimOp none
   --| tupleGet : ℕ → XlaPrimOp (some 1)
@@ -117,32 +119,69 @@ inductive XlaHigherOp : SSA.OpType TensorType where
       (outs.map fun ⟨α, s⟩ ↦ ⟨α, batch :: s⟩)
 
 def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp args out → String
+  | abs => "abs"
+  | acos => "acos"
+  | acosh => "acosh"
   | add => "add"
-  | cos => "cos"
+  | and => "and"
+  | argmax axis => s!"argmax {axis}"
+  | argmin axis => s!"argmin {axis}"
+  | asin => "asin"
+  | asinh => "asinh"
+  | atan => "atan"
+  | atanh => "atanh"
+  | bessel_i0e => "bessel_i0e"
+  | bessel_i1e => "bessel_i1e"
+  | broadcast s => s!"broadcast {s.map Prod.snd}"
+  | cbrt => "cbrt"
+  | ceil => "ceil"
+  | cholesky => "cholesky"
   | concat => "concat"
+  | conv => "conv"
+  | convert_type => "convert_type"
+  | cos => "cos"
+  | cosh => "cosh"
+  | cumlogsumexp axis reverse => s!"cumlogsumexp {axis} {reverse}"
+  | cummax axis reverse => s!"cummax {axis} {reverse}"
+  | cummin axis reverse => s!"cummin {axis} {reverse}"
+  | cumprod axis reverse => s!"cumprod {axis} {reverse}"
+  | cumsum => "cumsum"
+  | div => "div"
+  | div_int => "div_int"
+  | dot_general batch contract lhs rhs => s!"dot_general {contract.length} {batch.length}"
+  | dynamic_slice dims => s!"dynamic_slice"
+  | dynamic_update_slice dims => s!"dynamic_update_slice"
+  | eigvals => "eigvals"
+  | eigvalsh => "eigvalsh"
+  | eigvecs => "eigvecs"
+  | eigvecsh => "eigvecsh"
+  | empty => "empty"
+  | eq => "eq"
+  | erf => "erf"
+  | erf_inv => "erf_inv"
+  | erfc => "erfc"
+  | exp => "exp"
+  | exp2 => "exp2"
+  | expm1 => "expm1"
+  | gather => "gather"
+  | iota (n := n) => s!"iota {n}"
+  | log => "log"
   | mul => "mul"
   | mod => "mod"
+  | neg => "neg"
+  | ofNat (σ := ⟨α, s⟩) n => s!"const {α} {s} {n}"
+  | scatter => "scatter"
+  | sin => "sin"
+  | sorted => "sorted"
+  | sqrt => "sqrt"
+  | sub => "sub"
+  | sum n => s!"sum {n}"
   | transpose σ =>
     let σ : List ℕ := List.ofFn fun i => σ i
     s!"transpose {σ}"
-  | dot_general batch contract lhs rhs => s!"dot_general {contract.length} {batch.length}"
-  | scatter => "scatter"
   | zeros (σ := σ) => s!"zeros {σ.dtype} {σ.shape}"
-  | iota (n := n) => s!"iota {n}"
-  | sum n => s!"sum {n}"
-  | broadcast s => s!"broadcast {s.map Prod.snd}"
-  | div => "div"
-  | sqrt => "sqrt"
-  | cumsum => "cumsum"
   | choice => "where"
-  | ofNat (σ := ⟨α, s⟩) n => s!"const {α} {s} {n}"
-  | neg => "neg"
-  | sub => "sub"
   | einsum s indices n => s!"einsum {indices} {n}"
-  | gather => s!"gather"
-  | exp => "exp"
-  | eq => "eq"
-  | _ => "unimplemented"
 
 instance (args : List TensorType) (out : TensorType) : ToString (XlaPrimOp args out) :=
   ⟨XlaPrimOp.toString⟩

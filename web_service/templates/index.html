@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSA Verified Code Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SSA Verified Code Generator</h1>
+            <p>Natural Language &rarr; Formal Spec &rarr; SSA Implementation &rarr; Verified IR</p>
+        </header>
+
+        <div class="status-bar" id="statusBar">
+            <span id="statusText">Ready</span>
+        </div>
+
+        <!-- Step 1: Natural Language Input -->
+        <section class="card">
+            <h2>Step 1: Specification</h2>
+            <p>Describe the function you want to implement in natural language.</p>
+            <textarea id="specInput" rows="4" placeholder="Example: Compute the L2 norm of a vector, then divide each element by the norm to get a unit vector."></textarea>
+            <div class="actions">
+                <button id="btnFormalize" class="btn-primary">Formalize</button>
+            </div>
+        </section>
+
+        <!-- Reasoning Panel -->
+        <section class="card" id="reasoningCard" style="display:none;">
+            <h2>Chain-of-Thought</h2>
+            <p>Real-time reasoning from the LLM:</p>
+            <div id="reasoningBox" class="reasoning-box"></div>
+        </section>
+
+        <!-- Step 2: Formalization Editor -->
+        <section class="card" id="formalizeCard" style="display:none;">
+            <h2>Step 2: Formalization</h2>
+            <p>Review and edit the generated Lean theorem statement.</p>
+            <textarea id="theoremEditor" rows="10" class="code-editor"></textarea>
+            <div class="actions">
+                <button id="btnImplement" class="btn-primary">Implement & Verify</button>
+                <button id="btnBack" class="btn-secondary">Back to Spec</button>
+            </div>
+        </section>
+
+        <!-- Step 3: Results -->
+        <section class="card" id="resultCard" style="display:none;">
+            <h2>Step 3: Result</h2>
+            <div id="resultContent">
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="ir">Generated IR</button>
+                    <button class="tab-btn" data-tab="lean">Lean Code</button>
+                    <button class="tab-btn" data-tab="build">Build Log</button>
+                </div>
+                <div class="tab-content active" id="tab-ir">
+                    <pre id="irOutput"><code>No IR generated yet.</code></pre>
+                </div>
+                <div class="tab-content" id="tab-lean">
+                    <pre id="leanOutput"><code>No code generated yet.</code></pre>
+                </div>
+                <div class="tab-content" id="tab-build">
+                    <pre id="buildOutput"><code>No build run yet.</code></pre>
+                </div>
+            </div>
+            <div class="actions">
+                <button id="btnNew" class="btn-primary">New Specification</button>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // State
+        let currentTheorem = '';
+        let currentLeanCode = '';
+        let currentIR = '';
+        let currentBuildMsg = '';
+        let currentReasoning = '';
+        let abortController = null;
+
+        // DOM refs
+        const specInput = document.getElementById('specInput');
+        const theoremEditor = document.getElementById('theoremEditor');
+        const statusBar = document.getElementById('statusBar');
+        const statusText = document.getElementById('statusText');
+        const reasoningCard = document.getElementById('reasoningCard');
+        const reasoningBox = document.getElementById('reasoningBox');
+
+        // Cards
+        const formalizeCard = document.getElementById('formalizeCard');
+        const resultCard = document.getElementById('resultCard');
+
+        // Outputs
+        const irOutput = document.getElementById('irOutput');
+        const leanOutput = document.getElementById('leanOutput');
+        const buildOutput = document.getElementById('buildOutput');
+
+        function setStatus(msg, type = 'info') {
+            statusText.textContent = msg;
+            statusBar.className = 'status-bar ' + type;
+        }
+
+        function setLoading(loading) {
+            document.body.style.cursor = loading ? 'wait' : 'default';
+            ['btnFormalize', 'btnImplement'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) btn.disabled = loading;
+            });
+        }
+
+        function resetReasoning() {
+            currentReasoning = '';
+            reasoningBox.textContent = '';
+            reasoningCard.style.display = 'none';
+        }
+
+        function appendReasoning(text) {
+            currentReasoning += text;
+            reasoningBox.textContent = currentReasoning;
+            reasoningBox.scrollTop = reasoningBox.scrollHeight;
+            reasoningCard.style.display = 'block';
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+            });
+        });
+
+        async function readSSEStream(response, handlers) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (handlers[data.type]) {
+                                handlers[data.type](data);
+                            }
+                        } catch (e) {
+                            console.error('SSE parse error:', e, line);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 1: Formalize
+        document.getElementById('btnFormalize').addEventListener('click', async () => {
+            const spec = specInput.value.trim();
+            if (!spec) {
+                alert('Please enter a specification.');
+                return;
+            }
+            if (abortController) abortController.abort();
+            abortController = new AbortController();
+
+            setLoading(true);
+            setStatus('Formalizing... watch the CoT panel below', 'info');
+            resetReasoning();
+            formalizeCard.style.display = 'none';
+            resultCard.style.display = 'none';
+
+            let theoremDraft = '';
+
+            try {
+                const resp = await fetch('/api/formalize-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ spec }),
+                    signal: abortController.signal,
+                });
+
+                await readSSEStream(resp, {
+                    reasoning: (data) => appendReasoning(data.chunk),
+                    content: (data) => { theoremDraft += data.chunk; },
+                    done: (data) => {
+                        currentTheorem = data.theorem || theoremDraft;
+                        theoremEditor.value = currentTheorem;
+                        formalizeCard.style.display = 'block';
+                        setStatus('Formalization complete. Review and edit if needed.', 'success');
+                    },
+                    error: (data) => {
+                        setStatus('Formalization failed: ' + data.message, 'error');
+                        alert('Formalization failed: ' + data.message);
+                    },
+                });
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    setStatus('Formalization failed: ' + e.message, 'error');
+                    alert('Formalization failed: ' + e.message);
+                }
+            } finally {
+                setLoading(false);
+                abortController = null;
+            }
+        });
+
+        // Step 2: Implement
+        document.getElementById('btnImplement').addEventListener('click', async () => {
+            const theorem = theoremEditor.value.trim();
+            if (!theorem) {
+                alert('Theorem text is empty.');
+                return;
+            }
+            if (abortController) abortController.abort();
+            abortController = new AbortController();
+
+            setLoading(true);
+            setStatus('Generating implementation... watch the CoT panel', 'info');
+            resetReasoning();
+            resultCard.style.display = 'none';
+
+            let leanDraft = '';
+
+            try {
+                const resp = await fetch('/api/implement-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        theorem,
+                        auto_fix: true,
+                        max_fix_iterations: 3
+                    }),
+                    signal: abortController.signal,
+                });
+
+                await readSSEStream(resp, {
+                    reasoning: (data) => appendReasoning(data.chunk),
+                    content: (data) => { leanDraft += data.chunk; },
+                    phase: (data) => setStatus(data.message, 'info'),
+                    done: (data) => {
+                        currentLeanCode = data.lean_code || leanDraft;
+                        currentIR = data.ir || '';
+                        currentBuildMsg = data.message || data.error || '';
+
+                        leanOutput.querySelector('code').textContent = currentLeanCode || 'No code.';
+                        irOutput.querySelector('code').textContent = currentIR || 'No IR generated.';
+                        buildOutput.querySelector('code').textContent = currentBuildMsg;
+
+                        resultCard.style.display = 'block';
+                        if (data.verified) {
+                            setStatus('Verification succeeded! IR generated.', 'success');
+                        } else {
+                            setStatus('Verification failed. See Build Log.', 'error');
+                        }
+                    },
+                    error: (data) => {
+                        setStatus('Implementation failed: ' + data.message, 'error');
+                        alert('Implementation failed: ' + data.message);
+                    },
+                });
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    setStatus('Implementation failed: ' + e.message, 'error');
+                    alert('Implementation failed: ' + e.message);
+                }
+            } finally {
+                setLoading(false);
+                abortController = null;
+            }
+        });
+
+        // Back button
+        document.getElementById('btnBack').addEventListener('click', () => {
+            formalizeCard.style.display = 'none';
+            resultCard.style.display = 'none';
+            resetReasoning();
+        });
+
+        // New spec button
+        document.getElementById('btnNew').addEventListener('click', () => {
+            specInput.value = '';
+            theoremEditor.value = '';
+            currentTheorem = '';
+            currentLeanCode = '';
+            currentIR = '';
+            currentBuildMsg = '';
+            formalizeCard.style.display = 'none';
+            resultCard.style.display = 'none';
+            resetReasoning();
+            setStatus('Ready', 'info');
+        });
+    </script>
+</body>
+</html>
