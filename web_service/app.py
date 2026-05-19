@@ -4,14 +4,30 @@ import json
 import os
 import sys
 
-# Ensure project root is importable
+# Ensure project root and python/ are importable
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "python"))
 
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 
 from llm_client import LLMClient
 from lean_runner import iterative_fix_and_build, iterative_fix_and_build_stream, _strip_markdown
+
+# Lazy import of JAX evaluator (heavy dependency)
+_evaluator = None
+
+def _get_evaluator():
+    global _evaluator
+    if _evaluator is None:
+        try:
+            import eval as _eval_mod
+            import ops  # noqa: F401 — side-effect: registers ops
+            _evaluator = _eval_mod
+        except Exception as e:
+            raise RuntimeError(f"JAX evaluator not available: {e}")
+    return _evaluator
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
@@ -277,11 +293,61 @@ def api_verify():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/evaluate", methods=["POST"])
+def api_evaluate():
+    """Evaluate generated IR with user-provided concrete inputs."""
+    data = request.get_json(force=True)
+    ir_code = data.get("ir", "").strip()
+    args_spec = data.get("args", [])
+
+    if not ir_code:
+        return jsonify({"error": "Empty IR code."}), 400
+
+    try:
+        evaluator = _get_evaluator()
+        import jax.numpy as jnp
+
+        jax_arrays = []
+        for spec in args_spec:
+            shape = tuple(spec.get("shape", []))
+            dtype_str = spec.get("dtype", "float")
+            flat_data = spec.get("data", [])
+
+            dtype = jnp.float32 if dtype_str == "float" else jnp.int32
+            arr = jnp.array(flat_data, dtype=dtype).reshape(shape)
+            jax_arrays.append(arr)
+
+        result = evaluator.evaluate(ir_code, *jax_arrays)
+
+        # Convert JAX array to nested Python list for JSON serialization
+        result_list = jnp.asarray(result).tolist()
+        result_shape = list(jnp.asarray(result).shape)
+        result_dtype = "float" if jnp.asarray(result).dtype.kind == "f" else "int"
+
+        return jsonify({
+            "success": True,
+            "result": {
+                "data": result_list,
+                "shape": result_shape,
+                "dtype": result_dtype,
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/health", methods=["GET"])
 def api_health():
+    eval_ok = False
+    try:
+        _get_evaluator()
+        eval_ok = True
+    except Exception:
+        pass
     return jsonify({
         "status": "ok",
         "llm_configured": llm is not None,
+        "evaluator_ready": eval_ok,
     })
 
 

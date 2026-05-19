@@ -224,6 +224,49 @@ code {
     white-space: pre-wrap;
 }
 
+/* Evaluate section */
+.eval-input-group {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    background: var(--code-bg);
+}
+
+.eval-input-group h4 {
+    margin: 0 0 12px;
+    font-size: 1rem;
+    color: var(--primary-dark);
+}
+
+.eval-fields {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px 12px;
+    align-items: center;
+}
+
+.eval-fields label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.eval-fields input,
+.eval-fields select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+}
+
+.eval-fields input:focus,
+.eval-fields select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
 /* Responsive */
 @media (max-width: 600px) {
     .container {

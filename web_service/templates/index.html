@@ -68,6 +68,20 @@
                 <button id="btnNew" class="btn-primary">New Specification</button>
             </div>
         </section>
+
+        <!-- Step 4: Evaluate -->
+        <section class="card" id="evaluateCard" style="display:none;">
+            <h2>Step 4: Evaluate</h2>
+            <p>Run the generated IR with concrete inputs using the JAX evaluator.</p>
+            <div id="evaluateInputs"></div>
+            <div class="actions">
+                <button id="btnEvaluate" class="btn-primary">Run Evaluation</button>
+            </div>
+            <div id="evaluateResult" style="display:none; margin-top:16px;">
+                <h3>Result</h3>
+                <pre id="evaluateResultOutput"><code></code></pre>
+            </div>
+        </section>
     </div>
 
     <script>
@@ -253,8 +267,11 @@
                         resultCard.style.display = 'block';
                         if (data.verified) {
                             setStatus('Verification succeeded! IR generated.', 'success');
+                            evaluateCard.style.display = 'block';
+                            buildEvaluateForm();
                         } else {
                             setStatus('Verification failed. See Build Log.', 'error');
+                            evaluateCard.style.display = 'none';
                         }
                     },
                     error: (data) => {
@@ -290,8 +307,125 @@
             currentBuildMsg = '';
             formalizeCard.style.display = 'none';
             resultCard.style.display = 'none';
+            document.getElementById('evaluateCard').style.display = 'none';
             resetReasoning();
             setStatus('Ready', 'info');
+        });
+
+        // ------------------------------------------------------------------
+        // Evaluate feature
+        // ------------------------------------------------------------------
+
+        const evaluateCard = document.getElementById('evaluateCard');
+        const evaluateInputs = document.getElementById('evaluateInputs');
+        const evaluateResult = document.getElementById('evaluateResult');
+        const evaluateResultOutput = document.getElementById('evaluateResultOutput');
+
+        function countInputsInIR(ir) {
+            const matches = ir.match(/\$\d+/g);
+            if (!matches) return 0;
+            const nums = matches.map(m => parseInt(m.slice(1)));
+            return Math.max(...nums) + 1;
+        }
+
+        function buildEvaluateForm() {
+            evaluateInputs.innerHTML = '';
+            if (!currentIR) return;
+
+            const nInputs = countInputsInIR(currentIR);
+            if (nInputs === 0) {
+                evaluateInputs.innerHTML = '<p class="text-muted">This program takes no inputs (only constants).</p>';
+                return;
+            }
+
+            for (let i = 0; i < nInputs; i++) {
+                const div = document.createElement('div');
+                div.className = 'eval-input-group';
+                div.innerHTML = `
+                    <h4>Input $${i}</h4>
+                    <div class="eval-fields">
+                        <label>Shape (comma-separated):</label>
+                        <input type="text" class="eval-shape" id="evalShape${i}" placeholder="e.g. 4 or 3,4" value="4">
+                        <label>Dtype:</label>
+                        <select class="eval-dtype" id="evalDtype${i}">
+                            <option value="float" selected>float</option>
+                            <option value="int">int</option>
+                        </select>
+                        <label>Data (comma-separated, row-major):</label>
+                        <input type="text" class="eval-data" id="evalData${i}" placeholder="e.g. 1,2,3,4" value="1,2,3,4">
+                    </div>
+                `;
+                evaluateInputs.appendChild(div);
+            }
+        }
+
+        // Hook into the implement-stream done handler to also show evaluate card
+        const originalDoneHandler = (data) => {
+            currentLeanCode = data.lean_code || '';
+            currentIR = data.ir || '';
+            currentBuildMsg = data.message || data.error || '';
+
+            leanOutput.querySelector('code').textContent = currentLeanCode || 'No code.';
+            irOutput.querySelector('code').textContent = currentIR || 'No IR generated.';
+            buildOutput.querySelector('code').textContent = currentBuildMsg;
+
+            resultCard.style.display = 'block';
+            if (data.verified) {
+                setStatus('Verification succeeded! IR generated.', 'success');
+                evaluateCard.style.display = 'block';
+                buildEvaluateForm();
+            } else {
+                setStatus('Verification failed. See Build Log.', 'error');
+                evaluateCard.style.display = 'none';
+            }
+        };
+
+        document.getElementById('btnEvaluate').addEventListener('click', async () => {
+            if (!currentIR) {
+                alert('No IR to evaluate.');
+                return;
+            }
+
+            const nInputs = countInputsInIR(currentIR);
+            const args = [];
+            for (let i = 0; i < nInputs; i++) {
+                const shapeStr = document.getElementById(`evalShape${i}`).value.trim();
+                const dtype = document.getElementById(`evalDtype${i}`).value;
+                const dataStr = document.getElementById(`evalData${i}`).value.trim();
+
+                const shape = shapeStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                const data = dataStr.split(',').map(s => {
+                    const v = parseFloat(s.trim());
+                    return dtype === 'int' ? Math.round(v) : v;
+                });
+
+                args.push({ shape, dtype, data });
+            }
+
+            setStatus('Evaluating with JAX...', 'info');
+            try {
+                const resp = await fetch('/api/evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ir: currentIR, args }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    const r = data.result;
+                    evaluateResultOutput.querySelector('code').textContent =
+                        `Shape: [${r.shape.join(', ')}]\nDtype: ${r.dtype}\n\n${JSON.stringify(r.data, null, 2)}`;
+                    evaluateResult.style.display = 'block';
+                    setStatus('Evaluation complete.', 'success');
+                } else {
+                    evaluateResultOutput.querySelector('code').textContent = 'Error: ' + (data.error || 'Unknown error');
+                    evaluateResult.style.display = 'block';
+                    setStatus('Evaluation failed.', 'error');
+                }
+            } catch (e) {
+                evaluateResultOutput.querySelector('code').textContent = 'Error: ' + e.message;
+                evaluateResult.style.display = 'block';
+                setStatus('Evaluation failed: ' + e.message, 'error');
+            }
         });
     </script>
 </body>

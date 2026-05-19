@@ -165,6 +165,66 @@ def _eval_ceil(op_str, vals, lib_refs, libs, parent_args):
 def _eval_floor(op_str, vals, lib_refs, libs, parent_args):
     x, = vals; return jnp.floor(x)
 
+@register_op("acos")
+def _eval_acos(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.arccos(x)
+
+@register_op("acosh")
+def _eval_acosh(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.arccosh(x)
+
+@register_op("asin")
+def _eval_asin(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.arcsin(x)
+
+@register_op("asinh")
+def _eval_asinh(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.arcsinh(x)
+
+@register_op("atan")
+def _eval_atan(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.arctan(x)
+
+@register_op("atanh")
+def _eval_atanh(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.arctanh(x)
+
+@register_op("cbrt")
+def _eval_cbrt(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.cbrt(x)
+
+@register_op("cosh")
+def _eval_cosh(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.cosh(x)
+
+@register_op("erf")
+def _eval_erf(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jax.scipy.special.erf(x)
+
+@register_op("erf_inv")
+def _eval_erf_inv(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jax.scipy.special.erfinv(x)
+
+@register_op("erfc")
+def _eval_erfc(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jax.scipy.special.erfc(x)
+
+@register_op("exp2")
+def _eval_exp2(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.exp2(x)
+
+@register_op("expm1")
+def _eval_expm1(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jnp.expm1(x)
+
+@register_op("bessel_i0e")
+def _eval_bessel_i0e(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jax.scipy.special.i0e(x)
+
+@register_op("bessel_i1e")
+def _eval_bessel_i1e(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals; return jax.scipy.special.i1e(x)
+
 
 # -- Element-wise binary -----------------------------------------------------
 
@@ -208,6 +268,14 @@ def _eval_min(op_str, vals, lib_refs, libs, parent_args):
 def _eval_mod(op_str, vals, lib_refs, libs, parent_args):
     x, y = vals; return jnp.mod(x, y)
 
+@register_op("div_int")
+def _eval_div_int(op_str, vals, lib_refs, libs, parent_args):
+    x, y = vals; return jnp.floor_divide(x, y)
+
+@register_op("and")
+def _eval_and(op_str, vals, lib_refs, libs, parent_args):
+    x, y = vals; return jnp.bitwise_and(x, y)
+
 
 # -- Reductions & cumulative -------------------------------------------------
 
@@ -224,6 +292,46 @@ def _eval_cumsum(op_str, vals, lib_refs, libs, parent_args):
     if x.ndim == 0:
         return x
     return jnp.cumsum(x, axis=-1)
+
+@register_op("argmax")
+def _eval_argmax(op_str, vals, lib_refs, libs, parent_args):
+    axis = int(op_str.split()[1])
+    x, = vals
+    return jnp.argmax(x, axis=axis).astype(jnp.int32)
+
+@register_op("argmin")
+def _eval_argmin(op_str, vals, lib_refs, libs, parent_args):
+    axis = int(op_str.split()[1])
+    x, = vals
+    return jnp.argmin(x, axis=axis).astype(jnp.int32)
+
+@register_op("cummax")
+def _eval_cummax(op_str, vals, lib_refs, libs, parent_args):
+    parts = op_str.split()
+    axis = int(parts[1])
+    x, = vals
+    return jnp.maximum.accumulate(x, axis=axis)
+
+@register_op("cummin")
+def _eval_cummin(op_str, vals, lib_refs, libs, parent_args):
+    parts = op_str.split()
+    axis = int(parts[1])
+    x, = vals
+    return jnp.minimum.accumulate(x, axis=axis)
+
+@register_op("cumprod")
+def _eval_cumprod(op_str, vals, lib_refs, libs, parent_args):
+    parts = op_str.split()
+    axis = int(parts[1])
+    x, = vals
+    return jnp.cumprod(x, axis=axis)
+
+@register_op("cumlogsumexp")
+def _eval_cumlogsumexp(op_str, vals, lib_refs, libs, parent_args):
+    parts = op_str.split()
+    axis = int(parts[1])
+    x, = vals
+    return jnp.log(jnp.cumsum(jnp.exp(x), axis=axis))
 
 
 # -- Shape manipulation ------------------------------------------------------
@@ -256,6 +364,47 @@ def _eval_concat(op_str, vals, lib_refs, libs, parent_args):
 
 
 # -- Linear algebra ----------------------------------------------------------
+
+@register_op("cholesky")
+def _eval_cholesky(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    return jnp.linalg.cholesky(x)
+
+@register_op("eigvals")
+def _eval_eigvals(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    w = jnp.linalg.eigvals(x)
+    return w.astype(jnp.float32)
+
+@register_op("eigvalsh")
+def _eval_eigvalsh(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    return jnp.linalg.eigvalsh(x).astype(jnp.float32)
+
+@register_op("eigvecs")
+def _eval_eigvecs(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    w, v = jnp.linalg.eig(x)
+    return v.astype(jnp.float32)
+
+@register_op("eigvecsh")
+def _eval_eigvecsh(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    w, v = jnp.linalg.eigh(x)
+    return v.astype(jnp.float32)
+
+@register_op("convert_type")
+def _eval_convert_type(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    # IR doesn't encode target dtype; default to float32 for int->float
+    if jnp.issubdtype(x.dtype, jnp.integer):
+        return x.astype(jnp.float32)
+    return x.astype(jnp.int32)
+
+@register_op("empty")
+def _eval_empty(op_str, vals, lib_refs, libs, parent_args):
+    # IR doesn't encode shape/dtype; this is a placeholder
+    raise ValueError("empty: cannot determine shape/dtype from IR alone")
 
 @register_op("dot_general")
 def _eval_dot_general_op(op_str, vals, lib_refs, libs, parent_args):
@@ -352,7 +501,7 @@ def _eval_vmap(op_str, vals, lib_refs, libs, parent_args):
 def _eval_einsum(op_str, vals, lib_refs, libs, parent_args):
     """Parse einsum spec and evaluate using JAX."""
     # Format: einsum [[i,j,...], [k,l,...], ...] n; arg1, arg2, ...
-    m = re.match(r"einsum\s+(\[.*?\])\s+(\d+)", op_str)
+    m = re.match(r"einsum\s+(\[\[.*\]\])\s+(\d+)", op_str)
     if not m:
         raise ValueError(f"Invalid einsum op: {op_str!r}")
     
@@ -361,11 +510,13 @@ def _eval_einsum(op_str, vals, lib_refs, libs, parent_args):
     
     # Parse specs: [[2,1], [1,0], ...]
     specs = []
-    # Split by ], [ patterns
-    parts = re.findall(r"\[(.*?)\]", specs_str)
+    # specs_str is like "[[1, 0], [0]]"; strip outer brackets and split
+    inner = specs_str[1:-1].strip()
+    parts = [p.strip("[] ") for p in inner.split("], [")]
     for p in parts:
         idxs = [int(x.strip()) for x in p.split(",") if x.strip()]
-        specs.append(idxs)
+        if idxs:
+            specs.append(idxs)
     
     args = vals
     
