@@ -44,19 +44,19 @@ theorem offDiag_eq_def {n : ℕ} : Xla.simpleEval (offDiag (n := n)) = offDiag_d
   ext x i j
   have h1 : n - 1 ≠ 0 := (Nat.zero_lt_of_lt i.isLt).ne.symm
   have h2 : n ≠ 0 := (Nat.zero_lt_of_lt j.isLt).ne.symm
-  simp only [Xla.simpleEval, Curry.map, offDiag, Xla.gather, Xla.bindPrim, List.length_cons,
+  simp only [Xla.simpleEval, offDiag, Xla.gather, Xla.bindPrim, List.length_cons,
     List.length_nil, Nat.reduceAdd, List.reduceReplicate, Fin.getElem_fin, Xla.unflatten,
     List.prod_cons, List.prod_nil, Xla.cast, List.replicate_one, Xla.flatten, Fin.zero_eta,
     Fin.isValue, Xla.iota, List.replicate_zero, Xla.broadcast, List.map_cons, List.map_nil, Xla.add,
-    SSA.Expr.eval, Curry.get, SSA.evalType.bind, SSA.Impl.bind, SSA.SimpleImpl.bind,
+    SSA.Impl.bind, SSA.SimpleImpl.bind,
     Xla.DirectImpl.gather, Curry.of, h1, ↓reduceDIte, Nat.add_eq_zero_iff, h2, one_ne_zero,
-    and_self, Curry.pure, Curry.map₂, Index.append, SSA.Tensor.unflatten, mul_one, mul_eq_zero,
+    and_self, Index.append, SSA.Tensor.unflatten, mul_one, mul_eq_zero,
     or_self, SSA.Tensor.flatten, Fin.coe_ofNat_eq_mod, Nat.zero_mod, List.getElem_cons_zero,
     Curry.arg, Fin.divNat, List.foldr_cons, List.foldr_nil, Fin.modNat, Nat.div_one,
     Index.single_zero, Fin.intCast, Fin.succ_zero_eq_one, List.nil_append, Nat.cast_nonneg,
     ↓reduceIte, Int.natAbs_natCast, Fin.ofNat_eq_cast, Fin.val_natCast, dvd_mul_right,
     Nat.mod_mod_of_dvd, Fin.mulAdd, add_zero, SSA.Tensor.broadcast, id_eq, Fin.cast_val_eq_self,
-    Fin.succ_one_eq_two, SSA.Tensor.map₂]
+    Fin.succ_one_eq_two, SSA.Tensor.map₂, reduce_ssa]
   congr
   simp only [Fin.cast, Fin.isValue]
   congr 1

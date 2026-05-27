@@ -1,4 +1,5 @@
 import Mathlib.Algebra.Group.Defs
+import SSA.Meta
 
 variable {ι : Type}
 
@@ -29,6 +30,7 @@ def Index.select {γ : List ι} (i : List (Fin γ.length)) : Index m γ → Inde
     | .mk 0 h => x i₀
     | .mk (r + 1) h => select i x <| .mk r <| by simpa using h
 
+@[reduce_ssa]
 def Index.append {γ γ' : List ι} : Index m γ → Index m γ' → Index m (γ ++ γ') :=
   match γ with
   | [] => fun x y => y
@@ -47,11 +49,13 @@ def Index.replicate {i : ι} {n : ℕ} : Index m (List.replicate n i) → Fin n 
       let x' : Index m (List.replicate n i) := fun r => x r.succ
       replicate x' <| .mk r <| by simpa using h
 
+@[reduce_ssa]
 def Curry.get {γ : List ι} (f : Curry m γ α) (i : Index m γ) : α :=
   match γ with
   | [] => f
   | γ :: γs => (f (i ⟨0, by simp⟩)).get fun r => i r.succ
 
+@[reduce_ssa]
 def Curry.of {γ : List ι} (f : Index m γ → α) : Curry m γ α :=
   match γ with
   | [] => f fun r => nomatch r
@@ -60,21 +64,25 @@ def Curry.of {γ : List ι} (f : Index m γ → α) : Curry m γ α :=
     | .mk 0 h => x
     | .mk (r + 1) h => a <| .mk r <| by simpa using h
 
+@[reduce_ssa]
 def Index.map {γ : List μ} {f : μ → ι} : Index m (γ.map f) → Index (m ∘ f) γ :=
   match γ with
   | [] => fun _ r => nomatch r
   | _ :: _ => Curry.get <| fun x₀ => Curry.of <| fun x => Index.cons x₀ x.map
 
+@[reduce_ssa]
 def Index.unmap {γ : List μ} {f : μ → ι} : Index (m ∘ f) γ → Index m (γ.map f) :=
   match γ with
   | [] => fun _ r => nomatch r
   | _ :: _ => Curry.get <| fun x₀ => Curry.of <| fun x => Index.cons x₀ x.unmap
 
+@[reduce_ssa]
 theorem Curry.of_get {γ : List ι} (x : Curry m γ α) : of x.get = x := by
   induction γ with
   | nil => rfl
   | cons γ₀ γs ih => simp [of, get, ih, Fin.succ]
 
+@[reduce_ssa]
 theorem Curry.get_of {γ : List ι} (x : Index m γ → α) : (of x).get = x := by
   ext i
   induction γ with
@@ -89,26 +97,31 @@ theorem Curry.get_of {γ : List ι} (x : Index m γ → α) : (of x).get = x := 
     refine funext fun r => ?_
     match r with | 0 | .mk (r + 1) h => rfl
 
+@[reduce_ssa]
 def Curry.pure {γ : List ι} (x : α) : Curry m γ α :=
   match γ with
   | [] => x
   | _ :: _ => fun _ => pure x
 
+@[reduce_ssa]
 def Curry.map {γ : List ι} (f : α → β) : Curry m γ α → Curry m γ β :=
   match γ with
   | [] => f
   | _ :: _ => fun a x => (a x).map f
 
+@[reduce_ssa]
 def Curry.map₂ {γ : List ι} (f : α → β → μ) : Curry m γ α → Curry m γ β → Curry m γ μ :=
   match γ with
   | [] => f
   | _ :: _ => fun x y a => map₂ f (x a) (y a)
 
+@[reduce_ssa]
 def Curry.bind {γ : List ι} (x : Curry m γ α) (f : α → Curry m γ β) : Curry m γ β :=
   match γ with
   | [] => f x
   | _ :: _ => fun a => bind (x a) fun b => f b a
 
+@[reduce_ssa]
 def Curry.arg {γ : List ι} (i : Fin γ.length) : Curry m γ (m γ[i]) :=
   match γ with
   | γ₀ :: γs =>
@@ -170,11 +183,13 @@ instance Curry.instAddCommMonoid (γ : List ι) [AddCommMonoid α] :
       refine funext fun i => ?_
       exact ih (x i)
 
+@[reduce_ssa]
 def Curry.curry {γ γ' : List ι} : Curry m (γ ++ γ') α → Curry m γ (Curry m γ' α) := 
   match γ with
   | [] => id
   | _ :: _ => fun x a => (x a).curry
 
+@[reduce_ssa]
 def Curry.uncurry {γ γ' : List ι} : Curry m γ (Curry m γ' α) → Curry m (γ ++ γ') α :=
   match γ with
   | [] => id

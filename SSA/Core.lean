@@ -1,4 +1,6 @@
 import SSA.Curry
+import SSA.Meta
+
 /-!
 # The Core of the SSA framework
 
@@ -152,6 +154,7 @@ class Impl {data : Type} (op : OpType data) (impl : data → Type) where
   bind {expr : List (List data × List data)} {args outs : List data} : 
     op expr args outs → Impl.bindType impl expr args outs
 
+@[reduce_ssa]
 def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data × List data)}
   {args outs : List data} :
     Impl.bindType impl exprs args outs →
@@ -161,6 +164,7 @@ def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data 
   | expr :: exprs => fun op fs => bind (op (fs ⟨0, by simp⟩)) (fun i => fs i.succ)
 
 /-- We can evaluate an expression using some implementation -/
+@[reduce_ssa]
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
   | nil => Curry.pure Index.null
