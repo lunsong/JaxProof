@@ -99,6 +99,9 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | sub {σ : TensorType} : XlaPrimOp [σ, σ] σ
   | einsum (s : Shape) (indices : List (List (Fin s.length))) (n : ℕ) :
     XlaPrimOp (indices.map fun i ↦ ⟨.float, i.map s.get⟩) ⟨.float, s.drop n⟩
+  | flatten {α : DType} {s : Shape} : XlaPrimOp [⟨α, s⟩] ⟨α, [s.prod]⟩
+  | unflatten {α : DType} (s : Shape) : XlaPrimOp [⟨α, [s.prod]⟩] ⟨α, s⟩
+  | cast {α : DType} {s s' : Shape} : s = s' → XlaPrimOp [⟨α, s⟩] ⟨α, s'⟩
   --| lt : XlaPrimOp (some 2)
   --| select : XlaPrimOp (some 3)
   --| addIdx : XlaPrimOp (some 3)
@@ -182,6 +185,9 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | zeros (σ := σ) => s!"zeros {σ.dtype} {σ.shape}"
   | choice => "where"
   | einsum s indices n => s!"einsum {indices} {n}"
+  | flatten => "flatten"
+  | unflatten s => s!"unflatten {s}"
+  | cast _ => "id"
 
 instance (args : List TensorType) (out : TensorType) : ToString (XlaPrimOp args out) :=
   ⟨XlaPrimOp.toString⟩

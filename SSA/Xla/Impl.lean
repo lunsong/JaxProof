@@ -106,6 +106,9 @@ noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
     match α with | .int | .float => Tensor.map₂ (fun x y => x - y) x y
   | .einsum s indices n => Curry.of fun x =>
     Tensor.einsum s (List.ofFn fun r ↦ ⟨indices[r], x.map r⟩) n
+  | .flatten (α := α) => match α with | .int | .float => Tensor.flatten
+  | .unflatten (α := α) s => match α with | .int | .float => Tensor.unflatten s
+  | .cast (α := α) h => match α with | .int | .float => Tensor.cast h
   | _ => DirectImpl.zero
 
 instance : Impl XlaHigherOp DirectImpl where

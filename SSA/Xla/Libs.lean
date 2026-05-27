@@ -268,4 +268,15 @@ def cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool := false)
 def div_int {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .div_int (x.append y)
 
+def flatten {σ : TensorType} : Expr XlaOp args [σ] → Expr XlaOp args [⟨σ.dtype, [σ.shape.prod]⟩] :=
+  bindPrim .flatten
+
+def unflatten {α : DType} (s : Shape) :
+    Expr XlaOp args [⟨α, [s.prod]⟩] → Expr XlaOp args [⟨α, s⟩] :=
+  bindPrim (.unflatten s)
+
+def cast {α : DType} {s s' : Shape} (h : s = s') :
+    Expr XlaOp args [⟨α, s⟩] → Expr XlaOp args [⟨α, s'⟩] :=
+  bindPrim (.cast h)
+
 end Xla

@@ -5,3 +5,4 @@ import Tests.scatter
 import Tests.normalize
 import Tests.Coulomb
 import Tests.SchNet
+import Tests.offDiag
