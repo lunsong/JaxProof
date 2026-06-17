@@ -1,5 +1,6 @@
 import SSA.Core
 import SSA.Xla.Op
+import SSA.Xla.Meta
 
 namespace Xla
 
@@ -11,6 +12,7 @@ abbrev DType.impl : DType → Type
 
 abbrev DirectImpl : TensorType → Type := fun ⟨α, s⟩ => Tensor α.impl s
 
+@[reduce_xla]
 def DirectImpl.gather {α : DType} {s s' : Shape} :
     Curry DirectImpl (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) (DirectImpl ⟨α, s'⟩) :=
   match α with
@@ -24,6 +26,7 @@ def DirectImpl.gather {α : DType} {s s' : Shape} :
           let x  := x <| Fin.intCast (i.get r');
           Curry.get ((gather x).get r) r'
 
+@[reduce_xla]
 def DirectImpl.scatter {α : DType} {s : Shape} {n : ℕ}
   (x : DirectImpl ⟨α, s⟩) (y : DirectImpl ⟨α, [n]⟩) :
     Curry DirectImpl (List.replicate s.length ⟨.int, [n]⟩) (DirectImpl ⟨α, s⟩) :=
@@ -40,6 +43,7 @@ def DirectImpl.scatter {α : DType} {s : Shape} {n : ℕ}
    else
       Curry.pure x
 
+@[reduce_xla]
 def DirectImpl.zero {args : List TensorType} {out : TensorType} :
     Curry DirectImpl args (DirectImpl out) :=
   Curry.pure <|
@@ -47,6 +51,7 @@ def DirectImpl.zero {args : List TensorType} {out : TensorType} :
     | ⟨.int, _⟩
     | ⟨.float, _⟩ => Curry.pure 0
 
+@[reduce_xla]
 noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
   bind op := match op with
   |.abs (σ := ⟨α, n⟩) => fun x => match α with | .float | .int => x.map abs
@@ -111,6 +116,7 @@ noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
   | .cast (α := α) h => match α with | .int | .float => Tensor.cast h
   | _ => DirectImpl.zero
 
+@[reduce_xla]
 instance : Impl XlaHigherOp DirectImpl where
   bind op := match op with
   | .repeat => fun fn n => Curry.uncurry <| Curry.of <| fun x => Curry.of <| fun aux =>
@@ -121,6 +127,7 @@ instance : Impl XlaHigherOp DirectImpl where
     fun fn => Curry.uncurry <| Curry.of <| fun x => Curry.of <| fun aux =>
       Index.unmap <| fun r i => (fn.curry.get (fun r => x.map r i)).get aux r
 
+@[reduce_xla]
 noncomputable def simpleEval {args : List TensorType} {out : TensorType}
   (expr : Expr XlaOp args [out]) : Curry DirectImpl args (DirectImpl out) :=
   (expr.eval DirectImpl).map fun x => x 0

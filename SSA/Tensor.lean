@@ -6,6 +6,7 @@ import Mathlib.Data.Nat.ModEq
 import Mathlib.GroupTheory.Perm.Cycle.Concrete
 import Batteries.Data.Fin.Lemmas
 import SSA.Curry
+import SSA.Meta
 
 namespace SSA
 
@@ -46,12 +47,47 @@ def Tensor.cast_apply {s₀ s₀' : ℕ} {s s' : List ℕ} {x : Tensor R (s₀ :
   cases hi
   rfl
 
+theorem cast_apply_cast.{u, v}
+    {α₁ α₂ : Sort u}
+    {β₁ : α₁ → Sort v} {β₂ : α₂ → Sort v}
+    (hα : α₁ = α₂) (hβ : β₁ ≍ β₂)
+    (a : α₁) (f : ∀ a, β₁ a)
+    (h' : (∀ a, β₁ a) = (∀ a, β₂ a) := by cases hα; cases hβ; rfl) :
+    (cast h' f) (cast hα a) ≍ f a := by
+  cases hα
+  cases hβ
+  cases h'
+  rfl
+    
+theorem cast_apply.{u, v}
+    {α₁ α₂ : Sort u}
+    {β₁ : α₁ → Sort v} {β₂ : α₂ → Sort v}
+    (hα : α₂ = α₁) (hβ : β₁ ≍ β₂)
+    (a : α₂) (f : ∀ a, β₁ a)
+    (h' : (∀ a, β₁ a) = (∀ a, β₂ a) := by cases hα; cases hβ; rfl) :
+    (cast h' f) a ≍ f (cast hα a) := by
+  cases hα
+  cases hβ
+  cases h'
+  rfl
+
+theorem Tensor.cast_eq_cast {s s' : List ℕ} (h : s = s') (x : Tensor R s) :
+    x.cast h = _root_.cast (congrArg (Tensor R) h) x := by
+  cases h
+  induction s with
+  | nil => rfl
+  | cons s₀ s ih =>
+    dsimp [cast]
+    ext i
+    simp [ih]
+
 @[simp]
 def filter_pred {n : ℕ} : List (Fin (n + 1)) → List (Fin n)
   | [] => []
   | Fin.mk 0 _ :: xs => filter_pred xs
   | Fin.mk (n + 1) _ :: xs => (Fin.mk n (by omega)) :: filter_pred xs
 
+@[reduce_tensor]
 def Tensor.einprod [Mul R] [One R] (s : List ℕ)
   (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get))) : Tensor R s :=
   match s with
@@ -68,8 +104,13 @@ def Tensor.einprod [Mul R] [One R] (s : List ℕ)
     let xs' := xs.map fun ⟨i, x⟩ ↦ ⟨filter_pred i, filter i x⟩
     einprod s' xs'
 
+@[reduce_tensor]
 instance [Add R] {s : List ℕ} : Add (Tensor R s) := inferInstanceAs (Add (Curry Fin s R))
+
+@[reduce_tensor]
 instance [Zero R] {s : List ℕ} : Zero (Tensor R s) := inferInstanceAs (Zero (Curry Fin s R))
+
+@[reduce_tensor]
 instance [AddCommMonoid R] (s : List ℕ) : AddCommMonoid (Tensor R s) :=
   inferInstanceAs (AddCommMonoid (Curry Fin s R))
 
@@ -93,11 +134,13 @@ def Tensor.cumsum [AddCommMonoid R] {s : List ℕ} (x : Tensor R s) : Tensor R s
   | [_] => fun i => ∑ j with j ≤ i, x j
   | _ :: _ :: _ => fun i => cumsum (x i)
 
+@[reduce_tensor]
 def Tensor.einsum [AddCommMonoid R] [Mul R] [One R] (s : List ℕ)
   (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get))) (nsum : ℕ) :
     Tensor R (s.drop nsum) :=
   (einprod s xs).sumN nsum
 
+@[reduce_tensor]
 def Tensor.flatten {s : List ℕ} : Tensor R s → Fin s.prod → R :=
   match s with
   | [] => fun x _ ↦ x
@@ -133,6 +176,7 @@ theorem _root_.Fin.mulAdd_divNat_modNat {n m : ℕ} (i : Fin (n * m)) :
   simp only [Fin.mulAdd, Fin.coe_divNat, Fin.coe_modNat, ← Fin.val_eq_val]
   exact Nat.div_add_mod' i.val m
 
+@[reduce_tensor]
 def Tensor.unflatten (s : List ℕ) : (Fin s.prod → R) → Tensor R s :=
   match s with
   | [] => fun x ↦ x (0 : Fin 1)
@@ -164,9 +208,11 @@ attribute [simp] Tensor.einprod.filter
 --class TensorLike (dtype : Type) where
 --  protected tensor : List ℕ → dtype → Type
 
+@[reduce_tensor]
 instance (α : Type) (x₀ : α) (xs : List α) : NeZero (x₀ :: xs).length :=
   NeZero.mk <| by simp
 
+@[reduce_tensor]
 def Tensor.preBroadcast (s : List (ℕ × Bool)) : List ℕ :=
   (s.filter Prod.snd).map Prod.fst
 
@@ -175,6 +221,7 @@ theorem Tensor.preBroadcast_append (s s' : List (ℕ × Bool)) :
     Tensor.preBroadcast (s ++ s') = Tensor.preBroadcast s ++ Tensor.preBroadcast s' := by
   simp [preBroadcast]
 
+@[reduce_tensor]
 def Tensor.broadcast (s : List (ℕ × Bool)) :
     Tensor R (preBroadcast s) → Tensor R (s.map Prod.fst) :=
   match s with
@@ -183,53 +230,63 @@ def Tensor.broadcast (s : List (ℕ × Bool)) :
   | (_, false) :: s => fun x _ ↦ x.broadcast s
     
 
+@[reduce_tensor]
 def Tensor.batchGetType (R : Type) (s' : List ℕ) : List ℕ → Type
   | [] => Tensor R s' 
   | s₀ :: s => Tensor (Fin s₀) s' → Tensor.batchGetType R s' s
 
+@[reduce_tensor]
 def Tensor.fill {s : List ℕ} (x : R) : Tensor R s :=
   match s with
   | [] => x
   | _ :: _ => fun _ ↦ Tensor.fill x
 
+@[reduce_tensor]
 def Tensor.curry {s₀ : ℕ} {s : List ℕ} : Tensor R (s₀ :: s) → Tensor (Tensor R [s₀]) s :=
   match s with
   | [] => id
   | _ :: _ => fun x i₁ ↦ curry fun i₀ ↦ x i₀ i₁
 
+@[reduce_tensor]
 def Tensor.curry' {s s' : List ℕ} : Tensor R (s ++ s') → Tensor (Tensor R s') s :=
   match s with
   | [] => id
   | _ :: _ => fun x i ↦ Tensor.curry' (x i)
 
+@[reduce_tensor]
 def Tensor.uncurry {s₀ : ℕ} {s : List ℕ} : Tensor (Tensor R [s₀]) s → Tensor R (s₀ :: s) :=
   match s with
   | [] => id
   | _ :: _ => fun x i₀ i₁ ↦ uncurry (x i₁) i₀
 
+@[reduce_tensor]
 def Tensor.uncurry' {s s' : List ℕ} : Tensor (Tensor R s') s → Tensor R (s ++ s') :=
   match s with
   | [] => id
   | _ :: _ => fun x i => uncurry' (x i)
 
+@[reduce_tensor]
 def Tensor.map₃ {s : List ℕ} {α β γ μ : Type} (f : α → β → γ → μ) :
     Tensor α s → Tensor β s → Tensor γ s → Tensor μ s :=
   match s with
   | [] => f
   | _ :: _ => fun x y z i ↦ map₃ f (x i) (y i) (z i)
 
+@[reduce_tensor]
 def Tensor.map₂ {s : List ℕ} {α β γ : Type} (f : α → β → γ) :
     Tensor α s → Tensor β s → Tensor γ s :=
   match s with
   | [] => f
   | _ :: _ => fun x y i ↦ map₂ f (x i) (y i)
 
+@[reduce_tensor]
 def Tensor.batchGetType.uncurry {s₀ : ℕ} {s s' : List ℕ} :
     batchGetType (Tensor R [s₀]) s' s → Tensor (Fin s₀) s' → batchGetType R s' s :=
   match s with
   | [] => map₂ fun x i ↦ x i
   | _ :: _ => fun x i₀ i₁ ↦ (x i₁).uncurry i₀
 
+@[reduce_tensor]
 def Tensor.batchGet {R : Type} {s s' : List ℕ} : Tensor R s → Tensor.batchGetType R s' s :=
   match s with
   | [] => Tensor.fill
@@ -239,11 +296,13 @@ def Tensor.batchGetIntType (R : Type) (s : List ℕ) : ℕ → Type
   | 0 => Tensor R s
   | n + 1 => Tensor ℤ s → Tensor.batchGetIntType R s n
 
+@[reduce_tensor]
 def Tensor.map {s : List ℕ} {R R' : Type} (f : R → R') : Tensor R s → Tensor R' s :=
   match s with
   | [] => f
   | _ :: _ => fun x i₀ ↦ (x i₀).map f
 
+@[reduce_tensor]
 def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0) :
     batchGetType R s' s → batchGetIntType R s' s.length :=
   match s with
@@ -255,6 +314,7 @@ def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0)
       (by simp only [List.mem_cons, ne_eq, forall_eq_or_imp] at hs; exact hs.2)
       (x i₀')
 
+@[reduce_tensor]
 def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     Tensor R s → Tensor R (List.ofFn fun i ↦ s.get (σ i)) :=
   fun x ↦ Curry.of fun i ↦ x.get fun μ ↦ 

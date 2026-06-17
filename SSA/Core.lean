@@ -184,12 +184,16 @@ inductive SimpleOp {data : Type} (op : List data → data → Type) :
 class SimpleImpl {data : Type} (op : List data → data → Type) (impl : data → Type) where
   bind {args : List data} {out : data} : op args out → Curry impl args (impl out)
 
+attribute [reduce_ssa] Impl.bind SimpleImpl.bind
+
+@[reduce_ssa]
 instance SimpleOp.instImpl {data : Type} (op : List data → data → Type) (impl : data → Type)
   [SimpleImpl op impl] : Impl (SimpleOp op) impl where
   bind op :=
     match op with
     | simple op => (SimpleImpl.bind op).map Index.single
 
+@[reduce_ssa]
 instance SimpleOp.instToString {data : Type} (op : List data → data → Type)
   [∀ args, ∀ outs, ToString (op args outs)] (exprs : List (List data × List data))
   (args outs : List data) : ToString (SimpleOp op exprs args outs) where
@@ -203,12 +207,14 @@ inductive CombineOp {data : Type} (op₀ op₁ : OpType data) :
   | right {exprs : List (List data × List data)} {args outs : List data} :
     op₁ exprs args outs → CombineOp op₀ op₁ exprs args outs
 
+@[reduce_ssa]
 instance CombineOp.instImpl {data : Type} (op₀ op₁ : OpType data) (impl : data → Type)
   [Impl op₀ impl] [Impl op₁ impl] : Impl (CombineOp op₀ op₁) impl where
   bind
   | .left op
   | .right op => Impl.bind op
 
+@[reduce_ssa]
 instance CombineOp.instToString {data : Type} {op₀ op₁ : OpType data}
   [∀ exprs, ∀ args outs, ToString (op₀ exprs args outs)]
   [∀ exprs, ∀ args outs, ToString (op₁ exprs args outs)] :

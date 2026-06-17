@@ -1,4 +1,5 @@
 import SSA.Xla.Op
+import SSA.Xla.Meta
 
 namespace Xla
 
@@ -6,6 +7,7 @@ open SSA
 
 variable {args ins outs : List TensorType} {out : TensorType}
 
+@[reduce_xla]
 def bindPrim (op : XlaPrimOp ins out) : Expr XlaOp args ins → Expr XlaOp args [out] :=
   fun xs => .bind (.left (.simple op)) (fun r => nomatch r) xs
 
@@ -16,11 +18,13 @@ def makePerm {n : ℕ} (x : Fin n → Fin n) (h1 : Function.Surjective x) (h2 : 
   right_inv i := by simp [Fin.find_spec (h1 i)]
   left_inv i := by simp only [Fin.find_eq_iff, true_and]; intro j hj hc; exact hj.ne (h2 hc)
 
+@[reduce_xla]
 def transpose {α : DType} {s : Shape}
   (σ : Equiv.Perm (Fin s.length)) (x : Expr XlaOp args [⟨α, s⟩]) :
     Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
   bindPrim (.transpose σ) x
 
+@[reduce_xla]
 def transpose' {α : DType} {s : Shape}
   (x : Expr XlaOp args [⟨α, s⟩])
   (σ : Fin s.length → Fin s.length)
@@ -29,35 +33,47 @@ def transpose' {α : DType} {s : Shape}
     Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
   bindPrim (.transpose (makePerm σ h1 h2)) x
 
+@[reduce_xla]
 def dot_general {α : DType} (batch contract lhs rhs : Shape)
   (x : Expr XlaOp args [⟨α, contract ++ batch ++ lhs⟩])
   (y : Expr XlaOp args [⟨α, contract ++ batch ++ rhs⟩]) :
     Expr XlaOp args [⟨α, batch ++ lhs ++ rhs⟩] :=
   bindPrim (.dot_general batch contract lhs rhs) (x.append y)
 
+@[reduce_xla]
 instance : Zero (Expr XlaOp args [out]) := ⟨bindPrim .zeros .nil⟩
 
+@[reduce_xla]
 def iota (n : ℕ) : Expr XlaOp args [⟨.int, [n]⟩] := bindPrim .iota .nil
 
+@[reduce_xla]
 instance (n : ℕ) : OfNat (Expr XlaOp args [out]) n := .mk <| bindPrim (.ofNat n) .nil
 
+@[reduce_xla]
 def const_float (s : Shape) (val : ℕ) : Expr XlaOp args [⟨.float, s⟩] := OfNat.ofNat val
 
+@[reduce_xla]
 def const_int (s : Shape) (val : ℕ) : Expr XlaOp args [⟨.int, s⟩] := OfNat.ofNat val
 
+@[reduce_xla]
 instance : Sub (Expr XlaOp args [out]) := .mk fun x y => bindPrim .sub (x.append y)
 
+@[reduce_xla]
 def cumsum (x : Expr XlaOp args [out]) : Expr XlaOp args [out] := bindPrim .cumsum x
 
+@[reduce_xla]
 def exp {s : Shape} : Expr XlaOp args [⟨.float, s⟩] → Expr XlaOp args [⟨.float, s⟩] :=
   bindPrim .exp
 
+@[reduce_xla]
 def neg : Expr XlaOp args [out] → Expr XlaOp args [out] := bindPrim .neg
 
+@[reduce_xla]
 def choice {α : DType} {s : Shape}
   (c : Expr XlaOp args [⟨.int, s⟩]) (x y : Expr XlaOp args [⟨α, s⟩]) : Expr XlaOp args [⟨α, s⟩] :=
   bindPrim .choice ((c.append x).append y)
 
+@[reduce_xla]
 def scatter {α : DType} {s : Shape} {n : ℕ}
   (x : Expr XlaOp args [⟨α, s⟩]) (y : Expr XlaOp args [⟨α, [n]⟩]) :
    Curry (fun ι ↦ Expr XlaOp args [ι])
@@ -65,21 +81,27 @@ def scatter {α : DType} {s : Shape} {n : ℕ}
   Curry.of fun i =>
     bindPrim (.scatter (α := α) (s := s) (n := n)) <| (x.append y).append <| Expr.join.get i
 
+@[reduce_xla]
 def sub {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .sub (x.append y)
 
+@[reduce_xla]
 def add {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .add (x.append y)
 
+@[reduce_xla]
 def mul {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .mul (x.append y)
 
+@[reduce_xla]
 def mod {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .mod (x.append y)
 
+@[reduce_xla]
 def div {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .div (x.append y)
 
+@[reduce_xla]
 def fori_loop {carry aux : List TensorType}
   (body : Expr XlaOp (carry ++ aux) carry)
   (n : Expr XlaOp args [TensorType.scalar .int])
@@ -90,6 +112,7 @@ def fori_loop {carry aux : List TensorType}
     (fun i => match i with | ⟨0, _⟩ => body)
     ((n.append init).append aux_val)
 
+@[reduce_xla]
 def vmap (batch : ℕ) {aux : List TensorType}
   (fn : Expr XlaOp (ins ++ aux) outs)
   (xs : Expr XlaOp args (ins.map fun ⟨α, s⟩ ↦ ⟨α, batch :: s⟩))
@@ -110,28 +133,34 @@ def vmap₂ (batch₀ batch₁ : ℕ) (ins : List TensorType) {aux : List Tensor
   --vmap batch₀ fn xs aux
 -/
 
+@[reduce_xla]
 def sum {α : DType} {s : Shape} (n : ℕ) :
     Expr XlaOp args [⟨α, s⟩] → Expr XlaOp args [⟨α, s.drop n⟩] :=
   bindPrim (.sum n)
 
+@[reduce_xla]
 def broadcast {α : DType} (s : List (ℕ × Bool)) :
     Expr XlaOp args [⟨α, Tensor.preBroadcast s⟩] → Expr XlaOp args [⟨α, s.map Prod.fst⟩] :=
   bindPrim (.broadcast s)
 
+@[reduce_xla]
 def sqrt {s : Shape} : Expr XlaOp args [⟨.float, s⟩] → Expr XlaOp args [⟨.float, s⟩] :=
   bindPrim .sqrt
 
+@[reduce_xla]
 def einsum (s : Shape) (indices : List (List (Fin s.length))) (n : ℕ)
   (xs : Expr XlaOp args (indices.map fun i ↦ ⟨.float, i.map s.get⟩)) :
     Expr XlaOp args [⟨.float, s.drop n⟩] :=
   bindPrim (.einsum s indices n) xs
 
+@[reduce_xla]
 def gather {α : DType} {s s' : Shape}
   (x : Expr XlaOp args [⟨α, s⟩])
   (indices : Expr XlaOp args (List.replicate s.length ⟨.int, s'⟩)) :
     Expr XlaOp args [⟨α, s'⟩] :=
   bindPrim .gather (x.append indices)
 
+@[reduce_xla]
 def eq {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [⟨.int, σ.shape⟩] :=
   bindPrim .eq (x.append y)
 
@@ -259,6 +288,7 @@ def cummin {σ : TensorType} (axis : ℕ) (reverse : Bool := false)
   Expr XlaOp args [σ] :=
   bindPrim (.cummin axis reverse) x
 
+@[reduce_xla]
 def cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool := false)
   (x : Expr XlaOp args [σ]) :
   Expr XlaOp args [σ] :=
@@ -268,9 +298,11 @@ def cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool := false)
 def div_int {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .div_int (x.append y)
 
+@[reduce_xla]
 def flatten {σ : TensorType} : Expr XlaOp args [σ] → Expr XlaOp args [⟨σ.dtype, [σ.shape.prod]⟩] :=
   bindPrim .flatten
 
+@[reduce_xla]
 def unflatten {α : DType} (s : Shape) :
     Expr XlaOp args [⟨α, [s.prod]⟩] → Expr XlaOp args [⟨α, s⟩] :=
   bindPrim (.unflatten s)
