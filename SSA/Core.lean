@@ -121,6 +121,12 @@ def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
   let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}:\n{libs[i].2}"
   s!"{body}\n\n{libs}"
 
+@[reduce_ssa]
+def Expr.ofFn {args outs : List data}
+  (f : Curry (Expr op args [·]) args (Expr op args outs))
+  : Expr op args outs :=
+  f.get fun i => Expr.arg i
+
 end
 
 declare_syntax_cat expr_builder
