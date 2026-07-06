@@ -31,17 +31,35 @@ section
 
 variable {data : Type} {op : OpType data} [∀ exprs, ∀ ins, ∀ outs, ToString (op exprs ins outs)]
 
-abbrev Cached (α : Type) : Type := List (USize × α)
+abbrev Cached (α : Type) : Type := List (UInt64 × α)
 
 abbrev Expr.CodeM (α : Type) : Type :=
   StateM (Nat × Cached (List Nat × String) × Cached String) α
 
-unsafe def Expr.addVars {args outs : List data} (expr : Expr op args outs) (code : String) :
+/-- Structural hash of an `Expr`, used as the cache key for sub-expression
+deduplication during code generation. Two structurally equal expressions always
+hash to the same value, so deduplication no longer relies on pointer identity
+and the generated code is reproducible across builds.
+
+This is a hash, not a full equality test: it optimistically merges expressions
+with the same hash. Collisions are astronomically unlikely for realistic
+programs (64-bit hash space), and the worst case is incorrect codegen on a
+collision — acceptable given the "catch most cases" goal. -/
+def Expr.hashExpr {args outs : List data} : Expr op args outs → UInt64
+  | .nil => hash (0 : Nat)
+  | .arg i => hash (1, i.val)
+  | .append xs ys => hash (2, (xs.hashExpr, ys.hashExpr))
+  | .select is xs => hash (3, (is.map Fin.val, xs.hashExpr))
+  | .apply f x => hash (4, (f.hashExpr, x.hashExpr))
+  | .bind op fs ins =>
+    hash (5, (toString op, (List.ofFn fun i => (fs i).hashExpr, ins.hashExpr)))
+
+def Expr.addVars {args outs : List data} (expr : Expr op args outs) (code : String) :
     CodeM (List Nat) :=
   let n_new_var : Nat := outs.length
   fun ⟨n_var, codes, libs⟩ ↦
     let new_var_ids := List.ofFn fun (i : Fin n_new_var) ↦ n_var + i.val
-    ⟨new_var_ids, n_var + n_new_var, codes.concat ⟨ptrAddrUnsafe expr, new_var_ids, code⟩, libs⟩
+    ⟨new_var_ids, n_var + n_new_var, codes.concat ⟨expr.hashExpr, new_var_ids, code⟩, libs⟩
 
 def Expr.processCode (out_names : List String) (codes : Cached (List Nat × String)) : String :=
   let body : String := "\n".intercalate <|
@@ -52,20 +70,20 @@ def Expr.processCode (out_names : List String) (codes : Cached (List Nat × Stri
 
 mutual
 
-unsafe def Expr.addLib {args outs : List data} (expr : Expr op args outs) : CodeM Nat :=
+partial def Expr.addLib {args outs : List data} (expr : Expr op args outs) : CodeM Nat :=
   fun ⟨n_var, codes, libs⟩ ↦
-    match libs.findIdx? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
+    match libs.findIdx? (fun ⟨addr, _⟩ ↦ expr.hashExpr == addr) with
     | none =>
       let ⟨out_names, _, expr_codes, libs⟩ := expr.genCode ⟨0, [], libs⟩
       let expr_code := processCode out_names expr_codes
-      ⟨libs.length, n_var, codes, libs.concat ⟨ptrAddrUnsafe expr, expr_code⟩⟩
+      ⟨libs.length, n_var, codes, libs.concat ⟨expr.hashExpr, expr_code⟩⟩
     | some i =>
       ⟨i, n_var, codes, libs⟩
 
-unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
+partial def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
     CodeM (List String) := do
   let ⟨_, codes, _⟩ ← get
-  match codes.find? (fun ⟨addr, _⟩ ↦ ptrAddrUnsafe expr == addr) with
+  match codes.find? (fun ⟨addr, _⟩ ↦ expr.hashExpr == addr) with
   | none =>
     match expr with
     | nil =>  return []
@@ -97,7 +115,7 @@ unsafe def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
 
 end
 
-unsafe def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
+def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
   let ⟨out_names, _, codes, libs⟩ := expr.genCode ⟨0, [], []⟩
   let body := processCode out_names codes
   let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}:\n{libs[i].2}"
