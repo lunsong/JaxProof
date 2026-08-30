@@ -147,38 +147,38 @@ instance Curry.instAddCommMonoid (γ : List ι) [AddCommMonoid α] :
     AddCommMonoid (Curry m γ α) where
   zero_add x := by
     induction γ with
-    | nil => simp
+    | nil => exact zero_add x
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i)
   add_zero x := by
     induction γ with
-    | nil => simp
+    | nil => exact add_zero x
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i)
   add_comm x y := by
     induction γ with
-    | nil => simp [add_comm]
+    | nil => exact add_comm x y
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i) (y i)
   add_assoc x y z := by
     induction γ with
-    | nil => simp [add_assoc]
+    | nil => exact add_assoc x y z
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i) (y i) (z i)
   nsmul n x := do return n • (← x)
   nsmul_zero x := by
     induction γ with
-    | nil => simp; rfl
+    | nil => exact AddMonoid.nsmul_zero x
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i)
   nsmul_succ n x := by
     induction γ with
-    | nil => simp [Pure.pure, Bind.bind, bind, pure, succ_nsmul]
+    | nil => exact AddMonoid.nsmul_succ n x
     | cons γ₀ γs ih =>
       refine funext fun i => ?_
       exact ih (x i)

@@ -9,6 +9,13 @@ autoImplicit = false
 relaxedAutoImplicit = false
 weak.linter.mathlibStandardSet = true
 maxSynthPendingDepth = 3
+# silence mathlib style linters that are not relevant to this project
+# (`weak.` skips the option silently in modules that do not import mathlib)
+weak.linter.style.header = false
+weak.linter.style.show = false
+weak.linter.flexible = false
+weak.linter.defProp = false
+weak.linter.unusedSimpArgs = false
 
 [[require]]
 name = "mathlib"

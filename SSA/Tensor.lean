@@ -193,6 +193,8 @@ theorem Tensor.flatten_unflatten (s : List ℕ) (x : Fin s.prod → R) :
     simp
   | cons s₀ s ih =>
     simp [unflatten, flatten, ih]
+    funext i
+    exact congrArg x (Fin.mulAdd_divNat_modNat i)
 
 @[simp]
 theorem Tensor.unflatten_flatten {s : List ℕ} (x : Tensor R s) :
@@ -201,7 +203,13 @@ theorem Tensor.unflatten_flatten {s : List ℕ} (x : Tensor R s) :
   | nil =>
     simp [unflatten, flatten]
   | cons s₀ s ih =>
-    simp [unflatten, flatten, ih]
+    simp only [unflatten, flatten]
+    funext i
+    have h : (fun j => flatten (x (i.mulAdd j).divNat) (i.mulAdd j).modNat) =
+        Tensor.flatten (x i) := by
+      funext j
+      rw [Fin.divNat_mulAdd, Fin.modNat_mulAdd]
+    exact h ▸ ih (x i)
 
 attribute [simp] Tensor.einprod.filter
 
@@ -327,8 +335,8 @@ instance [Div R] (s : List ℕ) : Div (Tensor R s) where div := Tensor.map₂ (�
 example (n m l : ℕ) (A : Matrix (Fin n) (Fin m) ℝ) (B : Matrix (Fin m) (Fin l) ℝ) :
     Tensor.einsum [m, n, l] [⟨[#1, #0], A⟩, ⟨[#0, #2], B⟩] 1 = A * B := by
   simp only [List.drop_succ_cons, List.drop_zero, List.length_cons, List.length_nil, Nat.reduceAdd,
-    Fin.mk_one, Fin.isValue, Fin.zero_eta, Fin.reduceFinMk] 
-  ext i j
+    Fin.mk_one, Fin.isValue, Fin.zero_eta, Fin.reduceFinMk]
+  refine Tensor.ext fun i => Tensor.ext fun j => ?_
   simp only [Tensor.einsum, Tensor.sumN, Tensor.sumFirst, Tensor.einprod, List.length_nil,
     List.map_nil, List.length_cons, Nat.reduceAdd, Fin.isValue, List.map_cons, filter_pred,
     Fin.zero_eta, Tensor.einprod.filter, List.get_eq_getElem, Fin.coe_ofNat_eq_mod, Nat.zero_mod,
@@ -357,6 +365,8 @@ noncomputable def softmax {n₁ n₂ : ℕ} (x : Tensor ℝ [n₁, n₂]) : Tens
 example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin n₂) :
     softmax x i j = x i j / ∑ k, x i k := by
   simp [softmax, Tensor.broadcast, Tensor.einsum, Tensor.einprod]
+  show x i j / (∑ k, fun i_1 ↦ x i_1 k) i = x i j / ∑ k, x i k
+  rw [Finset.sum_apply]
 
 
 end SSA

@@ -84,34 +84,40 @@ partial def Expr.genCode {args outs : List data} (expr : Expr op args outs) :
     CodeM (List String) := do
   let ⟨_, codes, _⟩ ← get
   match codes.find? (fun ⟨addr, _⟩ ↦ expr.hashExpr == addr) with
-  | none =>
-    match expr with
-    | nil =>  return []
-    | arg i => return [s!"${i}"]
-    | append xs ys => do
-      let xs ← xs.genCode
-      let ys ← ys.genCode
-      return xs ++ ys
-    | select is xs => do
-      let xs ← xs.genCode
-      return is.map fun i =>
-        match xs[i]? with
-        | none => ""
-        | some a => a
-    | bind op exprs ins =>
-      let exprs ← (List.ofFn fun i => (exprs i).addLib).mapM id
-      let exprs := exprs.map fun i => s!"@{i}"
-      let ins ← ins.genCode
-      let out_ids ← expr.addVars s!"{op}; {", ".intercalate (exprs ++ ins)}"
-      return out_ids.map fun n ↦ s!"%{n}"
-    | apply f x =>
-      let f ← f.addLib
-      let x ← x.genCode
-      let out_ids ← expr.addVars s!"call; {", ".intercalate (s!"@{f}" :: x)}"
-      return out_ids.map fun n ↦ s!"%{n}"
-      
+  | none => expr.genCode'
   | some ⟨_, out_ids, _⟩ =>
     return out_ids.map fun n => s!"%{n}"
+
+/-- Body of `Expr.genCode`, split out so that the cases are handled by the
+equation compiler: a `match` on `expr` inside a `do` block cannot unify the
+indices of `Expr`. -/
+partial def Expr.genCode' {args outs : List data} :
+    Expr op args outs → CodeM (List String)
+  | .nil => return []
+  | .arg i => return [s!"${i}"]
+  | .append xs ys => do
+    let xs ← xs.genCode
+    let ys ← ys.genCode
+    return xs ++ ys
+  | .select is xs => do
+    let xs ← xs.genCode
+    return is.map fun i =>
+      match xs[i]? with
+      | none => ""
+      | some a => a
+  | .bind op exprs ins => do
+    let expr := Expr.bind op exprs ins
+    let exprs ← (List.ofFn fun i => (exprs i).addLib).mapM id
+    let exprs := exprs.map fun i => s!"@{i}"
+    let ins ← ins.genCode
+    let out_ids ← expr.addVars s!"{op}; {", ".intercalate (exprs ++ ins)}"
+    return out_ids.map fun n ↦ s!"%{n}"
+  | .apply f x => do
+    let expr := Expr.apply f x
+    let f ← f.addLib
+    let x ← x.genCode
+    let out_ids ← expr.addVars s!"call; {", ".intercalate (s!"@{f}" :: x)}"
+    return out_ids.map fun n ↦ s!"%{n}"
 
 end
 
@@ -201,8 +207,7 @@ def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
     (xs.eval impl).map op.get
   | apply f xs => (xs.eval impl).map (f.eval impl).get
 
-inductive SimpleOp {data : Type} (op : List data → data → Type) :
-    List (List data × List data) → List data → List data → Type where
+inductive SimpleOp {data : Type} (op : List data → data → Type) : OpType data where
   | simple {args : List data} {out : data} : op args out → SimpleOp op [] args [out]
 
 class SimpleImpl {data : Type} (op : List data → data → Type) (impl : data → Type) where
@@ -224,8 +229,7 @@ instance SimpleOp.instToString {data : Type} (op : List data → data → Type)
     toString op := match op with
     | .simple op => toString op
 
-inductive CombineOp {data : Type} (op₀ op₁ : OpType data) :
-    List (List data × List data) → List data → List data → Type where
+inductive CombineOp {data : Type} (op₀ op₁ : OpType data) : OpType data where
   | left {exprs : List (List data × List data)} {args outs : List data} :
     op₀ exprs args outs → CombineOp op₀ op₁ exprs args outs
   | right {exprs : List (List data × List data)} {args outs : List data} :
