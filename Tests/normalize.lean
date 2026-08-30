@@ -38,6 +38,7 @@ theorem norm_def (n : ℕ) (x : Fin n → ℝ) :
   simp [SSA.Expr.eval, Xla.sum, Xla.bindPrim, Curry.map, Curry.get, SSA.Impl.bind,
     SSA.evalType.bind, Index.single, SSA.SimpleImpl.bind, Xla.mul, SSA.Tensor.map₂, Curry.map₂,
     Curry.arg, Curry.pure, Index.append, pow_two]
+  rfl
 
 theorem normalize_def (n : ℕ) (x : Fin n → ℝ) : 
     normalize_xla.eval Xla.DirectImpl x = Index.single (fun i => x i / √(∑ j, (x j)^2)) := by
@@ -49,4 +50,6 @@ theorem normalize_def (n : ℕ) (x : Fin n → ℝ) :
     Fin.succ_zero_eq_one, SSA.Tensor.broadcast, id_eq, List.nil_append]
   congr
   ext i
-  simp [Index.single, norm_def]
+  simp only [Index.single]
+  congr 1
+  exact congrFun (norm_def n x) 0

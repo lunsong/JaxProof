@@ -59,6 +59,22 @@ theorem offDiag_eq_def {n : ℕ} : Xla.simpleEval (offDiag (n := n)) = offDiag_d
     Fin.succ_one_eq_two, SSA.Tensor.map₂, reduce_ssa]
   congr
   simp only [Fin.cast, Fin.isValue]
+  haveI : NeZero (n - 1) := ⟨h1⟩
+  conv_lhs =>
+    arg 1; arg 1; arg 1; arg 1; arg 1; arg 1; arg 1
+    change
+      if 0 ≤ (i.val : ℤ) then
+        Fin.ofNat (n - 1) (Int.natAbs (i.val : ℤ))
+      else
+        -(Fin.ofNat (n - 1) (Int.natAbs (i.val : ℤ)))
+  conv_lhs =>
+    arg 2; arg 1; arg 1; arg 1; arg 1; arg 1
+    change
+      if 0 ≤ (i.val : ℤ) then
+        Fin.ofNat (n - 1) (Int.natAbs (i.val : ℤ))
+      else
+        -(Fin.ofNat (n - 1) (Int.natAbs (i.val : ℤ)))
+  simp only [Nat.cast_nonneg, ↓reduceIte, Int.natAbs_natCast, Fin.ofNat_eq_cast]
   congr 1
   · simp only [Fin.isValue, Fin.mk.injEq]
     congr
@@ -79,6 +95,7 @@ theorem offDiag_eq_def {n : ℕ} : Xla.simpleEval (offDiag (n := n)) = offDiag_d
   · simp only [Fin.isValue, Fin.mk.injEq]
     congr 1
     rw [add_assoc]
+    simp only [Fin.val_natCast, Nat.mod_eq_of_lt i.isLt]
     congr
     conv_lhs =>
       arg 1; arg 1

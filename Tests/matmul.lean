@@ -26,6 +26,9 @@ example (n m l : ℕ) (x : Matrix (Fin n) (Fin m) ℝ) (y : Matrix (Fin m) (Fin 
     List.getElem_cons_succ, List.getElem_cons_zero, SSA.Tensor.cast_rfl, SSA.Tensor.map₂,
     SSA.Tensor.sumN, SSA.Tensor.sumFirst, List.tail_cons]
   congr
-  ext i j
-  simp [Matrix.mul_apply]
-  congr
+  refine SSA.Tensor.ext fun i => SSA.Tensor.ext fun j => ?_
+  simp only [reduce_xla, SSA.Expr.eval, Curry.map, Curry.get, Curry.arg, Index.single,
+    SSA.evalType.bind, SSA.Impl.bind, SSA.SimpleImpl.bind, Curry.pure, SSA.Tensor.curry']
+  conv_lhs =>
+    change (∑ k, fun i j ↦ x i k * y k j) i j
+  simp [Finset.sum_apply, Matrix.mul_apply]
