@@ -1,5 +1,7 @@
 import SSA
 
+theorem Index.single_zero {ι : Type} {m : ι → Type} {i : ι} {x : m i} : Index.single x 0 = x := rfl
+
 def embed (n_species embed_dim : ℕ) :=
   ssa Xla.XlaOp with
     x : ⟨.int, []⟩,
@@ -24,7 +26,7 @@ def periodic_distance :=
     lattice : ⟨.float, []⟩
   begin
     let lattice := Xla.broadcast [⟨3, false⟩] lattice;
-    let half_lattice := Xla.div lattice 2;
+    let half_lattice := Xla.div lattice (Xla.ofNat 2);
     let x := Xla.add x half_lattice;
     let x := Xla.mod x lattice;
     let x := Xla.sub x half_lattice;
@@ -103,16 +105,25 @@ def embed_def (n_species embed_dim : ℕ) [NeZero n_species]
 theorem embed_eq_def (n_species embed_dim : ℕ) [inst : NeZero n_species] :
     Xla.simpleEval (embed n_species embed_dim) = embed_def n_species embed_dim := by
   ext x θ
-  simp only [List.map_cons, List.map_nil, Xla.simpleEval, Curry.map, embed, Xla.gather,
-    Xla.bindPrim, List.length_cons, List.length_nil, Nat.reduceAdd, List.reduceReplicate,
-    Fin.getElem_fin, Fin.mk_one, Fin.isValue, List.replicate_zero, Xla.broadcast, Fin.zero_eta,
-    Xla.iota, SSA.Expr.eval, Curry.get, SSA.evalType.bind, SSA.Impl.bind, Index.single,
-    SSA.SimpleImpl.bind, Xla.DirectImpl.gather, List.replicate_one, Curry.of, inst.out, ↓reduceDIte,
-    Curry.pure, Curry.map₂, Index.append, Curry.arg, Fin.succ_zero_eq_one, SSA.Tensor.broadcast,
-    id_eq, Fin.succ_one_eq_two, List.nil_append, embed_def]
-  ext r
-  simp [ne_zero_of_lt r.isLt, Fin.intCast]
+  simp [embed, reduce_xla, reduce_ssa, inst.ne, Index.single_zero]
+  apply funext
+  intro i
+  simp [SSA.Tensor.broadcast,  id, Curry.get]
+  cbv
+  conv_lhs =>
+    arg 3; intro h; arg 2
+    conv =>
+      arg 1
+      cbv
+    equals i =>
+      rw [← Fin.val_eq_val]
+      cbv
+      split <;> grind
+  split_ifs with h
+  · cases h
+    exact (Nat.not_lt_zero _ i.isLt).elim
   rfl
+      
 
 def pairwise_offset_def {n_atom : ℕ}
   (x : Fin n_atom → Fin 3 → ℝ) (i j : Fin n_atom) (k : Fin 3) : ℝ :=
@@ -128,6 +139,39 @@ noncomputable def periodic_distance_def (x : Fin 3 → ℝ) (lattice : ℝ) : �
 
 theorem periodic_distance_eq_def : Xla.simpleEval periodic_distance = periodic_distance_def := by
   ext x L
+  simp [periodic_distance, reduce_xla, reduce_ssa, Index.single_zero, SSA.Tensor.map₂,
+    SSA.Tensor.broadcast, periodic_distance_def]
+  conv_rhs =>
+    arg 2; intro i; rw [pow_two]
+  rfl
+
+noncomputable def pairwise_periodic_distance_def {n_atom : ℕ}
+  (x : Fin n_atom → Fin 3 → ℝ) (lattice : ℝ) (i j : Fin n_atom) : ℝ :=
+  periodic_distance_def (fun k ↦ x i k - x j k) lattice
+
+theorem pairwise_periodic_distance_eq_def {n_atom : ℕ} :
+  let fn := (pairwise_periodic_distance (n_atom := n_atom))
+  Xla.simpleEval fn = pairwise_periodic_distance_def := by
+  ext x L i j
+  simp [pairwise_periodic_distance, periodic_distance_vmapped, reduce_xla, reduce_ssa,
+    Index.single_zero]
+  have h0 := periodic_distance_eq_def
+  simp [Xla.simpleEval, Curry.map] at h0
+  apply congrFun at h0
+  replace h0 := fun a => congrFun (h0 a)
+  conv_lhs =>
+    arg 1; intro a b; arg 1; intro c; arg 1; intro d e; arg 1; intro i
+    rw [h0]
+    simp [periodic_distance_def]
+    arg 2; intro f
+
+
+
+  
+  
+
+/-
+  ext x L
   simp only [OfNat.ofNat, List.drop_succ_cons, List.drop_zero, Xla.simpleEval, Curry.map,
     periodic_distance, Xla.sum, Xla.bindPrim, List.length_nil, Fin.getElem_fin, Xla.mul, Xla.sub,
     Xla.mod, Xla.add, List.length_cons, Nat.reduceAdd, Fin.zero_eta, Fin.isValue, Xla.div,
@@ -139,14 +183,6 @@ theorem periodic_distance_eq_def : Xla.simpleEval periodic_distance = periodic_d
   conv_rhs =>
     arg 2; intro i
     rw [pow_two]
- 
-noncomputable def pairwise_periodic_distance_def {n_atom : ℕ}
-  (x : Fin n_atom → Fin 3 → ℝ) (lattice : ℝ) (i j : Fin n_atom) : ℝ :=
-  periodic_distance_def (fun k ↦ x i k - x j k) lattice
-
-theorem pairwise_periodic_distance_eq_def {n_atom : ℕ} :
-  let fn := (pairwise_periodic_distance (n_atom := n_atom))
-  Xla.simpleEval fn = pairwise_periodic_distance_def := by
   ext x L i j
   simp only [List.drop_succ_cons, List.drop_zero, Xla.simpleEval, Curry.map,
     pairwise_periodic_distance, Xla.vmap, List.map_cons, List.map_nil, List.cons_append,
@@ -216,7 +252,6 @@ def message_passing_def {n_atom n_filter n_feat : ℕ}
     fun atom filter => ∑ atom', rbf atom' atom filter * y atom' filter
   fun atom feat => ∑ filter, z atom filter * proj₁ feat filter
 
-theorem Index.single_zero {ι : Type} {m : ι → Type} {i : ι} {x : m i} : Index.single x 0 = x := rfl
 
 theorem message_passing_eq_def {n_atom n_filter n_feat : ℕ} :
     let mp := message_passing (n_atom := n_atom) (n_filter := n_filter) (n_feat := n_feat)
@@ -307,3 +342,4 @@ theorem SchNet_permutation_equivariant
   · simp
   · simp
 
+-/

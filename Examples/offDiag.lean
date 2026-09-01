@@ -16,7 +16,7 @@ def offDiag {n : ℕ} :=
     let_expr i : [⟨.int, [n - 1, n]⟩] :=
       Xla.broadcast [⟨n - 1, true⟩, ⟨n, false⟩] (Xla.iota (n - 1));
     let_expr j : [⟨.int, [n - 1, n]⟩] :=
-      Xla.add (Xla.broadcast [⟨n - 1, false⟩, ⟨n, true⟩] (Xla.iota n)) 1;
+      Xla.add (Xla.broadcast [⟨n - 1, false⟩, ⟨n, true⟩] (Xla.iota n)) (Xla.ofNat 1);
     let x := Xla.gather x (i.append j);
     return x
 

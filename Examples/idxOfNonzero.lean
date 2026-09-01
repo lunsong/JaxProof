@@ -5,7 +5,7 @@ def idxOfNonzero {n : ℕ} :=
     x : ⟨.int, [n]⟩
   begin
     -- First we find nonzero elements of x
-    let_expr x_nonzero : [⟨.int, [n]⟩] := Xla.choice x 1 0;
+    let_expr x_nonzero : [⟨.int, [n]⟩] := Xla.choice x (Xla.ofNat 1) (Xla.ofNat 0);
     -- Then we give each nonzero element an index by counting the
     -- number of nonzero elements before it
     let x_id := Xla.cumsum x_nonzero;
@@ -78,12 +78,9 @@ theorem Finset.idxOf_sort_of_mem {m : ℕ} {s : Finset (Fin m)} {x : (Fin m)} :
 
 theorem idxOfNonzero_eq_def {n : ℕ} {x : Fin n → ℤ} :
     idxOfNonzero.eval Xla.DirectImpl x = Index.single (idxOfNonzero_def x) := by
-  have hOfNat : ∀ m : ℕ,
-      (OfNat.ofNat m : SSA.Expr Xla.XlaOp [⟨.int, [n]⟩] [⟨.int, [n]⟩]) =
-        Xla.bindPrim (.ofNat m) .nil := fun _ => rfl
   simp only [idxOfNonzero, Xla.choice, Xla.bindPrim, List.length_nil, Fin.getElem_fin,
     List.cons_append, List.nil_append, List.length_cons, Nat.reduceAdd, Fin.zero_eta, Fin.isValue,
-    Xla.cumsum, hOfNat, SSA.Expr.eval, Curry.map, Curry.get, SSA.evalType.bind, SSA.Impl.bind,
+    Xla.cumsum, SSA.Expr.eval, Curry.map, Curry.get, SSA.evalType.bind, SSA.Impl.bind,
     SSA.SimpleImpl.bind, SSA.Tensor.map₃, Curry.map₂, Fin.coe_ofNat_eq_mod, Nat.zero_mod,
     List.getElem_cons_zero, SSA.Tensor.cumsum, bne_iff_ne, ne_eq, Fin.succ_zero_eq_one,
     Fin.succ_one_eq_two, ite_not, Index.append, Index.single, Curry.arg, Curry.pure]

@@ -26,4 +26,4 @@ rev = "v4.33.1"
 name = "SSA"
 
 [[lean_lib]]
-name = "Tests"
+name = "Examples"

@@ -5,7 +5,7 @@ def matmul {n m l : ℕ}
     [⟨.float, [n, m]⟩, ⟨.float, [m, l]⟩]
     [⟨.float, [n, l]⟩] :=
   SSA.Expr.ofFn fun x y =>
-    let x := Xla.transpose [0, 1].formPerm x;
+    let x := Xla.transpose x [0, 1].formPerm;
     Xla.dot_general [] [m] [n] [l] x y
 
 #eval IO.println (matmul (n:=10) (m:=20) (l:=30)).code

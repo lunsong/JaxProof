@@ -18,9 +18,15 @@ def makePerm {n : ℕ} (x : Fin n → Fin n) (h1 : Function.Surjective x) (h2 : 
   right_inv i := by simp [Fin.find_spec (h1 i)]
   left_inv i := by simp only [Fin.find_eq_iff, true_and]; intro j hj hc; exact hj.ne (h2 hc)
 
+syntax "perm[" term,* "]" : term
+
+open Lean in macro_rules
+  | `(term| perm[ $[$xs],* ]) =>
+    `(term| (makePerm ![$[$xs],*] (by decide) (by decide) : Equiv.Perm (Fin $(quote xs.size))))
+
 @[reduce_xla]
 def transpose {α : DType} {s : Shape}
-  (σ : Equiv.Perm (Fin s.length)) (x : Expr XlaOp args [⟨α, s⟩]) :
+  (x : Expr XlaOp args [⟨α, s⟩]) (σ : Equiv.Perm (Fin s.length)) :
     Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
   bindPrim (.transpose σ) x
 
@@ -28,8 +34,8 @@ def transpose {α : DType} {s : Shape}
 def transpose' {α : DType} {s : Shape}
   (x : Expr XlaOp args [⟨α, s⟩])
   (σ : Fin s.length → Fin s.length)
-  (h1 : Function.Surjective σ := by simp; decide)
-  (h2 : Function.Injective σ := by simp; decide) :
+  (h1 : Function.Surjective σ := by decide)
+  (h2 : Function.Injective σ := by decide) :
     Expr XlaOp args [⟨α, List.ofFn fun i => s[σ i]⟩] :=
   bindPrim (.transpose (makePerm σ h1 h2)) x
 
@@ -47,13 +53,7 @@ instance : Zero (Expr XlaOp args [out]) := ⟨bindPrim .zeros .nil⟩
 def iota (n : ℕ) : Expr XlaOp args [⟨.int, [n]⟩] := bindPrim .iota .nil
 
 @[reduce_xla]
-instance (n : ℕ) : OfNat (Expr XlaOp args [out]) n := .mk <| bindPrim (.ofNat n) .nil
-
-@[reduce_xla]
-def const_float (s : Shape) (val : ℕ) : Expr XlaOp args [⟨.float, s⟩] := OfNat.ofNat val
-
-@[reduce_xla]
-def const_int (s : Shape) (val : ℕ) : Expr XlaOp args [⟨.int, s⟩] := OfNat.ofNat val
+def ofNat (x : ℕ) : Expr XlaOp args [out] := bindPrim (.ofNat x) .nil
 
 @[reduce_xla]
 instance : Sub (Expr XlaOp args [out]) := .mk fun x y => bindPrim .sub (x.append y)
