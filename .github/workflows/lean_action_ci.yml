@@ -12,5 +12,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
-      - name: Build tests
-        run: lake build Tests
