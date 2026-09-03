@@ -53,6 +53,7 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | cummin {σ : TensorType} (axis : ℕ) (reverse : Bool) : XlaPrimOp [σ] σ
   | cumprod {σ : TensorType} (axis : ℕ) (reverse : Bool) : XlaPrimOp [σ] σ
   | cumsum {σ : TensorType} : XlaPrimOp [σ] σ
+  | det {n : ℕ} : XlaPrimOp [⟨.float, [n, n]⟩] ⟨.float, []⟩
   | div {σ : TensorType} : XlaPrimOp [σ, σ] σ
   | dot_general {α : DType} (batch contract lhs rhs: List ℕ) : 
     XlaPrimOp
@@ -149,6 +150,7 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | cummin axis reverse => s!"cummin {axis} {reverse}"
   | cumprod axis reverse => s!"cumprod {axis} {reverse}"
   | cumsum => "cumsum"
+  | det => "det"
   | div => "div"
   | div_int => "div_int"
   | dot_general batch contract lhs rhs => s!"dot_general {contract.length} {batch.length}"

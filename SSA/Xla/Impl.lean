@@ -1,6 +1,7 @@
 import SSA.Core
 import SSA.Xla.Op
 import SSA.Xla.Meta
+import Mathlib.LinearAlgebra.Matrix.Determinant.Basic
 
 namespace Xla
 
@@ -114,6 +115,7 @@ noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
   | .flatten (α := α) => match α with | .int | .float => Tensor.flatten
   | .unflatten (α := α) s => match α with | .int | .float => Tensor.unflatten s
   | .cast (α := α) h => match α with | .int | .float => Tensor.cast h
+  | .det (n := n) => fun (x : Matrix (Fin n) (Fin n) ℝ) => Matrix.det x
   | _ => DirectImpl.zero
 
 @[reduce_xla]

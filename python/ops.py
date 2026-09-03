@@ -370,6 +370,11 @@ def _eval_cholesky(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
     return jnp.linalg.cholesky(x)
 
+@register_op("det")
+def _eval_det(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    return jnp.linalg.det(x)
+
 @register_op("eigvals")
 def _eval_eigvals(op_str, vals, lib_refs, libs, parent_args):
     x, = vals

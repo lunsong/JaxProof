@@ -247,6 +247,11 @@ def sorted {α : DType} {sorted_axes : ℕ} (batch : Shape)
 def empty {σ : TensorType} : Expr XlaOp args [σ] := bindPrim .empty .nil
 
 -- Linear algebra
+@[reduce_xla]
+def det {n : ℕ} (x : Expr XlaOp args [⟨.float, [n, n]⟩]) :
+    Expr XlaOp args [⟨.float, []⟩] :=
+  bindPrim .det x
+
 def cholesky {n : ℕ} (batch : Shape)
   (x : Expr XlaOp args [⟨.float, batch ++ [n, n]⟩]) :
   Expr XlaOp args [⟨.float, batch ++ [n, n]⟩] :=
