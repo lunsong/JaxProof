@@ -1,47 +1,117 @@
 import SSA
-import Mathlib.LinearAlgebra.Matrix.Determinant.Basic
 import Mathlib.Analysis.Calculus.ContDiff.Basic
-import Mathlib.MeasureTheory.Integral.Bochner.Basic
-import Mathlib.MeasureTheory.Constructions.Pi
-import Mathlib.MeasureTheory.Measure.Prod
-import Mathlib.MeasureTheory.Measure.Haar.OfBasis
 
 /-!
-# `Ansatz.lean` — what a molecular wavefunction must satisfy, and a simple verified ansatz
+# `Ansatz.lean` — the validity contract for AI-generated QMC ansätze
 
-This file is the contract for AI-generated QMC ansätze: an ansatz written in the
-SSA/XLA DSL is *valid* if its mathematical semantics (`Xla.simpleEval`) satisfies
-`IsValidQMCWavefunction` below.
+An ansatz written in the SSA/XLA DSL is *valid* if its mathematical semantics
+(`Xla.simpleEval`) satisfies `IsValidQMCWavefunction` below. The contract has exactly
+two fields; this docstring explains why two suffice, and where everything else went.
 
-The conditions are exactly what Pfau-style variational Monte Carlo
-(FermiNet/PauliNet lineage, cf. `pfnet`) needs to give correct energies:
+## Design principle: prove only what cheats
 
-* **Antisymmetry within each spin sector** (`antisymmetric`): electrons are fermions.
-  Swapping two same-spin electrons must negate `Ψ` (Pauli principle).
-* **C² smoothness** (`smooth`): the local energy
-  `E_L(x) = HΨ/Ψ = -½(Δ log Ψ + |∇ log Ψ|²) + V(x)` (the form evaluated in
-  `pfnet/qmc.py:make_E_local`) requires the Laplacian of `Ψ` to exist.
-  C², not C^∞: practical ansätze use finitely-smooth cutoffs (cf. the TODO in
-  `pfnet/model.py`), so the spec does not require more.
-* **Square-integrability** (`sq_integrable`): the Metropolis sampler
-  (`pfnet/qmc.py:make_sampler`) draws configurations from `p(x) ∝ |Ψ(x)|²`;
-  this is a probability density only if `Ψ²` is integrable.
-* **Vanishing at infinity** (`vanishes_at_infinity`): the bound-state boundary
-  condition, needed so the integration by parts behind the variational principle
-  `E[Ψ] ≥ E₀` has no boundary terms. NOTE: this is *not* implied by
-  square-integrability (a continuous L² function can have unit-height spikes of
-  shrinking width marching off to infinity), so it is stated separately.
+A requirement earns its per-candidate proof cost only if violating it yields a
+*spuriously low* energy that Monte Carlo converges to **silently** — poisoning the
+ansatz search. A requirement whose violation merely raises the energy, or makes Monte
+Carlo diverge loudly (NaN, drift), is self-punishing: the fitness function rejects the
+offender on its own. Those are policed by cheap runtime monitors (`pfnet/monitor.py`),
+not by proofs. Under this criterion exactly two conditions survive.
 
-Deliberately not fields of the structure:
+## Cheat 1 — broken antisymmetry: bosonic collapse
 
-* **Nonzeroness** (`∃ x, Ψ x ≠ 0`): needed to normalize `|Ψ|²`; carried as an
-  explicit hypothesis in the corollaries that need it.
-* **Finite kinetic energy** (`∇Ψ ∈ L²`): required for the Rayleigh quotient to be
-  finite; future work.
-* **Kato cusp conditions**: they keep the local energy bounded at coalescence
-  (finite variance / efficiency — `pfnet/model.py` adds an explicit cusp envelope),
-  but are not needed for the *mean* energy to be correct.
-* **Real-valuedness**: automatic — `DirectImpl` models floats as `ℝ`.
+Without antisymmetry, Monte Carlo converges cleanly to the Rayleigh quotient of a
+non-fermionic wavefunction, floored only by the bosonic ground energy
+`E₀^bosonic < E₀^fermionic`: low variance, no warning, wrong physics. Both spin
+sectors must be checked — a mixed-symmetry ansatz still cheats.
+
+## Cheat 2 — broken smoothness: AD drops distributional deltas
+
+`pfnet` evaluates the local energy `E_L = -½(Δ log Ψ + |∇ log Ψ|²) + V` by automatic
+differentiation (`pfnet/qmc.py:make_E_local`), which sees only the *regular* part of
+the Laplacian. Write the distributional Laplacian as `ΔΨ = f + μ` with `f` a locally
+integrable function and `μ` a singular measure. Pairing with `Ψ` and comparing
+against the kinetic quadratic form `½∫|∇Ψ|²` gives the estimator bias
+
+```
+E_MC = E_true + ½ ∫ Ψ dμ / ∫ Ψ².
+```
+
+The cheat bias *is* the singular part of `ΔΨ`. At a crease — a codimension-1 surface
+`Σ` where `∇Ψ` jumps — `μ = [∂ₙΨ]·dS|_Σ` contributes `½∫_Σ Ψ[∂ₙΨ] dS / ∫Ψ²`, which is
+first-order in the crease depth while the true energy cost is second-order: the
+optimizer reliably finds it, and the result is floored by nothing (it is not any
+variational object's energy). Value jumps are worse: true kinetic energy `+∞`,
+estimator finite.
+
+### The exact requirement (for the record)
+
+`smooth` as stated (C²) is the provable, compositional sufficient condition. The
+*exact* requirement is:
+
+* `Ψ ∈ W^{2,1}_loc` — the distributional Laplacian has no singular part. This
+  excludes value jumps and creases but *includes* Kato cusps: `e^{-Zr}` has bounded
+  gradient and `ΔΨ ~ 1/r`, locally integrable in 3D, so no delta forms;
+* `Ψ` twice differentiable at `Ψ²`-almost-every point, so the AD-evaluated `E_L`
+  equals the formula at sample points (automatic for piecewise-analytic DSL
+  programs);
+* `∫ Ψ dμ = 0` wherever a singular part is present — creases on the *nodal set* are
+  harmless, because `Ψ = 0` there.
+
+`C² ⊂ C¹ + piecewise C² ⊂ W^{2,1}_loc = exact`. `W^{2,1}_loc` is not formalized in
+mathlib, and C² is what is statable and provable compositionally; if the search ever
+rediscovers exact-cusp factors, relax `smooth` to "piecewise C² with `ΔΨ ∈ L¹_loc`
+across the interfaces".
+
+### LLM-facing op discipline (how candidates satisfy `smooth`)
+
+* always safe (real-analytic): `add`, `mul`, `sub`, `neg`, `exp`, `sum`,
+  `transpose`, `broadcast`, `einsum`, `dot_general`, `det`;
+* `sqrt`: analytic on `(0, ∞)`; keep the argument away from 0 (`sqrt(x²+ε)`), or
+  cancel it (`abs(x)^2 = x²`). `sqrt(x²) = |x|` is a crease;
+* `abs`: crease at 0; safe only if the composition is even in that argument, or the
+  zero set is provably nodal;
+* `choice` on float predicates: crease at the boundary unless the branches meet with
+  continuous gradient (the smooth-cutoff idiom), or the boundary is nodal;
+* `mod`, `gather`, `iota`: piecewise constant in continuous arguments — only on
+  integer data (`Z_nuc`, indices), never on electron coordinates.
+
+## Not in the structure, and why (monitored in `pfnet/monitor.py` instead)
+
+* **`Ψ ∈ L²`**: at infinite time self-punishing (no stationary distribution), but
+  *finite* runs fake convergence — walkers drift to infinity under a growing `Ψ`
+  (`E_L → -∞` quadratically), or collapse onto a non-integrable spike and sit in
+  long "settled" epochs. Monitored: walker-radius drift, walker-spread collapse,
+  energy stationarity.
+* **`∇Ψ ∈ L²`, `ΨΔΨ ∈ L¹`**: true energy `+∞`, or the `E_L` mean fails to settle;
+  trips the local-energy finiteness check or the grad-clip assert
+  (`pfnet/qmc.py:update`).
+* **vanishing at infinity**: the variational principle for `H¹` functions never
+  needs it; spikes at infinity carry vanishing sampling mass.
+* **θ-differentiability**: bad parameter gradients only slow optimization; energy
+  evaluation is unaffected.
+* **nodes of positive measure / flat zero regions**: the sampler never accepts moves
+  into zero-density regions; the restricted `Ψ` is still `H¹`, still `≥ E₀`.
+* **Kato cusp**: heavy `E_L` tails (divergent higher moments) hurt convergence
+  *rate* — efficiency, not correctness of the mean.
+* **`Ψ ≢ 0`**: immediate NaN in the acceptance ratio; caught by the log-amplitude
+  check.
+
+## The `∀θ` contract: reparameterize, don't restrict
+
+`Ansatz.isValid` quantifies over *all* parameter values, because `pfnet` optimizes
+with unconstrained SGD (`pfnet/qmc.py:update`) — there is no parameter domain to
+enforce. Consequence: every quantity that must stay positive (orbital exponents,
+widths, cutoff scales) must be reparameterized inside the ansatz itself via `exp`,
+square, or softplus.
+
+## Boundary with `pfnet`: log-amplitude
+
+The DSL ansatz outputs the amplitude `Ψ`; `pfnet` consumes log-amplitude
+(`log_psi(param, r, R, Z)`; `pfnet/model.py` returns `log|det| + log` envelope). The
+export wrapper is `log_psi(x) = log |Ψ(x)|`, packing spin-up electrons first in `r`.
+Off the nodal set (which has `Ψ²`-measure zero),
+`Δ log|Ψ| + |∇ log|Ψ||² = ΔΨ/Ψ`, so `make_E_local` evaluates `HΨ/Ψ`, and the
+Metropolis sampler (`pfnet/qmc.py:make_sampler`) targets `p(x) ∝ |Ψ(x)|²`.
 -/
 
 /-! ## Specification -/
@@ -57,18 +127,19 @@ def IsAntisymmetric {n₁ n₂ : ℕ} (Ψ : Wavefunction n₁ n₂) : Prop :=
   ∀ (σ₁ : Equiv.Perm (Fin n₁)) (σ₂ : Equiv.Perm (Fin n₂)), ∀ x₁ x₂,
     Ψ (x₁ ∘ σ₁) (x₂ ∘ σ₂) = σ₁.sign • σ₂.sign • Ψ x₁ x₂
 
-/-- The analytical conditions for Pfau-style VMC to give correct energies.
-See the module docstring for the justification of each field. -/
+/-- The validity contract: exactly the two properties whose violation is a *silent*
+cheat that Monte Carlo converges to (bosonic collapse; AD dropping distributional
+deltas). Everything else is self-punishing under Monte Carlo and is monitored at
+runtime in `pfnet/monitor.py`. See the module docstring for the full analysis. -/
 structure IsValidQMCWavefunction {n₁ n₂ : ℕ} (Ψ : Wavefunction n₁ n₂) : Prop where
-  /-- Pauli principle. -/
+  /-- Pauli principle in both spin sectors: without it, sampling silently converges
+  to a bosonic/mixed-symmetry energy below the fermionic ground state. -/
   antisymmetric : IsAntisymmetric Ψ
-  /-- The Laplacian exists, so the local energy `E_L = HΨ/Ψ` is well-defined. -/
+  /-- No jumps or creases: automatic differentiation computes the true Laplacian,
+  so the local-energy estimator is unbiased. (The exact condition is that the
+  distributional `ΔΨ` has no singular part, i.e. `Ψ ∈ W^{2,1}_loc`; C² is the
+  provable sufficient condition.) -/
   smooth : ContDiff ℝ 2 (Function.uncurry Ψ)
-  /-- `|Ψ|²` can be normalized to the probability density the sampler targets. -/
-  sq_integrable : MeasureTheory.Integrable
-    (fun x : (Fin n₁ → Fin 3 → ℝ) × (Fin n₂ → Fin 3 → ℝ) ↦ (Ψ x.1 x.2) ^ 2)
-  /-- Bound-state boundary condition (not implied by `sq_integrable`). -/
-  vanishes_at_infinity : Filter.Tendsto (Function.uncurry Ψ) (Filter.cocompact _) (nhds 0)
 
 /-- Wavefunction ansatz. The parameter is a 1D vector. An ansatz should support different
 numbers of atoms and electrons -/
