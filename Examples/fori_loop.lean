@@ -12,9 +12,8 @@ example (m n : ℕ) (x : Fin n → ℝ) :
     power_loop.eval x (m : ℤ) = x ^ (2 ^ m) := by
   simp [power_loop, reduce_xla, reduce_soir, power_loop_body, reduce_tensor]
   induction m with
-  | zero => simp [Nat.repeat]; rfl
+  | zero => simp [Nat.repeat]
   | succ m ih =>
-    simp [Nat.repeat, ih]
-    rw [pow_succ, pow_mul, pow_two]
-
-
+    simp only [Nat.repeat, reduce_soir]
+    rw [ih, pow_succ, pow_mul, pow_two]
+    rfl

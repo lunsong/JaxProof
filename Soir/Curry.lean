@@ -247,6 +247,199 @@ theorem Curry.arg_two {γ₀ γ₁ γ₂ : ι} {γ : List ι} :
 theorem Curry.arg_succ {γ₀ : ι} {γ : List ι} (i : Fin γ.length) :
     Curry.arg (m := m) (γ := γ₀ :: γ) i.succ = fun _ ↦ Curry.arg i := rfl
 
+/-!
+### A simproc for eliminating `Index` constructors at literal positions
+
+Applications of an `Index` built from `Index.single`/`Index.cons`/`Index.append`/
+`Index.map`/`Index.unmap` at a concrete position (`a 0`, `a 1`, ...) cannot be
+simplified by the rewrite lemmas above (`Index.cons_zero`, `Index.append_single`,
+...): `simp` matches at `implicit` transparency, and the *types* of these terms
+involve `List.append`/`List.length`/`List.getElem` computations that only reduce at
+default transparency, so the matches are never attempted (and the goal is not even
+type-correct at `implicit` transparency after unfolding).
+
+The `reduceIndex*` dsimprocs instead navigate the constructor structure of the
+`Index` expression themselves at default transparency, so no type-level matching is
+needed. All reductions are definitional, hence `dsimproc` rather than `simproc`.
+-/
+
+open Lean Meta Simp in
+/-- The length of a list expression built from `List.nil`/`List.cons`/`List.append`/
+`List.map`/`List.replicate` (the list constructors arising in `Index` types). `whnf`
+only reduces the head, so `List.length` cannot be evaluated directly. -/
+private partial def Index.listLength? (γ : Expr) : MetaM (Option Nat) := do
+  let γ ← whnfD γ
+  let fn := γ.getAppFn
+  let args := γ.getAppArgs
+  if fn.isConstOf ``List.nil then
+    return some 0
+  else if fn.isConstOf ``List.cons && args.size == 3 then
+    return (← listLength? args[2]!).map (· + 1)
+  else if fn.isConstOf ``List.append && args.size == 3 then
+    let some a ← listLength? args[1]! | return none
+    let some b ← listLength? args[2]! | return none
+    return some (a + b)
+  else if fn.isConstOf ``List.map && args.size == 3 then
+    listLength? args[2]!
+  else if fn.isConstOf ``List.replicate && args.size == 3 then
+    getNatValue? (← reduce args[1]!)
+  else
+    return none
+
+open Lean Meta Simp in
+/-- If `e` is a `Fin` literal (an `OfNat` numeral, `Fin.mk` of a `Nat` literal,
+or a `Fin.succ` chain on one), return its value. -/
+private partial def Index.getFinVal? (e : Expr) : MetaM (Option Nat) := do
+  if e.isAppOfArity ``Fin.succ 2 then
+    return (← getFinVal? e.appArg!).map (· + 1)
+  else if e.isAppOfArity ``Fin.mk 3 then
+    getNatValue? (← reduce e.getAppArgs[1]!)
+  else
+    -- `OfNat` numeral: the value is `k % n`, which is `k` for the literals that arise
+    if let some (k, _) ← getOfNatValue? e ``Fin then return some k
+    else return none
+
+open Lean Meta Simp in
+/-- Rebuild a stuck `Index` expression (a variable, or a constructor application that
+is not navigated, e.g. `Index.select`) as an application to a literal `Fin`. -/
+private def Index.stuckLeaf (idx : Expr) (k : Nat) : MetaM (Option Expr) := do
+  match ← whnfD (← inferType idx) with
+  | .forallE _ dom _ _ =>
+    unless dom.isAppOfArity ``Fin 1 do return none
+    let some n ← getNatValue? (← reduce dom.appArg!) | return none
+    if h : k < n then
+      return some (mkApp idx (toExpr (⟨k, h⟩ : Fin n)))
+    else
+      return none
+  | _ => return none
+
+open Lean Meta Simp in
+/--
+Navigate the `Index` expression `idx` at (literal) position `k`, performing the
+`Index.cons`/`Index.append`/`Index.single`/`Index.map`/`Index.unmap` reductions
+structurally. `progress` tracks whether any constructor has been consumed, so that
+rebuilding a stuck leaf only happens when the overall application simplifies.
+-/
+private partial def Index.nav (idx : Expr) (k : Nat) (progress : Bool) :
+    MetaM (Option Expr) := do
+  let fn := idx.getAppFn
+  let args := idx.getAppArgs
+  if fn.isConstOf ``Index.cons && args.size == 6 then
+    if k == 0 then return some args[4]!
+    else return ← nav args[5]! (k - 1) true
+  else if fn.isConstOf ``Index.append && args.size == 6 then
+    let some len ← listLength? args[2]! | return none
+    if k < len then return ← nav args[4]! k true
+    else return ← nav args[5]! (k - len) true
+  else if fn.isConstOf ``Index.single && args.size == 4 then
+    if k == 0 then return some args[3]! else return none
+  else if (fn.isConstOf ``Index.map || fn.isConstOf ``Index.unmap) && args.size == 6 then
+    return ← nav args[5]! k true
+  else if fn.isConst || fn.isFVar then
+    -- a head we do not navigate (a variable, `Index.null`, `Index.select`, ...):
+    -- rebuilding the application is only progress if a constructor was consumed
+    if progress then stuckLeaf idx k else return none
+  else
+    -- expose a constructor head through β-redexes, without unfolding definitions
+    let idx' := idx.consumeMData.headBeta
+    if idx' == idx then return none -- a `fun`/`match`: rebuilding would leave stuck matches
+    else return ← nav idx' k progress
+
+open Lean Meta Simp in
+/-- Core of the `reduceIndex*` dsimprocs: `e` is an `Index` built from
+`Index.cons`/`Index.append`/`Index.single`/`Index.map`/`Index.unmap`, applied to a
+`Fin` position. If the position is a literal, reduce the application structurally. -/
+private def Index.reduceCore (e : Expr) : SimpM DStep := do
+  let i := e.appArg!
+  let idx := e.appFn!
+  let some k ← getFinVal? i | return .continue
+  let some v ← nav idx k false | return .continue
+  if v == e then return .continue
+  return .visit v
+
+/-- Reduce `Index.cons x₀ x i` at a literal position `i`. -/
+dsimproc reduceIndexCons (Index.cons _ _ _) := Index.reduceCore
+
+/-- Reduce `Index.append a b i` at a literal position `i`. -/
+dsimproc reduceIndexAppend (Index.append _ _ _) := Index.reduceCore
+
+/-- Reduce `Index.single x i` at a literal position `i`. -/
+dsimproc reduceIndexSingle (Index.single _ _) := Index.reduceCore
+
+/-- Reduce `Index.map a i` at a literal position `i`. -/
+dsimproc reduceIndexMap (Index.map _ _) := Index.reduceCore
+
+/-- Reduce `Index.unmap a i` at a literal position `i`. -/
+dsimproc reduceIndexUnmap (Index.unmap _ _) := Index.reduceCore
+
+attribute [reduce_soir] reduceIndexCons reduceIndexAppend reduceIndexSingle
+  reduceIndexMap reduceIndexUnmap
+
+open Lean Meta Simp in
+/-- Core of `reduceCurryGet`: `e` is `Curry.get f i` with `i : Index m γ` for a
+concrete list `γ`. Compute the get structurally:
+`Curry.get f i = f (i 0) (i 1) ... (i (γ.length - 1))` (just `f` at `[]`).
+The rewrite lemmas `Curry.get_zero`/`get_one`/`get_two`/... prove the same equations,
+but only fire when `γ` is a literal cons-tower of length ≤ 3; this simproc works for
+any list built from `nil`/`cons`/`append`/`map`/`replicate`, e.g. the `γ ++ γ'`
+arising from `Curry.curry`/`Curry.transpose`. -/
+private def Curry.reduceGetCore (e : Expr) : SimpM DStep := do
+  let args := e.getAppArgs
+  unless args.size == 6 do return .continue
+  let γ := args[3]!
+  let f := args[4]!
+  let i := args[5]!
+  let some len ← Index.listLength? γ | return .continue
+  let mut v := f
+  for j in [:len] do
+    let some ij ← Index.stuckLeaf i j | return .continue
+    v := mkApp v ij
+  return .visit v
+
+open Lean Meta Simp in
+/-- Core of `reduceCurryOf`, unfolding one step of `Curry.of` on a concrete list
+(`e` is an unapplied `Curry.of f`; applied occurrences are handled by rewriting the
+unapplied `Curry.of f` subterm and β-reducing):
+- at `[]`: rewrites to `f Index.null`;
+- at `γ₀ :: γs`: rewrites to `fun v ↦ Curry.of fun a ↦ f (Index.cons v a)`, which is
+  `Curry.of`'s definition on a cons, η-expanded. Iterating consumes one argument per
+  step, ending at `f (Index.cons v₀ (... (Index.cons vₖ Index.null)))`.
+
+The η-expansion would rewrite its own output forever, so it is skipped when `f`
+already has the shape it produces (a lambda whose body ends in an `Index.cons`
+applied to the bound variable). -/
+private def Curry.reduceOfCore (e : Expr) : SimpM DStep := do
+  let args := e.getAppArgs
+  unless args.size == 5 do return .continue
+  let some len ← Index.listLength? args[3]! | return .continue
+  if len == 0 then
+    return .visit (mkApp args[4]! (mkApp2 (mkConst ``Index.null []) args[0]! args[1]!))
+  let f := args[4]!
+  if f.isLambda then
+    let body := f.bindingBody!
+    if body.isApp && body.appArg!.getAppFn.isConstOf ``Index.cons
+        && body.appArg!.appArg!.isBVar then
+      return .continue
+  let γ ← whnfD args[3]!
+  let cargs := γ.getAppArgs
+  unless γ.getAppFn.isConstOf ``List.cons && cargs.size == 3 do return .continue
+  let dom := mkApp args[1]! cargs[1]!
+  let idxTy ← mkAppM ``Index #[args[1]!, cargs[2]!]
+  let r ← withLocalDecl `v .default dom fun v => do
+    withLocalDecl `a .default idxTy fun a => do
+      let cons ← mkAppM ``Index.cons #[v, a]
+      let inner ← mkAppM ``Curry.of #[← mkLambdaFVars #[a] (mkApp f cons)]
+      mkLambdaFVars #[v] inner
+  return .visit r
+
+/-- Reduce `Curry.get f i` structurally on concrete lists. -/
+dsimproc reduceCurryGet (Curry.get _ _) := Curry.reduceGetCore
+
+/-- Reduce `Curry.of f` structurally on concrete lists. -/
+dsimproc reduceCurryOf (Curry.of _) := Curry.reduceOfCore
+
+attribute [reduce_soir] reduceCurryGet reduceCurryOf
+
 instance Curry.instMonad (γ : List ι) : Monad (Curry m γ) where
   pure := Curry.pure
   bind := Curry.bind
@@ -318,5 +511,7 @@ def Curry.transpose {γ γ' : List ι} : Curry m (γ ++ γ') α → Curry m (γ'
 
 def Curry.transposeFirst {γ₀ : ι} {γ : List ι} : Curry m (γ₀ :: γ) α → Curry m γ (m γ₀ → α) :=
   fun x => curry (γ' := [γ₀]) <| transpose x
+
+attribute [reduce_soir] Curry.transpose Curry.transposeFirst
 
 end Soir

@@ -8,12 +8,11 @@ def diag_mask {n : ℕ} : Xla.SimpleExpr [] ⟨.int, [n, n]⟩ :=
 
 theorem diag_mask_def {n : ℕ} (i j : Fin n) :
     diag_mask.eval i j = if i = j then (1 : ℤ) else 0 := by
-  simp [reduce_soir, reduce_xla, diag_mask, Xla.Tensor.map₂, Xla.Tensor.broadcast]
+  simp [reduce_soir, reduce_xla, diag_mask, reduce_tensor]
   congr 1
   apply propext
   constructor
   · intro h
-    simp [Soir.Index.single, id] at h
     grind
   · intro h; simp[h, Soir.Index.single, id]
 
@@ -40,7 +39,7 @@ theorem mutual_distance_def {n_atom}
   (x : Xla.Tensor ℝ [n_atom, 3])
   (n m : Fin n_atom) :
   mutual_distance.eval x n m = ∑ i, (x n i - x m i) ^ 2 := by
-  simp [mutual_distance, reduce_xla, reduce_soir, Xla.Tensor.map₂, ← pow_two]
+  simp [mutual_distance, reduce_xla, reduce_soir, reduce_tensor, ← pow_two]
   conv_lhs =>
     change (Xla.Tensor.sumN (s := [3, n_atom, n_atom]) 1 (fun i a b ↦ (x a i - x b i)^2)) n m
     fun
