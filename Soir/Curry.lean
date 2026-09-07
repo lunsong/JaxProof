@@ -1,6 +1,8 @@
 import Mathlib.Algebra.Group.Defs
 import Soir.Meta
 
+namespace Soir
+
 variable {ι : Type}
 
 abbrev Index (m : ι → Type) (γ : List ι) : Type := ∀ i : Fin γ.length, m γ[i]
@@ -21,6 +23,9 @@ def Index.cons {γ₀ : ι} {γ : List ι} : m γ₀ → Index m γ → Index m 
   fun x₀ x r => match r with
   | .mk 0 h => x₀
   | .mk (r + 1) h => x <| .mk r <| by simpa using h
+
+@[reduce_soir]
+theorem Index.single_zero {ι : Type} {m : ι → Type} {i : ι} {x : m i} : Index.single x 0 = x := rfl
 
 def Index.select {γ : List ι} (i : List (Fin γ.length)) : Index m γ → Index m (i.map γ.get) :=
   match i with
@@ -201,3 +206,4 @@ def Curry.transpose {γ γ' : List ι} : Curry m (γ ++ γ') α → Curry m (γ'
 def Curry.transposeFirst {γ₀ : ι} {γ : List ι} : Curry m (γ₀ :: γ) α → Curry m γ (m γ₀ → α) :=
   fun x => curry (γ' := [γ₀]) <| transpose x
 
+end Soir

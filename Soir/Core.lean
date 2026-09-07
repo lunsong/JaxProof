@@ -135,41 +135,6 @@ def Expr.ofFn {args outs : List data}
 
 end
 
-declare_syntax_cat expr_builder
-
-syntax "soir" term "with" ( ident ":" term ),*
-       "begin" expr_builder : term
-
-syntax "let_expr" ident ":" term ":=" term ";" expr_builder : expr_builder
-syntax "let" ident ":" term ":=" term ";" expr_builder : expr_builder
-syntax "let" ident ":=" term ";" expr_builder : expr_builder
-syntax "return" term : expr_builder
-
-open Lean in
-partial def parse_expr_builder (expr : TSyntax `term) :
-    TSyntax `expr_builder → MacroM (TSyntax `term)
-  | `(expr_builder| let_expr $name : $outs := $val; $content) => do
-    `(term| let $name : $expr $outs := $val;
-            $(← parse_expr_builder expr content))
-  | `(expr_builder| let $name : $type := $val; $content) => do
-    `(term| let $name : $type := $val; $(← parse_expr_builder expr content))
-  | `(expr_builder| let $name := $val; $content) => do
-    `(term| let $name := $val; $(← parse_expr_builder expr content))
-  | `(expr_builder| return $rets) => pure rets
-  | _ => Macro.throwUnsupported
-
-open Lean in macro_rules
-  | `(soir $op with $[$argnames : $argtypes],* begin $body) => do
-    let args : TSyntax `term ← `(term| [ $[$argtypes],* ])
-    let expr_head : TSyntax `term ← `(term| Expr $op $args)
-    let parsed_body : TSyntax `term ← parse_expr_builder expr_head body
-    let rec bind_args : List (TSyntax `ident × TSyntax `term) → Nat → MacroM (TSyntax `term)
-      | [], _ => return parsed_body
-      | ⟨name, out⟩ :: rest, n => do
-        `(term| let $name : $expr_head [$out] := Expr.arg ⟨$(quote n), by simp +decide⟩;
-        $(← bind_args rest (n + 1)))
-    bind_args (argnames.toList.zip argtypes.toList) 0
-
 def evalType {data : Type} (impl : data → Type) (args outs : List data) : Type :=
   Curry impl args (Index impl outs)
 

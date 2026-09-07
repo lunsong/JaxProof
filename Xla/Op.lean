@@ -35,7 +35,7 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | bessel_i0e {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | bessel_i1e {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | broadcast {α : DType} (s : List (ℕ × Bool)) :
-    XlaPrimOp [⟨α, Soir.Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
+    XlaPrimOp [⟨α, Xla.Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
   | cbrt {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | ceil {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.int, s⟩
   | cholesky {batch : Shape} {n : ℕ} :

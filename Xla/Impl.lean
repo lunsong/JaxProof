@@ -129,9 +129,14 @@ instance : Impl XlaHigherOp DirectImpl where
     fun fn => Curry.uncurry <| Curry.of <| fun x => Curry.of <| fun aux =>
       Index.unmap <| fun r i => (fn.curry.get (fun r => x.map r i)).get aux r
 
+def SimpleExpr (args : List TensorType) (out : TensorType) : Type :=
+  Expr XlaOp args [out]
+
 @[reduce_xla]
-noncomputable def simpleEval {args : List TensorType} {out : TensorType}
-  (expr : Expr XlaOp args [out]) : Curry DirectImpl args (DirectImpl out) :=
-  (expr.eval DirectImpl).map fun x => x 0
+noncomputable def SimpleExpr.eval
+  {args : List TensorType} {out : TensorType}
+  (expr : SimpleExpr args out) :
+    Curry DirectImpl args (DirectImpl out) :=
+  (Expr.eval DirectImpl expr).map fun x => x 0
 
 end Xla

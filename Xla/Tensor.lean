@@ -8,7 +8,9 @@ import Batteries.Data.Fin.Lemmas
 import Soir.Curry
 import Xla.Meta
 
-namespace Soir
+namespace Xla
+
+open Soir
 
 abbrev Tensor (R : Type) (shape : List ℕ) : Type :=
   Curry Fin shape R
@@ -365,4 +367,4 @@ example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin 
   rw [Finset.sum_apply]
 
 
-end Soir
+end Xla

@@ -1,15 +1,14 @@
-import SSA
+import Xla
 
-def idxOfNonzero {n : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.int, [n]⟩
-  begin
+def idxOfNonzero {n : ℕ} :
+  Xla.SimpleExpr [⟨.int, [n]⟩] ⟨.int, [n]⟩ :=
+  Soir.Expr.ofFn fun x =>
     -- First we find nonzero elements of x
-    let_expr x_nonzero : [⟨.int, [n]⟩] := Xla.choice x (Xla.ofNat 1) (Xla.ofNat 0);
+    let x_nonzero := Xla.choice x (Xla.ofNat 1) (Xla.ofNat 0);
     -- Then we give each nonzero element an index by counting the
     -- number of nonzero elements before it
     let x_id := Xla.cumsum x_nonzero;
-    return Xla.choice x x_id 0
+    Xla.choice x x_id 0
 
 #eval IO.println (idxOfNonzero (n := 12)).code
 /-
@@ -75,51 +74,19 @@ theorem Finset.idxOf_sort_of_mem {m : ℕ} {s : Finset (Fin m)} {x : (Fin m)} :
   apply List.Nodup.sublist (List.take_sublist _ _)
   simp
 
-
 theorem idxOfNonzero_eq_def {n : ℕ} {x : Fin n → ℤ} :
-    idxOfNonzero.eval Xla.DirectImpl x = Index.single (idxOfNonzero_def x) := by
-  simp only [idxOfNonzero, Xla.choice, Xla.bindPrim, List.length_nil, Fin.getElem_fin,
-    List.cons_append, List.nil_append, List.length_cons, Nat.reduceAdd, Fin.zero_eta, Fin.isValue,
-    Xla.cumsum, SSA.Expr.eval, Curry.map, Curry.get, SSA.evalType.bind, SSA.Impl.bind,
-    SSA.SimpleImpl.bind, SSA.Tensor.map₃, Curry.map₂, Fin.coe_ofNat_eq_mod, Nat.zero_mod,
-    List.getElem_cons_zero, SSA.Tensor.cumsum, bne_iff_ne, ne_eq, Fin.succ_zero_eq_one,
-    Fin.succ_one_eq_two, ite_not, Index.append, Index.single, Curry.arg, Curry.pure]
-  congr
+    idxOfNonzero.eval x = idxOfNonzero_def x := by
   ext i
-  simp only [Index.append, Index.single, Curry.arg, Curry.pure, List.nil_append, List.length_cons,
-    List.length_nil, Nat.reduceAdd, Fin.zero_eta, Fin.isValue, Fin.succ_zero_eq_one,
-    idxOfNonzero_def, ne_eq, dite_eq_ite]
+  simp [idxOfNonzero, reduce_xla, reduce_soir, reduce_tensor, idxOfNonzero_def]
   split_ifs with h
   · rfl
-  rw [Finset.idxOf_sort_of_mem (by simpa)]
-  conv_lhs =>
-    arg 2; intro j
-    conv =>
-      arg 2
-      change 0
-    conv =>
-      arg 3
-      change 1
-    equals if x j ≠ 0 then 1 else 0 =>
-      simp
-  rw [Finset.sum_ite]
-  simp only [ne_eq, Finset.sum_const, Int.nsmul_eq_mul, mul_one,
-    Decidable.not_not, add_zero, mul_zero]
-  conv_lhs =>
-    arg 1; arg 1
-    equals ({y ∈ {i | ¬x i = 0} | y < i} : Finset (Fin n)) ∪ {i} =>
-      ext j
-      constructor
-      · simp only [Finset.mem_filter, Finset.mem_univ, true_and, Finset.union_singleton,
-        Finset.mem_insert, and_imp]
-        intro h1 h2
-        rcases eq_or_lt_of_le h1 with h1 | h1
-        · left; exact h1
-        · right; exact ⟨h2, h1⟩
-      · simp only [Finset.union_singleton, Finset.mem_insert, Finset.mem_filter, Finset.mem_univ,
-        true_and]
-        intro h1
-        rcases h1 with h1 | h1
-        · simp [h1, h]
-        · exact ⟨h1.2.le, h1.1⟩
-  simp
+  · rw [Finset.idxOf_sort_of_mem (by simpa)]
+    conv_lhs =>
+      arg 2; intro j; rw [← ite_not]
+    rw [← Finset.sum_filter, Finset.sum_const]
+    simp only [Int.nsmul_eq_mul, mul_one]
+    conv_lhs =>
+      arg 1; arg 1
+      equals insert i (Finset.filter (fun j => j < i ∧ x j ≠ 0) Finset.univ) =>
+        ext j; grind
+    simp; congr 1; ext j; grind
