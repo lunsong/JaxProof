@@ -312,6 +312,7 @@ def unflatten {α : DType} (s : Shape) :
     Expr XlaOp args [⟨α, [s.prod]⟩] → Expr XlaOp args [⟨α, s⟩] :=
   bindPrim (.unflatten s)
 
+@[reduce_xla]
 def cast {α : DType} {s s' : Shape} (h : s = s') :
     Expr XlaOp args [⟨α, s⟩] → Expr XlaOp args [⟨α, s'⟩] :=
   bindPrim (.cast h)

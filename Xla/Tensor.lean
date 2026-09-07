@@ -174,6 +174,33 @@ theorem _root_.Fin.mulAdd_divNat_modNat {n m : ℕ} (i : Fin (n * m)) :
   simp only [Fin.mulAdd, Fin.coe_divNat, Fin.coe_modNat, ← Fin.val_eq_val]
   exact Nat.div_add_mod' i.val m
 
+@[simp]
+theorem _root_.Fin.val_mulAdd {n m : ℕ} (i : Fin n) (j : Fin m) :
+    (i.mulAdd j).val = i.val * m + j.val := rfl
+
+theorem _root_.Fin.val_intCast_natCast {n : ℕ} [NeZero n] (z : ℕ) :
+    ((Fin.intCast (z : ℤ) : Fin n)).val = z % n := by
+  simp [Fin.intCast, Fin.ofNat]
+
+@[simp]
+theorem _root_.Fin.intCast_val_self {n : ℕ} [NeZero n] (i : Fin n) :
+    (Fin.intCast (i.val : ℤ) : Fin n) = i := by
+  ext
+  simp [Fin.intCast, Fin.ofNat, Nat.mod_eq_of_lt i.isLt]
+
+@[simp]
+theorem _root_.Fin.intCast_val_add_one {n : ℕ} (j : Fin n) :
+    (Fin.intCast ((j.val : ℤ) + 1) : Fin (n + 1)) = j.succ := by
+  ext
+  have h0 : (0 : ℤ) ≤ (j.val : ℤ) + 1 := by omega
+  have hb : ((j.val : ℤ) + 1).natAbs = j.val + 1 := by omega
+  simp [Fin.intCast, h0, hb, Fin.ofNat, Fin.succ, Nat.mod_eq_of_lt (j.isLt : j.val + 1 ≤ n)]
+
+/-- Casting a one-dimensional tensor just reinterprets the index. -/
+@[reduce_tensor]
+theorem Tensor.cast_singleton {R : Type} {a b : ℕ} (h : [a] = [b]) (x : Tensor R [a])
+    (i : Fin b) : x.cast h i = x (i.cast (List.cons_eq_cons.mp h).1.symm) := rfl
+
 @[reduce_tensor]
 def Tensor.unflatten (s : List ℕ) : (Fin s.prod → R) → Tensor R s :=
   match s with
@@ -221,6 +248,17 @@ instance (α : Type) (x₀ : α) (xs : List α) : NeZero (x₀ :: xs).length :=
 @[reduce_tensor]
 def Tensor.preBroadcast (s : List (ℕ × Bool)) : List ℕ :=
   (s.filter Prod.snd).map Prod.fst
+
+@[reduce_tensor]
+theorem Tensor.preBroadcast_nil : Tensor.preBroadcast [] = [] := rfl
+
+@[reduce_tensor]
+theorem Tensor.preBroadcast_cons_true (a : ℕ) (s : List (ℕ × Bool)) :
+    Tensor.preBroadcast (⟨a, true⟩ :: s) = a :: Tensor.preBroadcast s := rfl
+
+@[reduce_tensor]
+theorem Tensor.preBroadcast_cons_false (a : ℕ) (s : List (ℕ × Bool)) :
+    Tensor.preBroadcast (⟨a, false⟩ :: s) = Tensor.preBroadcast s := rfl
 
 @[simp]
 theorem Tensor.preBroadcast_append (s s' : List (ℕ × Bool)) :

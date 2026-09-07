@@ -35,7 +35,6 @@ def Index.select {γ : List ι} (i : List (Fin γ.length)) : Index m γ → Inde
     | .mk 0 h => x i₀
     | .mk (r + 1) h => select i x <| .mk r <| by simpa using h
 
-@[reduce_soir]
 def Index.append {γ γ' : List ι} : Index m γ → Index m γ' → Index m (γ ++ γ') :=
   match γ with
   | [] => fun x y => y
@@ -54,13 +53,11 @@ def Index.replicate {i : ι} {n : ℕ} : Index m (List.replicate n i) → Fin n 
       let x' : Index m (List.replicate n i) := fun r => x r.succ
       replicate x' <| .mk r <| by simpa using h
 
-@[reduce_soir]
 def Curry.get {γ : List ι} (f : Curry m γ α) (i : Index m γ) : α :=
   match γ with
   | [] => f
   | γ :: γs => (f (i ⟨0, by simp⟩)).get fun r => i r.succ
 
-@[reduce_soir]
 def Curry.of {γ : List ι} (f : Index m γ → α) : Curry m γ α :=
   match γ with
   | [] => f fun r => nomatch r
@@ -126,13 +123,129 @@ def Curry.bind {γ : List ι} (x : Curry m γ α) (f : α → Curry m γ β) : C
   | [] => f x
   | _ :: _ => fun a => bind (x a) fun b => f b a
 
-@[reduce_soir]
 def Curry.arg {γ : List ι} (i : Fin γ.length) : Curry m γ (m γ[i]) :=
   match γ with
   | γ₀ :: γs =>
     match i with
     | .mk 0 _ => fun x => pure x
     | .mk (i + 1) hi => fun _ => arg <| .mk i <| by simpa using hi
+
+/-!
+### Computation rules for `Curry`/`Index` at concrete positions
+
+The definitions of `Curry.get`, `Curry.of`, `Index.append` and `Curry.arg` are
+matches on the index list and on `Fin` values. Unfolding them with `simp`
+leaves dependent matches whose scrutinees are `OfNat` numerals (the simp
+normal form for `Fin` literals, see `Fin.zero_eta`/`Fin.mk_one`); those matches
+reduce neither by `simp` nor by the kernel. The lemmas below instead compute
+applications at concrete positions (`0`, `Fin.succ r`) directly, so evaluation
+never exposes the matches.
+-/
+
+@[reduce_soir]
+theorem Curry.get_zero (f : Curry m [] α) (i : Index m []) : f.get i = f := rfl
+
+@[reduce_soir]
+theorem Curry.get_one {γ₀ : ι} (f : Curry m [γ₀] α) (i : Index m [γ₀]) :
+    f.get i = f (i 0) := rfl
+
+@[reduce_soir]
+theorem Curry.get_two {γ₀ γ₁ : ι} (f : Curry m [γ₀, γ₁] α) (i : Index m [γ₀, γ₁]) :
+    f.get i = f (i 0) (i 1) := rfl
+
+@[reduce_soir]
+theorem Curry.get_three {γ₀ γ₁ γ₂ : ι} (f : Curry m [γ₀, γ₁, γ₂] α)
+    (i : Index m [γ₀, γ₁, γ₂]) :
+    f.get i = f (i 0) (i 1) (i 2) := rfl
+
+@[reduce_soir]
+theorem Curry.get_pure {γ : List ι} (x : α) (i : Index m γ) : (Curry.pure x).get i = x := by
+  induction γ with
+  | nil => rfl
+  | cons γ₀ γs ih => exact ih fun r ↦ i r.succ
+
+@[reduce_soir]
+theorem Curry.get_map {γ : List ι} (f : α → β) (g : Curry m γ α) (i : Index m γ) :
+    (g.map f).get i = f (g.get i) := by
+  induction γ with
+  | nil => rfl
+  | cons γ₀ γs ih => exact ih (g (i ⟨0, by simp⟩)) fun r ↦ i r.succ
+
+@[reduce_soir]
+theorem Index.cons_zero {γ₀ : ι} {γ : List ι} (x₀ : m γ₀) (x : Index m γ) :
+    Index.cons x₀ x 0 = x₀ :=
+  show Index.cons x₀ x ⟨0, by simp⟩ = x₀ from rfl
+
+@[reduce_soir]
+theorem Index.cons_one {γ₀ γ₁ : ι} {γ : List ι} (x₀ : m γ₀) (x : Index m (γ₁ :: γ)) :
+    Index.cons x₀ x 1 = x 0 :=
+  show Index.cons x₀ x (Fin.succ 0) = x 0 from rfl
+
+@[reduce_soir]
+theorem Index.cons_two {γ₀ γ₁ γ₂ : ι} {γ : List ι} (x₀ : m γ₀)
+    (x : Index m (γ₁ :: γ₂ :: γ)) : Index.cons x₀ x 2 = x 1 :=
+  show Index.cons x₀ x (Fin.succ 1) = x 1 from rfl
+
+@[reduce_soir]
+theorem Index.cons_succ {γ₀ : ι} {γ : List ι} (x₀ : m γ₀) (x : Index m γ) (r : Fin γ.length) :
+    Index.cons x₀ x r.succ = x r := rfl
+
+@[reduce_soir]
+theorem Index.append_null {γ : List ι} (y : Index m γ) : Index.append Index.null y = y := rfl
+
+@[reduce_soir]
+theorem Index.append_single {γ₀ : ι} {γ : List ι} (x₀ : m γ₀) (y : Index m γ) :
+    Index.append (Index.single x₀) y = Index.cons x₀ y := by
+  funext ⟨r, hr⟩
+  match r, hr with
+  | 0, h => rfl
+  | r + 1, h => rfl
+
+@[reduce_soir]
+theorem Index.append_cons {γ₀ : ι} {γ γ' : List ι} (x₀ : m γ₀) (x : Index m γ)
+    (y : Index m γ') :
+    Index.append (Index.cons x₀ x) y = Index.cons x₀ (Index.append x y) := by
+  funext ⟨r, hr⟩
+  match r, hr with
+  | 0, h => rfl
+  | r + 1, h => rfl
+
+@[reduce_soir]
+theorem Curry.of_apply_zero (f : Index m [] → α) :
+    (Curry.of f : Curry m [] α) = f Index.null := rfl
+
+@[reduce_soir]
+theorem Curry.of_apply_one {γ₀ : ι} (f : Index m [γ₀] → α) (x₀ : m γ₀) :
+    (Curry.of f : Curry m [γ₀] α) x₀ = f (Index.single x₀) := by
+  rw [show f (Index.single x₀) = (Curry.of f).get (Index.single x₀) from by rw [Curry.get_of],
+    Curry.get_one, Index.single_zero]
+
+@[reduce_soir]
+theorem Curry.of_apply_two {γ₀ γ₁ : ι} (f : Index m [γ₀, γ₁] → α) (x₀ : m γ₀) (x₁ : m γ₁) :
+    (Curry.of f : Curry m [γ₀, γ₁] α) x₀ x₁ = f (Index.cons x₀ (Index.single x₁)) := by
+  rw [show f (Index.cons x₀ (Index.single x₁)) =
+      (Curry.of f).get (Index.cons x₀ (Index.single x₁)) from by rw [Curry.get_of],
+    Curry.get_two, Index.cons_zero, Index.cons_one, Index.single_zero]
+
+@[reduce_soir]
+theorem Curry.arg_zero {γ₀ : ι} {γ : List ι} :
+    Curry.arg (m := m) (0 : Fin (γ₀ :: γ).length) = fun x ↦ Curry.pure x :=
+  show Curry.arg (m := m) (γ := γ₀ :: γ) ⟨0, by simp⟩ = fun x ↦ Curry.pure x from rfl
+
+@[reduce_soir]
+theorem Curry.arg_one {γ₀ γ₁ : ι} {γ : List ι} :
+    Curry.arg (m := m) (1 : Fin (γ₀ :: γ₁ :: γ).length) = fun _ x ↦ Curry.pure x :=
+  show Curry.arg (m := m) (γ := γ₀ :: γ₁ :: γ) (Fin.succ 0) = fun _ x ↦ Curry.pure x from rfl
+
+@[reduce_soir]
+theorem Curry.arg_two {γ₀ γ₁ γ₂ : ι} {γ : List ι} :
+    Curry.arg (m := m) (2 : Fin (γ₀ :: γ₁ :: γ₂ :: γ).length) = fun _ _ x ↦ Curry.pure x :=
+  show Curry.arg (m := m) (γ := γ₀ :: γ₁ :: γ₂ :: γ) (Fin.succ 1)
+    = fun _ _ x ↦ Curry.pure x from rfl
+
+@[reduce_soir]
+theorem Curry.arg_succ {γ₀ : ι} {γ : List ι} (i : Fin γ.length) :
+    Curry.arg (m := m) (γ := γ₀ :: γ) i.succ = fun _ ↦ Curry.arg i := rfl
 
 instance Curry.instMonad (γ : List ι) : Monad (Curry m γ) where
   pure := Curry.pure

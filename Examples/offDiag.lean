@@ -38,5 +38,31 @@ def offDiag_def {n : ℕ} (x : Xla.Tensor ℝ [n, n]) : Xla.Tensor ℝ [n - 1, n
     x i' j'
 
 theorem offDiag_eq_def {n : ℕ} : (offDiag (n := n)).eval = offDiag_def := by
-  sorry
+  funext x
+  ext i j
+  simp [offDiag, offDiag_def, reduce_xla, reduce_soir, reduce_tensor]
+  have hn : 2 ≤ n := by have := i.isLt; omega
+  have hnn : NeZero (n * (n * 1)) :=
+    ⟨by rw [Nat.mul_one]; exact Nat.mul_ne_zero_iff.mpr ⟨by omega, by omega⟩⟩
+  have hlt : i.val * (n + 1) + (j.val + 1) < n * n := by
+    have hi := Nat.succ_le_iff.mpr i.isLt
+    have hj := Nat.succ_le_iff.mpr j.isLt
+    calc
+      (i.val * (n + 1) + j.val + 1).succ = i.val.succ * (n + 1) + j.val.succ - n := by grind
+      _ ≤ (n - 1) * (n + 1) + j.val.succ - n := by gcongr
+      _ ≤ (n - 1) * (n + 1) + n - n := by gcongr
+      _ ≤ n * n := by rw [← sq_sub_one, Nat.add_sub_cancel]; grind
+  rw [if_neg (by omega : n - 1 ≠ 0)]
+  split_ifs with h
+  · have := i.isLt; omega
+  · have hz : (↑i.val * (↑n + 1) + (↑j.val + 1) : ℤ) =
+        ((i.val * (n + 1) + (j.val + 1) : ℕ) : ℤ) := by push_cast; ring
+    congr 1
+    · ext
+      rw [Fin.coe_divNat, hz, Fin.val_intCast_natCast, Nat.mul_one, Nat.mod_eq_of_lt hlt]
+      rfl
+    · ext
+      rw [Fin.coe_divNat, Nat.div_one, Fin.coe_modNat, hz, Fin.val_intCast_natCast, Nat.mul_one,
+        Nat.mod_eq_of_lt hlt]
+      rfl
 

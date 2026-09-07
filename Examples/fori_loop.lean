@@ -16,4 +16,5 @@ example (m n : ℕ) (x : Fin n → ℝ) :
   | succ m ih =>
     simp [Nat.repeat, ih]
     rw [pow_succ, pow_mul, pow_two]
-    rfl
+
+
