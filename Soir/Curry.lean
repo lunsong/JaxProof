@@ -264,6 +264,13 @@ needed. All reductions are definitional, hence `dsimproc` rather than `simproc`.
 -/
 
 open Lean Meta Simp in
+/-- `reduce` at `default` transparency. Simprocs run at `reducible` transparency,
+where `List.length`/`List.append` and friends do not unfold; the `Index`/`Curry`
+computations below all live at the type level, so default transparency is needed. -/
+private def Index.reduceD (e : Expr) : MetaM Expr :=
+  withTransparency .default <| reduce e
+
+open Lean Meta Simp in
 /-- The length of a list expression built from `List.nil`/`List.cons`/`List.append`/
 `List.map`/`List.replicate` (the list constructors arising in `Index` types). `whnf`
 only reduces the head, so `List.length` cannot be evaluated directly. -/
@@ -282,7 +289,7 @@ private partial def Index.listLength? (γ : Expr) : MetaM (Option Nat) := do
   else if fn.isConstOf ``List.map && args.size == 3 then
     listLength? args[2]!
   else if fn.isConstOf ``List.replicate && args.size == 3 then
-    getNatValue? (← reduce args[1]!)
+    getNatValue? (← reduceD args[1]!)
   else
     return none
 
@@ -293,7 +300,7 @@ private partial def Index.getFinVal? (e : Expr) : MetaM (Option Nat) := do
   if e.isAppOfArity ``Fin.succ 2 then
     return (← getFinVal? e.appArg!).map (· + 1)
   else if e.isAppOfArity ``Fin.mk 3 then
-    getNatValue? (← reduce e.getAppArgs[1]!)
+    getNatValue? (← reduceD e.getAppArgs[1]!)
   else
     -- `OfNat` numeral: the value is `k % n`, which is `k` for the literals that arise
     if let some (k, _) ← getOfNatValue? e ``Fin then return some k
@@ -306,7 +313,7 @@ private def Index.stuckLeaf (idx : Expr) (k : Nat) : MetaM (Option Expr) := do
   match ← whnfD (← inferType idx) with
   | .forallE _ dom _ _ =>
     unless dom.isAppOfArity ``Fin 1 do return none
-    let some n ← getNatValue? (← reduce dom.appArg!) | return none
+    let some n ← getNatValue? (← reduceD dom.appArg!) | return none
     if h : k < n then
       return some (mkApp idx (toExpr (⟨k, h⟩ : Fin n)))
     else
@@ -438,7 +445,36 @@ dsimproc reduceCurryGet (Curry.get _ _) := Curry.reduceGetCore
 /-- Reduce `Curry.of f` structurally on concrete lists. -/
 dsimproc reduceCurryOf (Curry.of _) := Curry.reduceOfCore
 
-attribute [reduce_soir] reduceCurryGet reduceCurryOf
+open Lean Meta Simp in
+/-- Core of `reduceCurryArg`: `e` is `Curry.arg i` with `i : Fin γ.length` a literal
+position in a concrete list `γ`. Rewrite to `Curry.of fun a ↦ a i` (definitionally
+equal: both are the `i`-th projection η-expanded); `reduceCurryOf` and the
+`reduceIndex*` simprocs then compute the projection structurally.
+
+The rewrite lemmas `Curry.arg_zero`/`arg_one`/`arg_two`/`arg_succ` prove the same
+equations, but only fire when the type of `i` is the unreduced `Fin γ.length`:
+evaluation produces literals at the *reduced* type (e.g. `Fin 1`), which the lemmas
+cannot match at `implicit` transparency. -/
+private def Curry.reduceArgCore (e : Expr) : SimpM DStep := do
+  let args := e.getAppArgs
+  unless args.size == 4 do return .continue
+  let γ := args[2]!
+  let i := args[3]!
+  let some k ← Index.getFinVal? i | return .continue
+  let some len ← Index.listLength? γ | return .continue
+  unless k < len do return .continue
+  -- the element type `m γ[i]`, from the type `Curry m γ (m γ[i])` of `e`
+  let ty ← inferType e
+  unless ty.getAppFn.isConstOf ``Curry && ty.getAppArgs.size == 4 do return .continue
+  let α := ty.getAppArgs[3]!
+  let idxTy ← mkAppM ``Index #[args[1]!, γ]
+  let g ← withLocalDecl `a .default idxTy fun a => mkLambdaFVars #[a] (mkApp a i)
+  return .visit (mkAppN (mkConst ``Curry.of) #[args[0]!, args[1]!, α, γ, g])
+
+/-- Reduce `Curry.arg i` at a literal position `i` in a concrete list. -/
+dsimproc reduceCurryArg (Curry.arg _) := Curry.reduceArgCore
+
+attribute [reduce_soir] reduceCurryGet reduceCurryOf reduceCurryArg
 
 instance Curry.instMonad (γ : List ι) : Monad (Curry m γ) where
   pure := Curry.pure
