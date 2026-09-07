@@ -1,18 +1,18 @@
-import SSA.Curry
-import SSA.Meta
+import Soir.Curry
+import Soir.Meta
 
 /-!
-# The Core of the SSA framework
+# The Core of the Soir framework
 
 This file contains definitions for code generation and native evaluation
 -/
 
-namespace SSA
+namespace Soir
 
 /-- `OpType` specifies the primitive ops. First-order and second-order ops are put together. -/
 def OpType (data : Type) : Type 1 := List (List data × List data) → List data → List data → Type
 
-/-- `Expr` represent an SSA expression with multiput input and multiple output, using `data`
+/-- `Expr` represent an Soir expression with multiput input and multiple output, using `data`
 as the data type and `op` as primitive ops. -/
 inductive Expr {data : Type} (op : OpType data) :
     List data → List data → Type where
@@ -127,7 +127,7 @@ def Expr.code {args outs : List data} (expr : Expr op args outs) : String :=
   let libs := "\n\n".intercalate <| List.ofFn fun (i : Fin libs.length) => s!"@{i}:\n{libs[i].2}"
   s!"{body}\n\n{libs}"
 
-@[reduce_ssa]
+@[reduce_soir]
 def Expr.ofFn {args outs : List data}
   (f : Curry (Expr op args [·]) args (Expr op args outs))
   : Expr op args outs :=
@@ -137,7 +137,7 @@ end
 
 declare_syntax_cat expr_builder
 
-syntax "ssa" term "with" ( ident ":" term ),*
+syntax "soir" term "with" ( ident ":" term ),*
        "begin" expr_builder : term
 
 syntax "let_expr" ident ":" term ":=" term ";" expr_builder : expr_builder
@@ -159,7 +159,7 @@ partial def parse_expr_builder (expr : TSyntax `term) :
   | _ => Macro.throwUnsupported
 
 open Lean in macro_rules
-  | `(ssa $op with $[$argnames : $argtypes],* begin $body) => do
+  | `(soir $op with $[$argnames : $argtypes],* begin $body) => do
     let args : TSyntax `term ← `(term| [ $[$argtypes],* ])
     let expr_head : TSyntax `term ← `(term| Expr $op $args)
     let parsed_body : TSyntax `term ← parse_expr_builder expr_head body
@@ -184,7 +184,7 @@ class Impl {data : Type} (op : OpType data) (impl : data → Type) where
   bind {expr : List (List data × List data)} {args outs : List data} : 
     op expr args outs → Impl.bindType impl expr args outs
 
-@[reduce_ssa]
+@[reduce_soir]
 def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data × List data)}
   {args outs : List data} :
     Impl.bindType impl exprs args outs →
@@ -194,7 +194,7 @@ def evalType.bind {data : Type} {impl : data → Type} {exprs : List (List data 
   | expr :: exprs => fun op fs => bind (op (fs ⟨0, by simp⟩)) (fun i => fs i.succ)
 
 /-- We can evaluate an expression using some implementation -/
-@[reduce_ssa]
+@[reduce_soir]
 def Expr.eval {data : Type} {opType : OpType data} {args outs : List data}
   (impl : data → Type) [Impl opType impl] : Expr opType args outs → evalType impl args outs
   | nil => Curry.pure Index.null
@@ -213,16 +213,16 @@ inductive SimpleOp {data : Type} (op : List data → data → Type) : OpType dat
 class SimpleImpl {data : Type} (op : List data → data → Type) (impl : data → Type) where
   bind {args : List data} {out : data} : op args out → Curry impl args (impl out)
 
-attribute [reduce_ssa] Impl.bind SimpleImpl.bind
+attribute [reduce_soir] Impl.bind SimpleImpl.bind
 
-@[reduce_ssa]
+@[reduce_soir]
 instance SimpleOp.instImpl {data : Type} (op : List data → data → Type) (impl : data → Type)
   [SimpleImpl op impl] : Impl (SimpleOp op) impl where
   bind op :=
     match op with
     | simple op => (SimpleImpl.bind op).map Index.single
 
-@[reduce_ssa]
+@[reduce_soir]
 instance SimpleOp.instToString {data : Type} (op : List data → data → Type)
   [∀ args, ∀ outs, ToString (op args outs)] (exprs : List (List data × List data))
   (args outs : List data) : ToString (SimpleOp op exprs args outs) where
@@ -235,14 +235,14 @@ inductive CombineOp {data : Type} (op₀ op₁ : OpType data) : OpType data wher
   | right {exprs : List (List data × List data)} {args outs : List data} :
     op₁ exprs args outs → CombineOp op₀ op₁ exprs args outs
 
-@[reduce_ssa]
+@[reduce_soir]
 instance CombineOp.instImpl {data : Type} (op₀ op₁ : OpType data) (impl : data → Type)
   [Impl op₀ impl] [Impl op₁ impl] : Impl (CombineOp op₀ op₁) impl where
   bind
   | .left op
   | .right op => Impl.bind op
 
-@[reduce_ssa]
+@[reduce_soir]
 instance CombineOp.instToString {data : Type} {op₀ op₁ : OpType data}
   [∀ exprs, ∀ args outs, ToString (op₀ exprs args outs)]
   [∀ exprs, ∀ args outs, ToString (op₁ exprs args outs)] :
@@ -305,4 +305,4 @@ def Expr.id {data : Type} {op : OpType data} {args : List data} :
   | a :: args =>
     .append (.arg ⟨0, by simp⟩) <| Expr.id.succ
 
-end SSA
+end Soir

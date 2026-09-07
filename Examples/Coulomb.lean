@@ -1,4 +1,4 @@
-import SSA
+import Xla
 
 def diag_mask {n : ℕ} : SSA.Expr Xla.XlaOp [] [⟨.int, [n, n]⟩] :=
   let idx := Xla.iota n;

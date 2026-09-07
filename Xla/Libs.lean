@@ -1,9 +1,9 @@
-import SSA.Xla.Op
-import SSA.Xla.Meta
+import Xla.Op
+import Xla.Meta
 
 namespace Xla
 
-open SSA
+open Soir
 
 variable {args ins outs : List TensorType} {out : TensorType}
 

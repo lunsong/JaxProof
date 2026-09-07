@@ -5,14 +5,10 @@ import Mathlib.Algebra.Ring.Defs
 import Mathlib.Data.Nat.ModEq
 import Mathlib.GroupTheory.Perm.Cycle.Concrete
 import Batteries.Data.Fin.Lemmas
-import SSA.Curry
-import SSA.Meta
+import Soir.Curry
+import Xla.Meta
 
-namespace SSA
-
---def Tensor (R : Type) : List ℕ → Type
---  | [] => R
---  | n₀ :: ns => Fin n₀ → Tensor R ns
+namespace Soir
 
 abbrev Tensor (R : Type) (shape : List ℕ) : Type :=
   Curry Fin shape R
@@ -369,4 +365,4 @@ example (n₁ n₂ : ℕ) (x : Tensor ℝ [n₁, n₂]) (i : Fin n₁) (j : Fin 
   rw [Finset.sum_apply]
 
 
-end SSA
+end Soir

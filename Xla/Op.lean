@@ -1,5 +1,5 @@
-import SSA.Core
-import SSA.Tensor
+import Soir.Core
+import Xla.Tensor
 
 namespace Xla
 
@@ -35,7 +35,7 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   | bessel_i0e {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | bessel_i1e {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | broadcast {α : DType} (s : List (ℕ × Bool)) :
-    XlaPrimOp [⟨α, SSA.Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
+    XlaPrimOp [⟨α, Soir.Tensor.preBroadcast s⟩] ⟨α, s.map Prod.fst⟩
   | cbrt {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.float, s⟩
   | ceil {s : Shape} : XlaPrimOp [⟨.float, s⟩] ⟨.int, s⟩
   | cholesky {batch : Shape} {n : ℕ} :
@@ -114,7 +114,7 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
   --| tupleGet : ℕ → XlaPrimOp (some 1)
   --| anonTuple : XlaPrimOp none
 
-inductive XlaHigherOp : SSA.OpType TensorType where
+inductive XlaHigherOp : Soir.OpType TensorType where
   | repeat {carry aux : List TensorType} :
     XlaHigherOp [⟨carry ++ aux, carry⟩] (TensorType.scalar .int :: carry ++ aux) carry
   | vmap {args aux outs : List TensorType} {batch : ℕ} :
@@ -200,6 +200,6 @@ instance (exprs : List (List TensorType × List TensorType)) (args outs : List T
   | .repeat => "repeat"
   | .vmap => "vmap"
 
-abbrev XlaOp : SSA.OpType TensorType := SSA.CombineOp (SSA.SimpleOp XlaPrimOp) XlaHigherOp
+abbrev XlaOp : Soir.OpType TensorType := Soir.CombineOp (Soir.SimpleOp XlaPrimOp) XlaHigherOp
 
 end Xla

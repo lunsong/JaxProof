@@ -1,11 +1,11 @@
-import SSA.Core
-import SSA.Xla.Op
-import SSA.Xla.Meta
+import Soir.Core
+import Xla.Op
+import Xla.Meta
 import Mathlib.LinearAlgebra.Matrix.Determinant.Basic
 
 namespace Xla
 
-open SSA
+open Soir
 
 abbrev DType.impl : DType → Type
   | .float => ℝ

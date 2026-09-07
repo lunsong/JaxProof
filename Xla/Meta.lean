@@ -1,7 +1,7 @@
 import Lean
 
 open Lean Meta in
-initialize ReduceSSA : SimpExtension ← registerSimpAttr `reduce_ssa "unfold ssa evaluation"
+initialize ReduceXLA : SimpExtension ← registerSimpAttr `reduce_xla "unfold xla evaluation"
 
 open Lean Meta in
 initialize ReduceTensor : SimpExtension ← registerSimpAttr `reduce_tensor "unfold tensor evaluation"

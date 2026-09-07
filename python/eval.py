@@ -99,22 +99,6 @@ def _parse_args(arg_str: str) -> List[str]:
         return []
     return [p.strip() for p in arg_str.split(",")]
 
-
-def _lib_input_count(lib_body: List[Tuple[str, str]]) -> int:
-    """Count the number of inputs a library function expects (max $N + 1)."""
-    max_arg = -1
-    for lhs, rhs in lib_body:
-        if lhs == "return":
-            continue
-        if ";" not in rhs:
-            continue
-        _, arg_str = rhs.split(";", 1)
-        for a in _parse_args(arg_str):
-            if a.startswith("$"):
-                max_arg = max(max_arg, int(a[1:]))
-    return max_arg + 1
-
-
 def _lib_output_count(lib_body: List[Tuple[str, str]]) -> int:
     """Count the number of outputs a library function returns."""
     for lhs, rhs in lib_body:

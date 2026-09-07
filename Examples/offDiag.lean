@@ -1,4 +1,4 @@
-import SSA
+import Xla
 
 lemma sq_sub_one (n : ℕ) : n * n - 1 = (n - 1) * (n + 1) := by
   by_cases h : n = 0

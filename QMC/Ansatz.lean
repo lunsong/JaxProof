@@ -5,17 +5,27 @@ import Mathlib.Analysis.Calculus.ContDiff.Basic
 # `Ansatz.lean` — the validity contract for AI-generated QMC ansätze
 
 An ansatz written in the SSA/XLA DSL is *valid* if its mathematical semantics
-(`Xla.simpleEval`) satisfies `IsValidQMCWavefunction` below. The contract has exactly
-two fields; this docstring explains why two suffice, and where everything else went.
+(`Xla.simpleEval`) satisfies `IsValidQMCWavefunction` below. The contract has three
+fields — two anti-cheat proofs and one normalizability certificate; this docstring
+explains why these three, and where everything else went.
 
-## Design principle: prove only what cheats
+## Design principle: prove only what cheats — or what is cheaper to prove than to monitor
 
-A requirement earns its per-candidate proof cost only if violating it yields a
-*spuriously low* energy that Monte Carlo converges to **silently** — poisoning the
-ansatz search. A requirement whose violation merely raises the energy, or makes Monte
-Carlo diverge loudly (NaN, drift), is self-punishing: the fitness function rejects the
-offender on its own. Those are policed by cheap runtime monitors (`pfnet/monitor.py`),
-not by proofs. Under this criterion exactly two conditions survive.
+A requirement earns its per-candidate proof cost in one of two ways:
+
+1. **Silent cheats must be proved.** Violating them yields a *spuriously low* energy
+   that Monte Carlo converges to **silently** — poisoning the ansatz search. No
+   statistical test can substitute. Exactly two conditions are of this kind
+   (`antisymmetric`, `smooth` below).
+
+2. **Loud failures are monitored — unless a uniform compositional proof is cheaper
+   than eternal heuristic monitoring.** Violating them raises the energy or breaks
+   Monte Carlo loudly (NaN, drift), so the fitness function is the validator, and
+   `pfnet/monitor.py` is the backstop. One condition is so cheap to prove — by
+   structural recursion over the DSL program — that proving it beats monitoring it
+   forever (`exp_decay` below).
+
+Everything else stays out of the contract and is monitored at runtime.
 
 ## Cheat 1 — broken antisymmetry: bosonic collapse
 
@@ -75,18 +85,49 @@ across the interfaces".
 * `mod`, `gather`, `iota`: piecewise constant in continuous arguments — only on
   integer data (`Z_nuc`, indices), never on electron coordinates.
 
+## Tier 2 — `exp_decay`: a normalizability certificate, proved because it is cheap
+
+Square-integrability failures are *loud* eventually (no stationary distribution),
+but finite Monte Carlo runs fake convergence — walkers drift to infinity under a
+growing `Ψ` (`E_L → -∞` quadratically), or collapse onto a non-integrable spike and
+sit in long "settled" epochs. The monitors in `pfnet/monitor.py` catch this
+heuristically, per training run. The exponential envelope upgrades the same guarantee
+to a theorem — `Ψ ∈ L²`, boundedness, and vanishing at infinity all follow from it —
+because it is one uniform field covering *both* failure modes, and because per-candidate
+proofs are structural recursion rather than analysis:
+
+* orbitals `exp(-ζ‖x-R‖²)`: Gaussians beat any exponential (`e^{-ζr²} ≤ C e^{-kr}`),
+  with `k(θ) > 0` automatic under the exp/softplus reparameterization rule;
+* determinants: Hadamard's inequality `|det M| ≤ ∏ᵢ ‖row i‖` turns per-orbital
+  envelopes into a determinant envelope (`n!` into `C`, min-orbital decay into `k`);
+* products multiply envelopes (`k`s add), sums add them (`k` takes the min), bounded
+  Jastrow factors (tanh MLPs) only inflate `C`;
+* `C` and `k` are existential, so proofs never need tight rates.
+
+Three design notes:
+
+* **Per-`θ` constants, not uniform-in-`θ`.** `Ansatz.isValid` quantifies over all
+  parameters, so each `θ` gets its own `C, k`: `k(θ)` may shrink as training pushes
+  widths toward zero without ever breaking validity. A uniform-in-`θ` bound would be
+  false for exactly the families we want.
+* **Norm choice is immaterial** — all norms on a finite-dimensional space are
+  equivalent, which only rescales `k`.
+* **Physically non-restrictive**: bound states decay exponentially
+  (Agmon/Combes–Thomas), so every ansatz family worth finding has an envelope. The
+  only excluded families are rational-decay ones (`(1+r²)^{-α}`), which would be
+  rejected on variance grounds anyway.
+
+What the envelope does *not* buy: it constrains **amplitude, not frequency**.
+`e^{-|x|}·sin(e^{x²})` satisfies it while `∇Ψ, ΔΨ` grow like `e^{x²}` — kinetic
+energy `+∞`, local energy not integrable. Those failures remain monitored
+(finiteness/stationarity checks), and the drift/collapse monitors stay on as
+defense-in-depth guarding the executable (which Lean cannot see).
+
 ## Not in the structure, and why (monitored in `pfnet/monitor.py` instead)
 
-* **`Ψ ∈ L²`**: at infinite time self-punishing (no stationary distribution), but
-  *finite* runs fake convergence — walkers drift to infinity under a growing `Ψ`
-  (`E_L → -∞` quadratically), or collapse onto a non-integrable spike and sit in
-  long "settled" epochs. Monitored: walker-radius drift, walker-spread collapse,
-  energy stationarity.
 * **`∇Ψ ∈ L²`, `ΨΔΨ ∈ L¹`**: true energy `+∞`, or the `E_L` mean fails to settle;
   trips the local-energy finiteness check or the grad-clip assert
-  (`pfnet/qmc.py:update`).
-* **vanishing at infinity**: the variational principle for `H¹` functions never
-  needs it; spikes at infinity carry vanishing sampling mass.
+  (`pfnet/qmc.py:update`). (Not implied by the envelope — see above.)
 * **θ-differentiability**: bad parameter gradients only slow optimization; energy
   evaluation is unaffected.
 * **nodes of positive measure / flat zero regions**: the sampler never accepts moves
@@ -127,10 +168,12 @@ def IsAntisymmetric {n₁ n₂ : ℕ} (Ψ : Wavefunction n₁ n₂) : Prop :=
   ∀ (σ₁ : Equiv.Perm (Fin n₁)) (σ₂ : Equiv.Perm (Fin n₂)), ∀ x₁ x₂,
     Ψ (x₁ ∘ σ₁) (x₂ ∘ σ₂) = σ₁.sign • σ₂.sign • Ψ x₁ x₂
 
-/-- The validity contract: exactly the two properties whose violation is a *silent*
+/-- The validity contract. Tier 1: the two properties whose violation is a *silent*
 cheat that Monte Carlo converges to (bosonic collapse; AD dropping distributional
-deltas). Everything else is self-punishing under Monte Carlo and is monitored at
-runtime in `pfnet/monitor.py`. See the module docstring for the full analysis. -/
+deltas). Tier 2: a normalizability certificate that is cheaper to prove
+compositionally than to monitor heuristically. Everything else is self-punishing
+under Monte Carlo and is monitored at runtime in `pfnet/monitor.py`. See the module
+docstring for the full analysis. -/
 structure IsValidQMCWavefunction {n₁ n₂ : ℕ} (Ψ : Wavefunction n₁ n₂) : Prop where
   /-- Pauli principle in both spin sectors: without it, sampling silently converges
   to a bosonic/mixed-symmetry energy below the fermionic ground state. -/
@@ -140,6 +183,13 @@ structure IsValidQMCWavefunction {n₁ n₂ : ℕ} (Ψ : Wavefunction n₁ n₂)
   distributional `ΔΨ` has no singular part, i.e. `Ψ ∈ W^{2,1}_loc`; C² is the
   provable sufficient condition.) -/
   smooth : ContDiff ℝ 2 (Function.uncurry Ψ)
+  /-- Normalizability certificate: a uniform exponential envelope. Implies
+  `Ψ ∈ L²` (both growth and spike failure modes excluded), boundedness, and
+  vanishing at infinity — the conditions the drift/collapse monitors in
+  `pfnet/monitor.py` guard dynamically. Constrains amplitude, not frequency:
+  derivative growth is NOT bounded by this field and remains monitored. -/
+  exp_decay : ∃ C k : ℝ, 0 < k ∧
+    ∀ x, |Function.uncurry Ψ x| ≤ C * Real.exp (-k * ‖x‖)
 
 /-- Wavefunction ansatz. The parameter is a 1D vector. An ansatz should support different
 numbers of atoms and electrons -/
