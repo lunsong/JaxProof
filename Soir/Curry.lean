@@ -190,6 +190,32 @@ theorem Index.cons_two {γ₀ γ₁ γ₂ : ι} {γ : List ι} (x₀ : m γ₀)
 theorem Index.cons_succ {γ₀ : ι} {γ : List ι} (x₀ : m γ₀) (x : Index m γ) (r : Fin γ.length) :
     Index.cons x₀ x r.succ = x r := rfl
 
+/-- `Index.replicate` at any position of a singleton list is the single element.
+Stated with the list in cons form and the count as `[i].length` so that `simp`
+matching is purely syntactic (at instance-implicit transparency `List.length` and
+`List.replicate` do not compute). Positions that are Fin literals are instead
+handled definitionally by the `reduceIndexReplicate` dsimproc. -/
+@[reduce_soir]
+theorem Index.replicate_one {i : ι} (x : Index m [i]) (r : Fin [i].length) :
+    Index.replicate (n := [i].length) x r = x ⟨0, by simp⟩ := by
+  obtain ⟨r, hr⟩ := r
+  have hr : r < 1 := hr
+  obtain rfl : r = 0 := Nat.lt_one_iff.mp hr
+  rfl
+
+/-- Extensionality for `Index` over a singleton list. Reduces `Index` equalities
+(which arise e.g. as the `Fin.find?` predicate in `DirectImpl.scatter`) to
+pointwise equalities at `0`, where the `reduceIndex*` simprocs can compute. -/
+@[reduce_soir]
+theorem Index.ext_one {i : ι} {f g : Index m [i]} :
+    f = g ↔ f ⟨0, by simp⟩ = g ⟨0, by simp⟩ := by
+  constructor
+  · intro h; rw [h]
+  · intro h; funext ⟨r, hr⟩
+    have hr : r < 1 := hr
+    obtain rfl : r = 0 := Nat.lt_one_iff.mp hr
+    exact h
+
 @[reduce_soir]
 theorem Index.append_null {γ : List ι} (y : Index m γ) : Index.append Index.null y = y := rfl
 
@@ -379,8 +405,28 @@ dsimproc reduceIndexMap (Index.map _ _) := Index.reduceCore
 /-- Reduce `Index.unmap a i` at a literal position `i`. -/
 dsimproc reduceIndexUnmap (Index.unmap _ _) := Index.reduceCore
 
+open Lean Meta Simp in
+/-- Core of `reduceIndexReplicate`: `e` is `Index.replicate x i` where the replicate
+count computes to a literal `n` and `i` is a `Fin` literal `k`. Then
+`Index.replicate x i` is definitionally `x ⟨k % n, _⟩`; navigate `x` at that position.
+A non-literal `i` on a singleton list is instead handled by the `Index.replicate_one`
+rewrite (a genuine proof obligation: the match on `i` is stuck, so the reduction is
+not definitional). -/
+private def Index.reduceReplicateCore (e : Expr) : SimpM DStep := do
+  let args := e.getAppArgs
+  unless args.size == 6 do return .continue
+  let some len ← getNatValue? (← Index.reduceD args[3]!) | return .continue
+  unless len > 0 do return .continue
+  let some k ← getFinVal? args[5]! | return .continue
+  let some v ← nav args[4]! (k % len) true | return .continue
+  if v == e then return .continue
+  return .visit v
+
+/-- Reduce `Index.replicate a i` at a literal position `i`. -/
+dsimproc reduceIndexReplicate (Index.replicate _ _) := Index.reduceReplicateCore
+
 attribute [reduce_soir] reduceIndexCons reduceIndexAppend reduceIndexSingle
-  reduceIndexMap reduceIndexUnmap
+  reduceIndexMap reduceIndexUnmap reduceIndexReplicate
 
 open Lean Meta Simp in
 /-- Core of `reduceCurryGet`: `e` is `Curry.get f i` with `i : Index m γ` for a

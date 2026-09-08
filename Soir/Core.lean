@@ -216,6 +216,7 @@ instance CombineOp.instToString {data : Type} {op₀ op₁ : OpType data}
     toString x := match x with | .left op | .right op => toString op
   }
 
+@[reduce_soir]
 def Expr.join {data : Type} {op : OpType data} {args outs : List data} :
     Curry (fun α ↦ Expr op args [α]) outs (Expr op args outs) :=
   match outs with
