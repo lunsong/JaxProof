@@ -1,10 +1,11 @@
-import SSA
+import Xla
 
-def permInv {n : ℕ} :=
-  ssa Xla.XlaOp with
-    x : ⟨.int, [n]⟩
-  begin
-    return Xla.scatter (Xla.ofNat (out := ⟨.int, [n]⟩) 0) (Xla.iota n) x
+def permInv {n : ℕ} :
+  Xla.SimpleExpr
+    [⟨.int, [n]⟩]
+    ⟨.int, [n]⟩ :=
+  Soir.Expr.ofFn fun x =>
+    Xla.scatter (Xla.ofNat (out := ⟨.int, [n]⟩) 0) (Xla.iota n) x
 
 #eval IO.println (permInv (n := 10)).code
 /-
@@ -16,8 +17,12 @@ return %2
 
 
 
-example (n : ℕ) (hn : n ≠ 0) (σ : Equiv.Perm (Fin n)) :
-    permInv.eval Xla.DirectImpl (fun i => σ i) = Index.single (fun i => (σ.symm i : ℤ)) := by
+example (n : ℕ) (σ : Equiv.Perm (Fin n)) :
+    permInv.eval (fun i => σ i) = fun i => (σ.symm i : ℤ) := by
+  ext i
+  have hn := Nat.ne_zero_of_lt i.isLt
+  simp [permInv, reduce_xla, reduce_soir, hn]
+/-
   simp only [permInv, Xla.scatter, List.length_cons, List.length_nil, Nat.reduceAdd,
     List.replicate_one, Xla.bindPrim, Fin.getElem_fin, List.cons_append, List.nil_append, Xla.iota,
     Curry.get, Fin.zero_eta, Fin.isValue, Curry.of, SSA.Expr.eval, Curry.map, SSA.evalType.bind,
@@ -52,4 +57,4 @@ example (n : ℕ) (hn : n ≠ 0) (σ : Equiv.Perm (Fin n)) :
     rwa [Equiv.eq_symm_apply]
   -- `simp [this]` would raise: Don't know how to synthesize place holder
   rw [this]
-
+-/
