@@ -1,16 +1,32 @@
-import SSA
+import Xla
 
-theorem Index.single_zero {ι : Type} {m : ι → Type} {i : ι} {x : m i} : Index.single x 0 = x := rfl
-
-def embed (n_species embed_dim : ℕ) :=
-  ssa Xla.XlaOp with
-    x : ⟨.int, []⟩,
-    θ : ⟨.float, [n_species, embed_dim]⟩
-  begin
-    let x := Xla.broadcast [⟨embed_dim, false⟩] x;
-    let_expr i : [⟨.int, [embed_dim]⟩] := Xla.iota embed_dim;
+def embed (n n_species embed_dim : ℕ) :
+  Xla.SimpleExpr
+    [⟨.int, [n]⟩, ⟨.float, [n_species, embed_dim]⟩]
+    ⟨.float, [n, embed_dim]⟩ :=
+  Soir.Expr.ofFn fun x θ ↦
+    let x := Xla.broadcast [⟨n, true⟩, ⟨embed_dim, false⟩] x;
+    let i := Xla.broadcast [⟨n, false⟩, ⟨embed_dim, true⟩] <| Xla.iota embed_dim;
     let y := Xla.gather θ (x.append i);
-    return y
+    y
+
+#eval IO.println (@embed 10 20 30).code
+
+def embed_def
+  {n n_species embed_dim : ℕ} [NeZero n_species]
+  (x : Fin n → ℤ)
+  (θ : Fin n_species → Fin embed_dim → ℝ)
+  (i : Fin n) (k : Fin embed_dim) : ℝ :=
+  θ (Fin.intCast (x i)) k
+
+theorem embed_eq_def
+  {n n_species embed_dim : ℕ} [inst : NeZero n_species] :
+  (embed n n_species embed_dim).eval = embed_def := by
+  ext x θ i j
+  have : embed_dim ≠ 0 := Nat.ne_zero_of_lt j.isLt
+  simp [embed, reduce_xla, reduce_soir, reduce_tensor, embed_def, inst.ne, this]
+
+/-
 
 def pairwise_offset {n_atom : ℕ} :=
   ssa Xla.XlaOp with
@@ -343,3 +359,5 @@ theorem SchNet_permutation_equivariant
   · simp
 
 -/
+-/
+

@@ -140,9 +140,9 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | cbrt => "cbrt"
   | ceil => "ceil"
   | cholesky => "cholesky"
-  | concat => "concat"
+  | concat (axis := axis) => s!"concat {axis}"
   | conv => "conv"
-  | convert_type => "convert_type"
+  | convert_type (α := α) (β := β) => s!"convert_type {α} {β}"
   | cos => "cos"
   | cosh => "cosh"
   | cumlogsumexp axis reverse => s!"cumlogsumexp {axis} {reverse}"
@@ -198,7 +198,7 @@ instance (exprs : List (List TensorType × List TensorType)) (args outs : List T
     ToString (XlaHigherOp exprs args outs) where
   toString op := match op with
   | .repeat => "repeat"
-  | .vmap => "vmap"
+  | .vmap (args := args) => s!"vmap {args.length}"
 
 abbrev XlaOp : Soir.OpType TensorType := Soir.CombineOp (Soir.SimpleOp XlaPrimOp) XlaHigherOp
 

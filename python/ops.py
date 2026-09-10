@@ -3,8 +3,16 @@ Operation handlers for the SSA XLA IR evaluator.
 
 Each handler is registered via @register_op(name) from eval.py.
 Importing this module automatically populates the operation registry.
+
+Handlers receive:
+    op_str      the full op string (e.g. "transpose [1, 0]")
+    vals        resolved non-library arguments, in order
+    lib_refs    indices of `@i` library arguments, in order
+    libs        all parsed library bodies
+    parent_args the `$i` arguments of the enclosing body
 """
 
+import ast
 import re
 import jax
 import jax.numpy as jnp
@@ -14,7 +22,7 @@ from eval import register_op, eval_body, _lib_output_count
 
 
 # ---------------------------------------------------------------------------
-# Operation helpers
+# Parsing helpers
 # ---------------------------------------------------------------------------
 
 _DTYPE_MAP = {
@@ -23,48 +31,57 @@ _DTYPE_MAP = {
 }
 
 
+def _parse_shape(shape_str: str) -> tuple:
+    return tuple(int(x) for x in shape_str.strip("[]").split(",") if x.strip())
+
+
+def _parse_bool(s: str) -> bool:
+    s = s.strip().lower()
+    if s not in ("true", "false"):
+        raise ValueError(f"Expected 'true' or 'false', got {s!r}")
+    return s == "true"
+
+
+def _opt_int(parts, i, default=None):
+    """Optional integer parameter: new-style IR prints it, legacy IR omits it."""
+    return int(parts[i]) if len(parts) > i else default
+
+
+# ---------------------------------------------------------------------------
+# Operation helpers
+# ---------------------------------------------------------------------------
+
 def _eval_const(dtype_str: str, shape_str: str, val_str: str):
     dtype = _DTYPE_MAP.get(dtype_str, jnp.float32)
-    shape = tuple(int(x) for x in shape_str.strip("[]").split(",") if x.strip())
-    val = int(val_str)
-    return jnp.full(shape, val, dtype=dtype)
+    return jnp.full(_parse_shape(shape_str), int(val_str), dtype=dtype)
 
 
 def _eval_zeros(dtype_str: str, shape_str: str):
     dtype = _DTYPE_MAP.get(dtype_str, jnp.float32)
-    shape = tuple(int(x) for x in shape_str.strip("[]").split(",") if x.strip())
-    return jnp.zeros(shape, dtype=dtype)
-
-
-def _eval_iota(n: int):
-    return jnp.arange(n, dtype=jnp.int32)
+    return jnp.zeros(_parse_shape(shape_str), dtype=dtype)
 
 
 def _eval_transpose(perm_str: str, x):
-    perm = tuple(int(x.strip()) for x in perm_str.strip("[]").split(",") if x.strip())
-    return jnp.transpose(x, axes=perm)
+    return jnp.transpose(x, axes=_parse_shape(perm_str))
 
 
 def _eval_dot_general(contract_len: int, batch_len: int, x, y):
-    C = contract_len
-    B = batch_len
-    lhs_contract = tuple(range(C))
-    rhs_contract = tuple(range(C))
-    lhs_batch = tuple(range(C, C + B))
-    rhs_batch = tuple(range(C, C + B))
-    dimension_numbers = ((lhs_contract, rhs_contract), (lhs_batch, rhs_batch))
+    C, B = contract_len, batch_len
+    dimension_numbers = (
+        (tuple(range(C)), tuple(range(C))),                    # contracting dims
+        (tuple(range(C, C + B)), tuple(range(C, C + B))),      # batch dims
+    )
     return jax.lax.dot_general(x, y, dimension_numbers=dimension_numbers)
 
 
 def _eval_broadcast_impl(bools_str: str, x):
-    bools = [p.strip().lower() == "true" for p in bools_str.strip("[]").split(",") if p.strip()]
+    bools = [_parse_bool(p) for p in bools_str.strip("[]").split(",") if p.strip()]
     n_input_dims = sum(bools)
     if n_input_dims != x.ndim:
         raise ValueError(
             f"Broadcast: input has {x.ndim} dims but bools {bools} expect {n_input_dims}"
         )
-    new_shape = []
-    input_dim = 0
+    new_shape, input_dim = [], 0
     for keep in bools:
         if keep:
             new_shape.append(x.shape[input_dim])
@@ -76,21 +93,32 @@ def _eval_broadcast_impl(bools_str: str, x):
 
 def _eval_scatter(x, y, indices):
     """
-    Scatter with Lean semantics: first matching update wins.
-    We iterate in reverse so that earlier updates overwrite later ones.
+    Scatter with Lean semantics (`DirectImpl.scatter`): the *first* matching
+    update wins. Vectorized in two steps: for each target slot, find the
+    smallest update index writing to it (an order-independent min-reduction),
+    then select between that update and the original value.
     """
-    out = jnp.array(x)
     n = y.shape[0]
-    ndim = len(indices)
-    for k in reversed(range(n)):
-        idx = tuple(int(indices[d][k]) for d in range(ndim))
-        out = out.at[idx].set(y[k])
-    return out
+    if n == 0:
+        return x
+    idx = tuple(jnp.asarray(i) for i in indices)
+    winner = jnp.full(x.shape, n, dtype=jnp.int32).at[idx].min(
+        jnp.arange(n, dtype=jnp.int32)
+    )
+    update = y[jnp.minimum(winner, n - 1)]
+    return jnp.where(winner < n, update, x)
 
 
 def _eval_gather(x, indices):
-    idx = tuple(indices)
-    return x[idx]
+    return x[tuple(jnp.asarray(i) for i in indices)]
+
+
+def _apply_cum(op, x, axis: int, reverse: bool):
+    """Cumulative op with optional reversal (scan from the right)."""
+    if reverse:
+        x = jnp.flip(x, axis=axis)
+    out = op(x, axis=axis)
+    return jnp.flip(out, axis=axis) if reverse else out
 
 
 # ---------------------------------------------------------------------------
@@ -101,26 +129,29 @@ def _eval_gather(x, indices):
 
 @register_op("const")
 def _eval_const_op(op_str, vals, lib_refs, libs, parent_args):
-    m = re.match(r"const\s+(\S+)\s+(\[.*?\])\s+(\S+)", op_str)
+    m = re.fullmatch(r"const\s+(\S+)\s+(\[.*?\])\s+(\S+)", op_str)
     if not m:
         raise ValueError(f"Invalid const op: {op_str!r}")
-    dtype, shape_str, val_str = m.groups()
-    return _eval_const(dtype, shape_str, val_str)
+    return _eval_const(*m.groups())
 
 
 @register_op("zeros")
 def _eval_zeros_op(op_str, vals, lib_refs, libs, parent_args):
-    m = re.match(r"zeros\s+(\S+)\s+(\[.*?\])", op_str)
+    m = re.fullmatch(r"zeros\s+(\S+)\s+(\[.*?\])", op_str)
     if not m:
         raise ValueError(f"Invalid zeros op: {op_str!r}")
-    dtype, shape_str = m.groups()
-    return _eval_zeros(dtype, shape_str)
+    return _eval_zeros(*m.groups())
 
 
 @register_op("iota")
 def _eval_iota_op(op_str, vals, lib_refs, libs, parent_args):
-    n = int(op_str.split()[1])
-    return _eval_iota(n)
+    return jnp.arange(int(op_str.split()[1]), dtype=jnp.int32)
+
+
+@register_op("empty")
+def _eval_empty(op_str, vals, lib_refs, libs, parent_args):
+    # The IR does not encode shape/dtype for `empty`.
+    raise ValueError("empty: cannot determine shape/dtype from IR alone")
 
 
 # -- Element-wise unary ------------------------------------------------------
@@ -159,6 +190,8 @@ def _eval_tanh(op_str, vals, lib_refs, libs, parent_args):
 
 @register_op("ceil")
 def _eval_ceil(op_str, vals, lib_refs, libs, parent_args):
+    # Note: the Lean op signature declares an int output; kept as float here
+    # to preserve differentiability (XLA `ceil` semantics).
     x, = vals; return jnp.ceil(x)
 
 @register_op("floor")
@@ -288,10 +321,12 @@ def _eval_sum(op_str, vals, lib_refs, libs, parent_args):
 
 @register_op("cumsum")
 def _eval_cumsum(op_str, vals, lib_refs, libs, parent_args):
+    # `Tensor.cumsum` recurses to the innermost axis.
     x, = vals
     if x.ndim == 0:
         return x
     return jnp.cumsum(x, axis=-1)
+
 
 @register_op("argmax")
 def _eval_argmax(op_str, vals, lib_refs, libs, parent_args):
@@ -299,68 +334,104 @@ def _eval_argmax(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
     return jnp.argmax(x, axis=axis).astype(jnp.int32)
 
+
 @register_op("argmin")
 def _eval_argmin(op_str, vals, lib_refs, libs, parent_args):
     axis = int(op_str.split()[1])
     x, = vals
     return jnp.argmin(x, axis=axis).astype(jnp.int32)
 
+
+def _cum_parts(op_str, default_axis=-1):
+    parts = op_str.split()
+    axis = int(parts[1]) if len(parts) > 1 else default_axis
+    reverse = _parse_bool(parts[2]) if len(parts) > 2 else False
+    return axis, reverse
+
+
 @register_op("cummax")
 def _eval_cummax(op_str, vals, lib_refs, libs, parent_args):
-    parts = op_str.split()
-    axis = int(parts[1])
+    axis, reverse = _cum_parts(op_str)
     x, = vals
-    return jnp.maximum.accumulate(x, axis=axis)
+    return _apply_cum(jnp.maximum.accumulate, x, axis, reverse)
+
 
 @register_op("cummin")
 def _eval_cummin(op_str, vals, lib_refs, libs, parent_args):
-    parts = op_str.split()
-    axis = int(parts[1])
+    axis, reverse = _cum_parts(op_str)
     x, = vals
-    return jnp.minimum.accumulate(x, axis=axis)
+    return _apply_cum(jnp.minimum.accumulate, x, axis, reverse)
+
 
 @register_op("cumprod")
 def _eval_cumprod(op_str, vals, lib_refs, libs, parent_args):
-    parts = op_str.split()
-    axis = int(parts[1])
+    axis, reverse = _cum_parts(op_str)
     x, = vals
-    return jnp.cumprod(x, axis=axis)
+    return _apply_cum(jnp.cumprod, x, axis, reverse)
+
 
 @register_op("cumlogsumexp")
 def _eval_cumlogsumexp(op_str, vals, lib_refs, libs, parent_args):
-    parts = op_str.split()
-    axis = int(parts[1])
+    axis, reverse = _cum_parts(op_str)
     x, = vals
-    return jnp.log(jnp.cumsum(jnp.exp(x), axis=axis))
+    def lse(a, axis):
+        c = jnp.cumsum(jnp.exp(a), axis=axis)
+        return jnp.log(c)
+    return _apply_cum(lse, x, axis, reverse)
 
 
 # -- Shape manipulation ------------------------------------------------------
 
 @register_op("transpose")
 def _eval_transpose_op(op_str, vals, lib_refs, libs, parent_args):
-    perm_str = op_str[len("transpose "):]
     x, = vals
-    return _eval_transpose(perm_str, x)
-
-
-@register_op("broadcast")
-def _eval_broadcast_typo(op_str, vals, lib_refs, libs, parent_args):
-    bools_str = op_str[len("broadcast "):]
-    x, = vals
-    return _eval_broadcast_impl(bools_str, x)
+    return _eval_transpose(op_str[len("transpose "):], x)
 
 
 @register_op("broadcast")
 def _eval_broadcast(op_str, vals, lib_refs, libs, parent_args):
-    bools_str = op_str[len("broadcast "):]
     x, = vals
-    return _eval_broadcast_impl(bools_str, x)
+    return _eval_broadcast_impl(op_str[len("broadcast "):], x)
 
 
 @register_op("concat")
 def _eval_concat(op_str, vals, lib_refs, libs, parent_args):
-    xs = vals
-    return jnp.concatenate(xs, axis=0)
+    parts = op_str.split()
+    axis = _opt_int(parts, 1, default=0)  # legacy IR omits the axis
+    return jnp.concatenate(vals, axis=axis)
+
+
+@register_op("flatten")
+def _eval_flatten(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    return x.reshape(-1)
+
+
+@register_op("unflatten")
+def _eval_unflatten(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    return x.reshape(_parse_shape(op_str[len("unflatten "):]))
+
+
+@register_op("id")
+def _eval_id(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    return x
+
+
+@register_op("convert_type")
+def _eval_convert_type(op_str, vals, lib_refs, libs, parent_args):
+    x, = vals
+    parts = op_str.split()
+    if len(parts) >= 3:      # new-style: "convert_type <src> <dst>"
+        return x.astype(_DTYPE_MAP[parts[2]])
+    if len(parts) == 2:      # "convert_type <dst>"
+        return x.astype(_DTYPE_MAP[parts[1]])
+    # Legacy IR does not encode the target dtype; fall back to the
+    # direction implied by the input dtype.
+    if jnp.issubdtype(x.dtype, jnp.integer):
+        return x.astype(jnp.float32)
+    return x.astype(jnp.int32)
 
 
 # -- Linear algebra ----------------------------------------------------------
@@ -370,54 +441,66 @@ def _eval_cholesky(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
     return jnp.linalg.cholesky(x)
 
+
 @register_op("det")
 def _eval_det(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
     return jnp.linalg.det(x)
 
+
 @register_op("eigvals")
 def _eval_eigvals(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
-    w = jnp.linalg.eigvals(x)
-    return w.astype(jnp.float32)
+    return jnp.linalg.eigvals(x).astype(jnp.float32)
+
 
 @register_op("eigvalsh")
 def _eval_eigvalsh(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
     return jnp.linalg.eigvalsh(x).astype(jnp.float32)
 
+
 @register_op("eigvecs")
 def _eval_eigvecs(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
-    w, v = jnp.linalg.eig(x)
+    _, v = jnp.linalg.eig(x)
     return v.astype(jnp.float32)
+
 
 @register_op("eigvecsh")
 def _eval_eigvecsh(op_str, vals, lib_refs, libs, parent_args):
     x, = vals
-    w, v = jnp.linalg.eigh(x)
+    _, v = jnp.linalg.eigh(x)
     return v.astype(jnp.float32)
 
-@register_op("convert_type")
-def _eval_convert_type(op_str, vals, lib_refs, libs, parent_args):
-    x, = vals
-    # IR doesn't encode target dtype; default to float32 for int->float
-    if jnp.issubdtype(x.dtype, jnp.integer):
-        return x.astype(jnp.float32)
-    return x.astype(jnp.int32)
-
-@register_op("empty")
-def _eval_empty(op_str, vals, lib_refs, libs, parent_args):
-    # IR doesn't encode shape/dtype; this is a placeholder
-    raise ValueError("empty: cannot determine shape/dtype from IR alone")
 
 @register_op("dot_general")
 def _eval_dot_general_op(op_str, vals, lib_refs, libs, parent_args):
     parts = op_str.split()
-    contract_len = int(parts[1])
-    batch_len = int(parts[2])
     x, y = vals
-    return _eval_dot_general(contract_len, batch_len, x, y)
+    return _eval_dot_general(int(parts[1]), int(parts[2]), x, y)
+
+
+@register_op("einsum")
+def _eval_einsum(op_str, vals, lib_refs, libs, parent_args):
+    """Format: `einsum [[i,j,...], [k,l,...], ...] n; arg1, arg2, ...`
+
+    Contracts the first `n` axes of the ambient shape; the remaining axes
+    (in order) form the output. Uses opt_einsum-style operand notation so
+    axis labels never run out of letters.
+    """
+    m = re.fullmatch(r"einsum\s+(\[.*\])\s+(\d+)", op_str)
+    if not m:
+        raise ValueError(f"Invalid einsum op: {op_str!r}")
+    specs = ast.literal_eval(m.group(1))
+    nsum = int(m.group(2))
+
+    max_idx = max((i for spec in specs for i in spec), default=-1)
+    operands = []
+    for arg, spec in zip(vals, specs):
+        operands += [arg, list(spec)]
+    operands.append(list(range(nsum, max_idx + 1)))
+    return jnp.einsum(*operands)
 
 
 # -- Selection & indexing ----------------------------------------------------
@@ -430,14 +513,12 @@ def _eval_where(op_str, vals, lib_refs, libs, parent_args):
 
 @register_op("scatter")
 def _eval_scatter_op(op_str, vals, lib_refs, libs, parent_args):
-    arr = vals
-    return _eval_scatter(arr[0], arr[1], arr[2:])
+    return _eval_scatter(vals[0], vals[1], vals[2:])
 
 
 @register_op("gather")
 def _eval_gather_op(op_str, vals, lib_refs, libs, parent_args):
-    arr = vals
-    return _eval_gather(arr[0], arr[1:])
+    return _eval_gather(vals[0], vals[1:])
 
 
 @register_op("sorted")
@@ -450,106 +531,51 @@ def _eval_sorted(op_str, vals, lib_refs, libs, parent_args):
 
 @register_op("repeat")
 def _eval_repeat(op_str, vals, lib_refs, libs, parent_args):
-    lib_idx = lib_refs[0]
-    count = vals[0]
-    inputs = vals[1:]
-    lib_body = libs[lib_idx]
+    """`repeat; @f, n, carry..., aux...` — iterate `f` |n| times on the carry.
+
+    The carry size is read off the library's return arity. Uses
+    `jax.lax.fori_loop`, so the trip count may be a traced value.
+    """
+    lib_body = libs[lib_refs[0]]
+    count = jnp.abs(jnp.asarray(vals[0]))
     carry_size = _lib_output_count(lib_body)
-    init_carry = inputs[:carry_size]
-    aux = inputs[carry_size:]
+    init_carry = vals[1:1 + carry_size]
+    aux = vals[1 + carry_size:]
 
     def body_fn(i, carry):
         carry_args = [carry] if carry_size == 1 else list(carry)
-        all_args = carry_args + list(aux)
-        result = eval_body(lib_body, libs, all_args)
-        if len(result) == 1:
-            return result[0]
-        return tuple(result)
+        result = eval_body(lib_body, libs, carry_args + list(aux))
+        return result[0] if carry_size == 1 else tuple(result)
 
-    count_int = int(jnp.asarray(count).item())
     init = init_carry[0] if carry_size == 1 else tuple(init_carry)
-    result = jax.lax.fori_loop(0, count_int, body_fn, init)
-    if carry_size == 1:
-        return result
-    return list(result)
+    result = jax.lax.fori_loop(0, count, body_fn, init)
+    return result if carry_size == 1 else list(result)
 
 
 @register_op("vmap")
 def _eval_vmap(op_str, vals, lib_refs, libs, parent_args):
-    """Vectorize a library function over the leading axis of inputs."""
-    lib_idx = lib_refs[0]
-    inputs = vals
-    lib_body = libs[lib_idx]
-    
-    if not inputs:
-        return eval_body(lib_body, libs, [])
-    
-    batch_size = int(inputs[0].shape[0])
-    results = []
-    
-    for i in range(batch_size):
-        slice_args = [inp[i] for inp in inputs]
-        result = eval_body(lib_body, libs, slice_args)
-        if len(result) == 1:
-            results.append(result[0])
-        else:
-            results.append(tuple(result))
-    
-    if not results:
-        return results
-    if isinstance(results[0], tuple):
-        return [jnp.stack([r[j] for r in results], axis=0) for j in range(len(results[0]))]
-    return jnp.stack(results, axis=0)
+    """`vmap k; @f, batched..., aux...` — map `f` over the leading axis of
+    the first `k` inputs; the rest are passed through unchanged.
 
+    Legacy IR omits `k`; then every input is treated as batched.
+    """
+    parts = op_str.split()
+    n_batched = _opt_int(parts, 1, default=len(vals))
+    batched, aux = vals[:n_batched], vals[n_batched:]
+    lib_body = libs[lib_refs[0]]
 
-@register_op("einsum")
-def _eval_einsum(op_str, vals, lib_refs, libs, parent_args):
-    """Parse einsum spec and evaluate using JAX."""
-    # Format: einsum [[i,j,...], [k,l,...], ...] n; arg1, arg2, ...
-    m = re.match(r"einsum\s+(\[\[.*\]\])\s+(\d+)", op_str)
-    if not m:
-        raise ValueError(f"Invalid einsum op: {op_str!r}")
-    
-    specs_str = m.group(1)
-    nsum = int(m.group(2))
-    
-    # Parse specs: [[2,1], [1,0], ...]
-    specs = []
-    # specs_str is like "[[1, 0], [0]]"; strip outer brackets and split
-    inner = specs_str[1:-1].strip()
-    parts = [p.strip("[] ") for p in inner.split("], [")]
-    for p in parts:
-        idxs = [int(x.strip()) for x in p.split(",") if x.strip()]
-        if idxs:
-            specs.append(idxs)
-    
-    args = vals
-    
-    # Find max axis index
-    max_idx = max((max(s) for s in specs if s), default=-1)
-    
-    # Map indices to letters: 0->'a', 1->'b', etc.
-    letters = [chr(ord('a') + i) for i in range(max_idx + 1)]
-    
-    # Build subscript for each arg
-    arg_subs = []
-    for spec in specs:
-        sub = "".join(letters[i] for i in spec)
-        arg_subs.append(sub)
-    
-    # Build output subscript: axes nsum, nsum+1, ..., max_idx
-    out_sub = "".join(letters[i] for i in range(nsum, max_idx + 1))
-    
-    einsum_str = ",".join(arg_subs) + "->" + out_sub
-    return jnp.einsum(einsum_str, *args)
+    if not batched:
+        result = eval_body(lib_body, libs, list(aux))
+        return result[0] if len(result) == 1 else result
+
+    def fn(*xs):
+        return eval_body(lib_body, libs, list(xs) + list(aux))
+
+    result = jax.vmap(fn)(*batched)
+    return result[0] if len(result) == 1 else list(result)
 
 
 @register_op("call")
 def _eval_call(op_str, vals, lib_refs, libs, parent_args):
-    lib_idx = lib_refs[0]
-    call_args = vals
-    lib_body = libs[lib_idx]
-    result = eval_body(lib_body, libs, call_args)
-    if len(result) == 1:
-        return result[0]
-    return result
+    result = eval_body(libs[lib_refs[0]], libs, vals)
+    return result[0] if len(result) == 1 else result

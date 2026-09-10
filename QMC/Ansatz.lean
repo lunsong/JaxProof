@@ -1,4 +1,4 @@
-import SSA
+import Xla
 import Mathlib.Analysis.Calculus.ContDiff.Basic
 
 /-!
@@ -196,7 +196,7 @@ numbers of atoms and electrons -/
 structure Ansatz where
   N_param : ℕ
   ansatz (N_nuc N_up N_down : ℕ) :
-    SSA.Expr Xla.XlaOp
+    Xla.SimpleExpr
       [
         ⟨.float, [N_param]⟩, -- parameters
         ⟨.float, [N_nuc, 3]⟩, -- positions of nuclei
@@ -204,13 +204,13 @@ structure Ansatz where
         ⟨.float, [N_up, 3]⟩, -- positions of spin up electrons
         ⟨.float, [N_down, 3]⟩ -- positions of spin down electrons
       ]
-      [⟨.float, []⟩]
+      ⟨.float, []⟩
 
 /-- An ansatz is valid if for any param and any molecule, the wavefunction is valid. -/
 def Ansatz.isValid (ansatz : Ansatz) : Prop :=
   ∀ (N_nuc N_up N_down : ℕ) (_ : N_nuc ≠ 0) (_ : N_up + N_down ≠ 0)
     (θ : Fin ansatz.N_param → ℝ)
-    (R_nuc : SSA.Tensor ℝ [N_nuc, 3])
-    (Z_nuc : SSA.Tensor ℤ [N_nuc]),
+    (R_nuc : Xla.Tensor ℝ [N_nuc, 3])
+    (Z_nuc : Xla.Tensor ℤ [N_nuc]),
   IsValidQMCWavefunction <|
-    Xla.simpleEval (ansatz.ansatz N_nuc N_up N_down) θ R_nuc Z_nuc
+    (ansatz.ansatz N_nuc N_up N_down).eval θ R_nuc Z_nuc
