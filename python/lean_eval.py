@@ -103,7 +103,7 @@ def lean_code(
     return _code_cached(module, decl, tuple(params), str(project_root))
 
 
-def eval(ref: str, *args, params: Tuple[Param, ...] = (), **kwargs):
+def lean_eval(ref: str, *args, params: Tuple[Param, ...] = (), **kwargs):
     """
     Evaluate a Lean expression declaration on JAX arrays.
 
