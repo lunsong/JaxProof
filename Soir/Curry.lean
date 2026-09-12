@@ -286,7 +286,10 @@ type-correct at `implicit` transparency after unfolding).
 
 The `reduceIndex*` dsimprocs instead navigate the constructor structure of the
 `Index` expression themselves at default transparency, so no type-level matching is
-needed. All reductions are definitional, hence `dsimproc` rather than `simproc`.
+needed. A position need not be a syntactic literal either: `soir` evaluation
+produces positions that are literals only up to reduction (e.g. a permutation
+application, which computes through `Fin.find`), so `Index.getFinVal?` reduces them
+first. All reductions are definitional, hence `dsimproc` rather than `simproc`.
 -/
 
 open Lean Meta Simp in
@@ -321,7 +324,11 @@ private partial def Index.listLength? (γ : Expr) : MetaM (Option Nat) := do
 
 open Lean Meta Simp in
 /-- If `e` is a `Fin` literal (an `OfNat` numeral, `Fin.mk` of a `Nat` literal,
-or a `Fin.succ` chain on one), return its value. -/
+or a `Fin.succ` chain on one), return its value. A position that is a literal only
+*up to reduction* — e.g. `Equiv.symm (makePerm ![2, 0, 1] _ _) 0`, whose value is
+computed by `Fin.find`, or a `Fin.cast` of a literal — is reduced to weak head
+normal form first; the reduced expression is only inspected, never rebuilt into
+the term, so the reductions performed by the simprocs stay definitional. -/
 private partial def Index.getFinVal? (e : Expr) : MetaM (Option Nat) := do
   if e.isAppOfArity ``Fin.succ 2 then
     return (← getFinVal? e.appArg!).map (· + 1)
@@ -330,7 +337,9 @@ private partial def Index.getFinVal? (e : Expr) : MetaM (Option Nat) := do
   else
     -- `OfNat` numeral: the value is `k % n`, which is `k` for the literals that arise
     if let some (k, _) ← getOfNatValue? e ``Fin then return some k
-    else return none
+    else
+      let e' ← whnfD e
+      if e' == e then return none else getFinVal? e'
 
 open Lean Meta Simp in
 /-- Rebuild a stuck `Index` expression (a variable, or a constructor application that

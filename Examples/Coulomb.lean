@@ -40,11 +40,7 @@ theorem mutual_distance_def {n_atom}
   (n m : Fin n_atom) :
   mutual_distance.eval x n m = ∑ i, (x n i - x m i) ^ 2 := by
   simp [mutual_distance, mutual_displacement, reduce_xla, reduce_soir, reduce_tensor, ← pow_two]
-  conv_lhs =>
-    change (Xla.Tensor.sumN (s := [3, n_atom, n_atom]) 1 (fun i a b ↦ (x a i - x b i)^2)) n m
-    fun
-    simp [Xla.Tensor.sumN]
-  erw [Finset.sum_apply, Finset.sum_apply]
+  rfl
 
 def coulomb {n_atom : ℕ} :
   Xla.SimpleExpr

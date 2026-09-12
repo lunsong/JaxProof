@@ -361,9 +361,66 @@ def Tensor.batchGet_to_batchGetInt {s s' : List ℕ} (hs : ∀ l ∈ s, l ≠ 0)
 @[reduce_tensor]
 def Tensor.transpose {s : List ℕ} (σ : Equiv.Perm (Fin s.length)) :
     Tensor R s → Tensor R (List.ofFn fun i ↦ s.get (σ i)) :=
-  fun x ↦ Curry.of fun i ↦ x.get fun μ ↦ 
+  fun x ↦ Curry.of fun i ↦ x.get fun μ ↦
     let j := i <| (σ.symm μ).cast <| by simp
     j.cast <| by simp
+
+/-!
+### Reducing the shape and the index casts produced by `Tensor.transpose`
+
+`Tensor.transpose` gives its result the shape `List.ofFn fun i ↦ s.get (σ i)` and casts
+its indices with `Fin.cast`, since the permuted shape is only *propositionally* the
+original one. Both are cons towers/numerals only definitionally: `simp` matches at
+`implicit` transparency, where `Fin.foldr` and `Fin.cast` do not unfold, so every
+`Tensor` operation — all of them match on the shape — is stuck on a transposed tensor
+(`Tensor.sumN`'s `match n, s` never fires). The dsimprocs below compute them; the
+reductions performed are the kernel's own, hence `dsimproc` rather than `simproc`.
+-/
+
+open Lean Meta Simp in
+/-- `List.ofFn f` at a literal length is a cons tower, but only definitionally. Reduce
+the *whole* tower at once: the tails of the intermediate `Fin.foldr` applications no
+longer mention `List.ofFn`, so unfolding a single cons cell would not let the reduction
+continue to the next one (`Tensor.sumN`/`Tensor.sumFirst` recurse on the shape). -/
+private def reduceOfFnCore (e : Expr) : SimpM DStep := do
+  let args := e.getAppArgs
+  unless args.size == 3 do return .continue
+  let some n ← getNatValue? (← withTransparency .default <| reduce args[1]!) | return .continue
+  let mut elems := #[]
+  let mut cur ← whnfD e
+  for _ in [:n] do
+    unless cur.isAppOfArity ``List.cons 3 do return .continue
+    elems := elems.push cur.appFn!.appArg!
+    cur ← whnfD cur.appArg!
+  unless cur.isAppOfArity ``List.nil 1 do return .continue
+  let mut r := cur
+  for elem in elems.reverse do
+    r ← mkAppM ``List.cons #[elem, r]
+  if r == e then return .continue
+  return .visit r
+
+open Lean Meta Simp in
+/-- `Fin.cast h i` is the identity when the cast does not change the type — the case for
+the index casts of `Tensor.transpose`, once the permutation application computes. The
+two `Fin` types are definitionally equal there, but not syntactically, so no `simp`
+lemma can see it (and `Fin.cast` leaves a `Fin` that the `Index`/`Curry` simprocs
+cannot navigate past). -/
+private def reduceFinCastCore (e : Expr) : SimpM DStep := do
+  let args := e.getAppArgs
+  unless args.size == 4 do return .continue
+  let i := args[3]!
+  if ← withTransparency .default <| isDefEqGuarded (← inferType e) (← inferType i) then
+    return .visit i
+  else
+    return .continue
+
+/-- Reduce `List.ofFn` at a literal length to its cons tower. -/
+dsimproc reduceOfFn (List.ofFn _) := reduceOfFnCore
+
+/-- Erase `Fin.cast` when it does not change the type. -/
+dsimproc reduceFinCast (Fin.cast _ _) := reduceFinCastCore
+
+attribute [reduce_tensor] reduceOfFn reduceFinCast
 
 @[simps]
 instance [Div R] (s : List ℕ) : Div (Tensor R s) where div := Tensor.map₂ (· / ·)
