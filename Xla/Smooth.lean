@@ -19,10 +19,11 @@ smoothness of a whole program is composed along its dataflow.
 Every lemma is stated for an arbitrary normed `ℝ`-vector space `X` — in a
 wavefunction, `X` is the electron-position space — and tensor-valued functions
 `f : X → Xla.Tensor ℝ s`. `Tensor ℝ s` is `Curry Fin s ℝ`, a finitely nested `Π` type
-of `ℝ`s, so for a *concrete* shape the `NormedAddCommGroup`/`NormedSpace ℝ` instances
-are found by typeclass search. Lemmas generic in the shape `s` therefore take those
-instances as instance arguments: `Curry` is an abbreviation whose body matches on the
-shape list, and typeclass search cannot unfold that match for a variable `s`.
+of `ℝ`s. `Curry` is an abbreviation whose body matches on the shape list, so typeclass
+search cannot unfold that match for a variable `s`; the recursive instances
+`Tensor.instNormedAddCommGroup`/`Tensor.instNormedSpace` below therefore build the
+canonical product structure on *every* `Tensor ℝ s`, and the lemmas need no per-shape
+instance arguments.
 
 Data that a program treats as *constant* in the smooth variable is passed as an
 ordinary argument, never as a function of `X`. In particular the integer tensors
@@ -69,14 +70,52 @@ open Soir
 
 variable {X : Type} [NormedAddCommGroup X] [NormedSpace ℝ X]
 
+/-! ### Canonical normed structure on tensors
+
+`Tensor ℝ s` is `Curry Fin s ℝ`, whose body matches on `s`; typeclass search cannot
+unfold that match for a variable `s`, so the shape-generic statements cannot leave the
+normed-space instances to be found. The recursive instances below equip every
+`Tensor ℝ s` with the canonical (product) structure, which removes the per-shape
+instance arguments entirely. -/
+
+noncomputable instance Tensor.instNormedAddCommGroup :
+    (s : Shape) → NormedAddCommGroup (Tensor ℝ s)
+  | [] => inferInstanceAs (NormedAddCommGroup ℝ)
+  | _ :: s =>
+    letI : NormedAddCommGroup (Tensor ℝ s) := Tensor.instNormedAddCommGroup s
+    inferInstanceAs (NormedAddCommGroup (Fin _ → Tensor ℝ s))
+
+noncomputable instance Tensor.instNormedSpace :
+    (s : Shape) → NormedSpace ℝ (Tensor ℝ s)
+  | [] => inferInstanceAs (NormedSpace ℝ ℝ)
+  | _ :: s =>
+    letI : NormedAddCommGroup (Tensor ℝ s) := Tensor.instNormedAddCommGroup s
+    letI : NormedSpace ℝ (Tensor ℝ s) := Tensor.instNormedSpace s
+    inferInstanceAs (NormedSpace ℝ (Fin _ → Tensor ℝ s))
+
+/-- `Tensor.map` is `Curry.map`, definitionally after a case split on the shape. -/
+private theorem Tensor.map_eq_curryMap (s : Shape) (g : ℝ → ℝ) :
+    (Tensor.map g : Tensor ℝ s → Tensor ℝ s) = Curry.map g := by
+  induction s with
+  | nil => rfl
+  | cons s₀ s ih => rfl
+
 /-! ### Elementwise maps -/
 
 /-- `Tensor.map` of a `C²` scalar function preserves `C²`. -/
-theorem contDiff_tensorMap {s : Shape} [NormedAddCommGroup (Tensor ℝ s)]
-    [NormedSpace ℝ (Tensor ℝ s)] {g : ℝ → ℝ} (hg : ContDiff ℝ 2 g)
+theorem contDiff_tensorMap {s : Shape} {g : ℝ → ℝ} (hg : ContDiff ℝ 2 g)
     {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (f x).map g := by
-  sorry
+  induction s with
+  | nil =>
+    change ContDiff ℝ 2 fun x => g (f x)
+    exact hg.comp hf
+  | cons s₀ s ih =>
+    change ContDiff ℝ 2 fun x (i : Fin s₀) => Curry.map g (f x i)
+    apply contDiff_pi'
+    intro i
+    rw [← Tensor.map_eq_curryMap s g]
+    exact ih ((contDiff_apply ℝ _ i).comp hf)
 
 /-- `Tensor.map₂` of a `C²` scalar function of two variables preserves `C²`. -/
 theorem contDiff_tensorMap₂ {s : Shape} [NormedAddCommGroup (Tensor ℝ s)]
@@ -87,7 +126,7 @@ theorem contDiff_tensorMap₂ {s : Shape} [NormedAddCommGroup (Tensor ℝ s)]
 
 section Elementwise
 
-variable {s : Shape} [NormedAddCommGroup (Tensor ℝ s)] [NormedSpace ℝ (Tensor ℝ s)]
+variable {s : Shape}
 
 /-- `DirectImpl.exp`. -/
 theorem contDiff_tensorMap_exp {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
@@ -160,7 +199,12 @@ theorem contDiff_einsum (s : Shape) (i₁ i₂ : List (Fin s.length)) (n : ℕ)
 `Matrix.det`). -/
 theorem contDiff_det {n : ℕ} {f : X → Tensor ℝ [n, n]} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => Matrix.det (f x) := by
-  sorry
+  have h : (fun x => Matrix.det (f x)) = fun x => ∑ σ : Equiv.Perm (Fin n),
+      (Equiv.Perm.sign σ : ℝ) * ∏ i, f x (σ i) i := by
+    funext x
+    exact Matrix.det_apply' (M := (f x : Matrix (Fin n) (Fin n) ℝ))
+  rw [h]
+  fun_prop
 
 /-- `DirectImpl.transpose`: a permutation of the indices is a linear isometry. -/
 theorem contDiff_transpose {s : Shape} (σ : Equiv.Perm (Fin s.length))
