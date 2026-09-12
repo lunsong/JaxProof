@@ -118,11 +118,18 @@ theorem contDiff_tensorMap {s : Shape} {g : ℝ → ℝ} (hg : ContDiff ℝ 2 g)
     exact ih ((contDiff_apply ℝ _ i).comp hf)
 
 /-- `Tensor.map₂` of a `C²` scalar function of two variables preserves `C²`. -/
-theorem contDiff_tensorMap₂ {s : Shape} [NormedAddCommGroup (Tensor ℝ s)]
-    [NormedSpace ℝ (Tensor ℝ s)] {g : ℝ → ℝ → ℝ} (hg : ContDiff ℝ 2 (Function.uncurry g))
+theorem contDiff_tensorMap₂ {s : Shape} {g : ℝ → ℝ → ℝ} (hg : ContDiff ℝ 2 (Function.uncurry g))
     {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁) (h₂ : ContDiff ℝ 2 f₂) :
     ContDiff ℝ 2 fun x => Tensor.map₂ g (f₁ x) (f₂ x) := by
-  sorry
+  induction s with
+  | nil =>
+    change ContDiff ℝ 2 fun x => g (f₁ x) (f₂ x)
+    exact hg.comp (h₁.prodMk h₂)
+  | cons s₀ s ih =>
+    change ContDiff ℝ 2 fun x (i : Fin s₀) => Tensor.map₂ g (f₁ x i) (f₂ x i)
+    apply contDiff_pi'
+    intro i
+    exact ih ((contDiff_apply ℝ _ i).comp h₁) ((contDiff_apply ℝ _ i).comp h₂)
 
 section Elementwise
 
@@ -176,12 +183,61 @@ end Elementwise
 
 /-! ### Reductions and index manipulation -/
 
+/-- A finite sum of tensors commutes with the evaluation of a `Curry` argument:
+addition on `Tensor` is pointwise, but `Finset.sum` does not unfold definitionally,
+so this is an induction on the finset. -/
+private theorem Tensor.sum_apply_get {ι : Type} {s₀ : ℕ} {s : Shape}
+    (t : Finset ι) (x : ι → Tensor ℝ (s₀ :: s)) (i : Fin s₀) :
+    (∑ j ∈ t, x j) i = ∑ j ∈ t, x j i := by
+  classical
+  induction t using Finset.induction_on with
+  | empty => simp
+  | insert a t ha ih =>
+    rw [Finset.sum_insert ha, Finset.sum_insert ha]
+    show x a i + (∑ j ∈ t, x j) i = x a i + ∑ j ∈ t, x j i
+    rw [ih]
+
+/-- A finite sum of `C²` tensor-valued functions is `C²`, proved entrywise. -/
+private theorem contDiff_finset_sum {ι : Type} [Fintype ι]
+    {s : Shape} {g : ι → X → Tensor ℝ s} (hg : ∀ i, ContDiff ℝ 2 (g i)) :
+    ContDiff ℝ 2 fun x => ∑ i, g i x := by
+  induction s with
+  | nil =>
+    with_unfolding_all
+      exact ContDiff.sum (𝕜 := ℝ) (n := 2) (s := Finset.univ)
+        (f := fun i x => g i x) (fun i _ => hg i)
+  | cons s₀ s ih =>
+    change ContDiff ℝ 2 fun x (j : Fin s₀) => (∑ i, g i x) j
+    apply contDiff_pi'
+    intro j
+    have hfun : (fun x => (∑ i, g i x) j) = fun x => ∑ i, g i x j := by
+      funext x
+      rw [Tensor.sum_apply_get Finset.univ]
+    rw [hfun]
+    exact ih (fun i => (contDiff_apply ℝ _ j).comp (hg i))
+
 /-- `DirectImpl.sum`: a finite sum of `C²` components. -/
-theorem contDiff_sumN {s : Shape} (n : ℕ) [NormedAddCommGroup (Tensor ℝ s)]
-    [NormedSpace ℝ (Tensor ℝ s)] [NormedAddCommGroup (Tensor ℝ (s.drop n))]
-    [NormedSpace ℝ (Tensor ℝ (s.drop n))] {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+theorem contDiff_sumN {s : Shape} (n : ℕ) {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (f x).sumN n := by
-  sorry
+  induction s generalizing n with
+  | nil =>
+    cases n with
+    | zero =>
+      change ContDiff ℝ 2 fun x => f x
+      exact hf
+    | succ n =>
+      change ContDiff ℝ 2 fun x => f x
+      exact hf
+  | cons s₀ s ih =>
+    cases n with
+    | zero =>
+      change ContDiff ℝ 2 fun x => f x
+      exact hf
+    | succ n =>
+      change ContDiff ℝ 2 fun x => ((f x).sumFirst).sumN n
+      refine ih n ?_
+      change ContDiff ℝ 2 fun x => ∑ i : Fin s₀, f x i
+      exact contDiff_finset_sum (fun i => (contDiff_apply ℝ _ i).comp hf)
 
 /-- `DirectImpl.einsum` of two input tensors: a finite sum of products of entries. -/
 theorem contDiff_einsum (s : Shape) (i₁ i₂ : List (Fin s.length)) (n : ℕ)
