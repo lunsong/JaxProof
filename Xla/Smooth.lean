@@ -1,0 +1,207 @@
+import Xla.Impl
+import Mathlib.Analysis.Calculus.ContDiff.Basic
+import Mathlib.Analysis.Calculus.ContDiff.Operations
+import Mathlib.Analysis.SpecialFunctions.ExpDeriv
+import Mathlib.Analysis.SpecialFunctions.Sqrt
+
+/-!
+# `Xla/Smooth.lean` — smoothness of the DSL semantics
+
+`QMC/Ansatz.lean` demands that every candidate wavefunction be `C²` in the electron
+coordinates (`ContDiff ℝ 2`), because `pfnet` evaluates the local energy by automatic
+differentiation and silently computes the wrong Laplacian at a crease or a jump (see
+the module docstring there). This file is the *leaf library* of that obligation: the
+facts about the `DirectImpl` semantics of the individual primitives from which the
+smoothness of a whole program is composed along its dataflow.
+
+## The smooth variable
+
+Every lemma is stated for an arbitrary normed `ℝ`-vector space `X` — in a
+wavefunction, `X` is the electron-position space — and tensor-valued functions
+`f : X → Xla.Tensor ℝ s`. `Tensor ℝ s` is `Curry Fin s ℝ`, a finitely nested `Π` type
+of `ℝ`s, so for a *concrete* shape the `NormedAddCommGroup`/`NormedSpace ℝ` instances
+are found by typeclass search. Lemmas generic in the shape `s` therefore take those
+instances as instance arguments: `Curry` is an abbreviation whose body matches on the
+shape list, and typeclass search cannot unfold that match for a variable `s`.
+
+Data that a program treats as *constant* in the smooth variable is passed as an
+ordinary argument, never as a function of `X`. In particular the integer tensors
+(nuclear charges, `gather` indices) never occur under a `C²` hypothesis: `ℤ` carries
+no `NormedSpace ℝ` structure, and the DSL only ever uses it for
+`iota`/`ofNat`/`mod`/`gather` indices, which are constant in the electron coordinates
+(the op discipline of `QMC/Ansatz.lean`).
+
+## Shape-level results
+
+`Tensor.map`/`Tensor.map₂` and the `Tensor.flatten`-based side conditions
+(`0 < (f x).flatten i`) are how a shape-generic statement refers to "every entry" of a
+tensor without naming its index type.
+
+## The proofs
+
+The leaf statements below are `sorry`; each is a small analysis fact whose proof is
+independent of the program it is used in. Program-level smoothness
+(`QMC/FermiNet.lean`) is then a composition of these leaves along the dataflow.
+
+Where the work is:
+
+* `contDiff_tensorMap`/`contDiff_tensorMap₂`: induction on the shape `s` — at `[]` the
+  statement is `hg.comp` and at `s₀ :: s` it is `contDiff_pi'` plus the induction
+  hypothesis. The wrinkle is that the induction hypothesis is stated for the *tail*
+  shape, whose normed-space instances are not recoverable from the hypothesis for the
+  whole shape (a `Π`-instance does not expose its fibres); proving it for a variable `s`
+  therefore wants either the instances threaded through the induction or a
+  `Curry`-level reformulation.
+* `contDiff_tensorMap_sqrt`/`contDiff_tensorMap₂_div`: pointwise
+  (`ContDiffAt` from `Real.contDiffAt_sqrt`/`contDiffAt_div`, using
+  `flatten`-componentwise positivity/non-vanishing), then `contDiff_iff_contDiffAt`.
+* `contDiff_gather`: the `unflatten ∘ flatten` round trip of a reindexing; the
+  `unflatten`/`flatten` isometries are `contDiff_unflatten` plus linearity.
+* `contDiff_einsum`/`contDiff_det`/`contDiff_sumN`/`contDiff_transpose`/
+  `contDiff_broadcast`/`contDiff_unflatten`: `Tensor.einsum`, `Matrix.det`, `sumN` are
+  finite sums of products of entries and the index manipulations are linear isometries;
+  `contDiff_pi'` reduces each to the entrywise polynomial/identity.
+-/
+
+namespace Xla
+
+open Soir
+
+variable {X : Type} [NormedAddCommGroup X] [NormedSpace ℝ X]
+
+/-! ### Elementwise maps -/
+
+/-- `Tensor.map` of a `C²` scalar function preserves `C²`. -/
+theorem contDiff_tensorMap {s : Shape} [NormedAddCommGroup (Tensor ℝ s)]
+    [NormedSpace ℝ (Tensor ℝ s)] {g : ℝ → ℝ} (hg : ContDiff ℝ 2 g)
+    {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (f x).map g := by
+  sorry
+
+/-- `Tensor.map₂` of a `C²` scalar function of two variables preserves `C²`. -/
+theorem contDiff_tensorMap₂ {s : Shape} [NormedAddCommGroup (Tensor ℝ s)]
+    [NormedSpace ℝ (Tensor ℝ s)] {g : ℝ → ℝ → ℝ} (hg : ContDiff ℝ 2 (Function.uncurry g))
+    {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁) (h₂ : ContDiff ℝ 2 f₂) :
+    ContDiff ℝ 2 fun x => Tensor.map₂ g (f₁ x) (f₂ x) := by
+  sorry
+
+section Elementwise
+
+variable {s : Shape} [NormedAddCommGroup (Tensor ℝ s)] [NormedSpace ℝ (Tensor ℝ s)]
+
+/-- `DirectImpl.exp`. -/
+theorem contDiff_tensorMap_exp {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (f x).map Real.exp :=
+  contDiff_tensorMap Real.contDiff_exp hf
+
+/-- `DirectImpl.neg`. -/
+theorem contDiff_tensorMap_neg {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (f x).map fun t => -t :=
+  contDiff_tensorMap (by fun_prop) hf
+
+/-- `DirectImpl.add`. -/
+theorem contDiff_tensorMap₂_add {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁)
+    (h₂ : ContDiff ℝ 2 f₂) :
+    ContDiff ℝ 2 fun x => Tensor.map₂ (· + ·) (f₁ x) (f₂ x) :=
+  contDiff_tensorMap₂ (by fun_prop) h₁ h₂
+
+/-- `DirectImpl.sub`. -/
+theorem contDiff_tensorMap₂_sub {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁)
+    (h₂ : ContDiff ℝ 2 f₂) :
+    ContDiff ℝ 2 fun x => Tensor.map₂ (· - ·) (f₁ x) (f₂ x) :=
+  contDiff_tensorMap₂ (by fun_prop) h₁ h₂
+
+/-- `DirectImpl.mul`. -/
+theorem contDiff_tensorMap₂_mul {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁)
+    (h₂ : ContDiff ℝ 2 f₂) :
+    ContDiff ℝ 2 fun x => Tensor.map₂ (· * ·) (f₁ x) (f₂ x) :=
+  contDiff_tensorMap₂ (by fun_prop) h₁ h₂
+
+/-- `DirectImpl.div`: `C²` where the denominator does not vanish. (In the DSL,
+division only ever appears inside `tanh = 1 - 2/(exp(2x)+1)`, whose denominator is
+`≥ 1`.) -/
+theorem contDiff_tensorMap₂_div {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁)
+    (h₂ : ContDiff ℝ 2 f₂) (hne : ∀ x (i : Fin s.prod), (f₂ x).flatten i ≠ 0) :
+    ContDiff ℝ 2 fun x => Tensor.map₂ (· / ·) (f₁ x) (f₂ x) := by
+  sorry
+
+/-- `DirectImpl.sqrt`: `C²` where the argument is positive. The DSL guards every
+`sqrt` by `√(r² + ε)` with `ε = exp θ > 0` (see `enDist`/`pairDist`), so the argument
+is bounded away from the non-analytic point `0`. -/
+theorem contDiff_tensorMap_sqrt {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f)
+    (hpos : ∀ x (i : Fin s.prod), 0 < (f x).flatten i) :
+    ContDiff ℝ 2 fun x => (f x).map Real.sqrt := by
+  sorry
+
+end Elementwise
+
+/-! ### Reductions and index manipulation -/
+
+/-- `DirectImpl.sum`: a finite sum of `C²` components. -/
+theorem contDiff_sumN {s : Shape} (n : ℕ) [NormedAddCommGroup (Tensor ℝ s)]
+    [NormedSpace ℝ (Tensor ℝ s)] [NormedAddCommGroup (Tensor ℝ (s.drop n))]
+    [NormedSpace ℝ (Tensor ℝ (s.drop n))] {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (f x).sumN n := by
+  sorry
+
+/-- `DirectImpl.einsum` of two input tensors: a finite sum of products of entries. -/
+theorem contDiff_einsum (s : Shape) (i₁ i₂ : List (Fin s.length)) (n : ℕ)
+    [NormedAddCommGroup (Tensor ℝ (i₁.map s.get))]
+    [NormedSpace ℝ (Tensor ℝ (i₁.map s.get))]
+    [NormedAddCommGroup (Tensor ℝ (i₂.map s.get))]
+    [NormedSpace ℝ (Tensor ℝ (i₂.map s.get))]
+    [NormedAddCommGroup (Tensor ℝ (s.drop n))] [NormedSpace ℝ (Tensor ℝ (s.drop n))]
+    {f₁ : X → Tensor ℝ (i₁.map s.get)} {f₂ : X → Tensor ℝ (i₂.map s.get)}
+    (h₁ : ContDiff ℝ 2 f₁) (h₂ : ContDiff ℝ 2 f₂) :
+    ContDiff ℝ 2 fun x => Tensor.einsum s [⟨i₁, f₁ x⟩, ⟨i₂, f₂ x⟩] n := by
+  sorry
+
+/-- `DirectImpl.det`: a polynomial (in fact a sum of products of the entries, via
+`Matrix.det`). -/
+theorem contDiff_det {n : ℕ} {f : X → Tensor ℝ [n, n]} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => Matrix.det (f x) := by
+  sorry
+
+/-- `DirectImpl.transpose`: a permutation of the indices is a linear isometry. -/
+theorem contDiff_transpose {s : Shape} (σ : Equiv.Perm (Fin s.length))
+    [NormedAddCommGroup (Tensor ℝ s)] [NormedSpace ℝ (Tensor ℝ s)]
+    [NormedAddCommGroup (Tensor ℝ (List.ofFn fun i => s.get (σ i)))]
+    [NormedSpace ℝ (Tensor ℝ (List.ofFn fun i => s.get (σ i)))]
+    {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (f x).transpose σ := by
+  sorry
+
+/-- `DirectImpl.broadcast`: duplicating entries along new axes is a linear isometry. -/
+theorem contDiff_broadcast {s : List (ℕ × Bool)}
+    [NormedAddCommGroup (Tensor ℝ (Tensor.preBroadcast s))]
+    [NormedSpace ℝ (Tensor ℝ (Tensor.preBroadcast s))]
+    [NormedAddCommGroup (Tensor ℝ (s.map Prod.fst))]
+    [NormedSpace ℝ (Tensor ℝ (s.map Prod.fst))]
+    {f : X → Tensor ℝ (Tensor.preBroadcast s)} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => Tensor.broadcast s (f x) := by
+  sorry
+
+/-- `DirectImpl.unflatten`: reinterpreting a flat index as a multi-index is a linear
+isometry. -/
+theorem contDiff_unflatten (s : Shape) [NormedAddCommGroup (Tensor ℝ s)]
+    [NormedSpace ℝ (Tensor ℝ s)] {f : X → Tensor ℝ [s.prod]} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (Tensor.unflatten s (f x) : Tensor ℝ s) := by
+  sorry
+
+/-- `DirectImpl.gather` from a one-dimensional table along a *fixed* integer index
+tensor: a reindexing of the data, hence `C²` in the data. The index is constant in the
+smooth variable by the op discipline; this is the only `gather` shape the FermiNet
+program uses (parameter slicing and the nuclear-charge embedding).
+
+Entrywise, `(gather x idx).flatten r = x (Fin.intCast (idx.flatten r))` holds
+definitionally (`simp [DirectImpl.gather, reduce_tensor, reduce_soir, reduce_xla]`),
+so the statement below is `gather` up to the `unflatten ∘ flatten` round trip
+(`Tensor.unflatten_flatten`). -/
+theorem contDiff_gather {n : ℕ} [NeZero n] {s' : Shape} [NormedAddCommGroup (Tensor ℝ s')]
+    [NormedSpace ℝ (Tensor ℝ s')] (idx : Tensor ℤ s') {f : X → Tensor ℝ [n]}
+    (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x =>
+      Tensor.unflatten s' fun r => f x (Fin.intCast (idx.flatten r)) := by
+  sorry
+
+end Xla

@@ -1,4 +1,5 @@
 import QMC.Ansatz
+import Xla.Smooth
 
 /-!
 # FermiNet — a neural-network QMC ansatz for molecules
@@ -106,7 +107,11 @@ over the leading axis. Determinant weights are `w_k = exp θ_k > 0`.
   data — with `sqrt` applied to `r² + ε`, `ε > 0`, so the argument never touches
   the non-analytic point 0; `tanh` is the composition `1 - 2/(exp(2x) + 1)` of
   analytic functions. All reparameterizations use `exp`, so positivity holds for
-  *every* `θ` (the `∀θ` contract).
+  *every* `θ` (the `∀θ` contract). The proof is a composition along the dataflow:
+  `smooth` reduces to `contDiff_fermiNetAnsatz`, which composes the per-node lemmas
+  `contDiff_eval_*` in the section "Smoothness: the decomposition", whose leaves are
+  the per-primitive facts in `Xla/Smooth.lean`. See that section for the shape of
+  the statements and the status of the proofs.
 * **`exp_decay`**: `‖x‖ → ∞` forces `Σ_j env_j ≳ a‖x‖` (`A_{k,i,α} > 0` and
   `√(r²+ε) ≥ ‖x_j - R_α‖`), so the envelope contributes `exp(-a‖x‖)`. The
   determinant entries are bounded (`tanh`-bounded streams) times the envelope,
@@ -517,9 +522,10 @@ def fermiNet : Ansatz where
   N_param := N_PARAM
   ansatz := fun N_nuc N_up N_down => fermiNetAnsatz N_nuc N_up N_down
 
-/-! ### The validity contract (all proofs `sorry`)
+/-! ### The validity contract
 
-See the module docstring for the proof sketches. -/
+See the module docstring for the proof sketches. `smooth` is proved modulo the
+decomposition below; `antisymmetric` and `exp_decay` are `sorry`. -/
 
 /-- Antisymmetry in both spin sectors: the streams are permutation-equivariant,
 the envelope/Jastrow invariant, and each determinant picks up `sign σ`. -/
@@ -529,13 +535,242 @@ theorem antisymmetric (N_nuc N_up N_down : ℕ) (_ : N_nuc ≠ 0) (_ : N_up + N_
     IsAntisymmetric ((fermiNet.ansatz N_nuc N_up N_down).eval θ R_nuc Z_nuc) := by
   sorry
 
+/-! ### Smoothness: the decomposition
+
+`smooth` says that the evaluated program `Ψ(θ, R, Z) : (x↑, x↓) ↦ ℝ` is `C²` in the
+electron positions. Every primitive in the program is real-analytic on its domain, so
+the proof is a composition along the SSA dataflow: `Ψ = e^{J↑+J↓} · det↑ · det↓`, each
+factor is `C²` because its inputs are, and the inputs of the leaves are the two
+electron-position tensors.
+
+The lemmas below state that composition one node at a time. Each is stated for an
+arbitrary normed `ℝ`-space `X` (the "smooth variable": for the top-level theorem it is
+`Config N_up N_down`, and for an intermediate node it is again `Config N_up N_down`,
+since every intermediate value is a function of the electron positions), together with
+`C²` hypotheses for the arguments the node consumes — so the lemmas *chain* by
+`ContDiff.comp` with no glue at all: `contDiff_eval_oneStreamLayer` consumes the
+conclusions of `contDiff_eval_oneStreamInit`, `contDiff_eval_twoStreamInit` and
+`contDiff_eval_twoStreamInitCross`, and so on up to `contDiff_fermiNetAnsatz`.
+
+Two kinds of data flow through the program but not through the `C²` hypotheses:
+
+* **Integer data is constant.** The nuclear charges `Z` and the `gather` indices built
+  from them (`paramSlice`, the charge embedding) do not depend on `X`, and `ℤ` has no
+  `NormedSpace ℝ` structure, so they are passed to the lemmas as *fixed* arguments
+  rather than as functions of `X`. This is exactly the op discipline of
+  `QMC/Ansatz.lean` (`iota`/`ofNat`/`mod`/`gather` on integer data only).
+* **Constant tensors are fixed, not `C²`.** `θ`, `R` and `Z` are fixed by the theorem
+  (the wavefunction varies the electron positions), so a node that only reads them
+  appears in a `C²` statement as a constant.
+
+The leaves — one per primitive of `DirectImpl` — are in `Xla/Smooth.lean`:
+`contDiff_tensorMap`(`₂`) for elementwise ops (`exp`, `neg`, `add`, `sub`, `mul`,
+`div`, `sqrt`, the last two with the side conditions the DSL guarantees),
+`contDiff_sumN`/`contDiff_einsum`/`contDiff_det` for the reductions,
+`contDiff_transpose`/`contDiff_broadcast`/`contDiff_unflatten` for the index
+manipulations, and `contDiff_gather` for gathering along a fixed index tensor.
+
+The proofs of the node lemmas are `sorry`: each is the composition of its children's
+lemmas with the `Xla/Smooth.lean` leaves, mechanically obtained by
+`simp only [reduce_soir, reduce_xla, reduce_tensor]`-unfolding the node (which leaves
+the sub-components as named libraries, never inlined) and then chaining. -/
+
+/-- The configuration space the wavefunction is a function of: the two spin sectors'
+electron positions. -/
+abbrev Config (N_up N_down : ℕ) : Type := Tensor ℝ [N_up, 3] × Tensor ℝ [N_down, 3]
+
+section Smoothness
+
+variable {X : Type} [NormedAddCommGroup X] [NormedSpace ℝ X]
+
+/-! #### Primitive leaves of the program -/
+
+/-- `tanh`: `1 - 2/(exp(2x) + 1)`, a composition of `exp` and a division whose
+denominator is `≥ 1`. -/
+theorem contDiff_eval_tanh (s : Shape) [NormedAddCommGroup (Tensor ℝ s)]
+    [NormedSpace ℝ (Tensor ℝ s)] {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (tanh s).eval (f x) := by
+  sorry
+
+/-- Parameter slicing is linear (`gather` along the fixed index tensor `iota + off`). -/
+theorem contDiff_eval_paramSlice (off len : ℕ) {p : X → Tensor ℝ [N_PARAM]}
+    (hp : ContDiff ℝ 2 p) :
+    ContDiff ℝ 2 fun x => (paramSlice off len).eval (p x) := by
+  sorry
+
+/-- Reshaping a slice is an index reinterpretation. -/
+theorem contDiff_eval_paramBlock (off : ℕ) (s : Shape)
+    [NormedAddCommGroup (Tensor ℝ s)] [NormedSpace ℝ (Tensor ℝ s)]
+    {p : X → Tensor ℝ [N_PARAM]} (hp : ContDiff ℝ 2 p) :
+    ContDiff ℝ 2 fun x => (paramBlock off s).eval (p x) := by
+  sorry
+
+/-- `exp` of a parameter, so positive for every `θ`. -/
+theorem contDiff_eval_posScalar (off : ℕ) {p : X → Tensor ℝ [N_PARAM]}
+    (hp : ContDiff ℝ 2 p) :
+    ContDiff ℝ 2 fun x => (posScalar off).eval (p x) := by
+  sorry
+
+/-- Electron–nucleus displacement: a difference of coordinates. -/
+theorem contDiff_eval_enDisp (N N_nuc : ℕ)
+    {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]}
+    (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) :
+    ContDiff ℝ 2 fun x => (enDisp N N_nuc).eval (r x) (R x) := by
+  sorry
+
+/-- Electron–nucleus distance `√(‖rᵢ - Rα‖² + ε)`: a polynomial under `sqrt`, whose
+argument is `≥ ε = exp θ > 0` — bounded away from the crease of `sqrt` at `0`. -/
+theorem contDiff_eval_enDist (N N_nuc : ℕ)
+    {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (enDist N N_nuc).eval (r x) (R x) (θ x) := by
+  sorry
+
+/-- Same-spin displacement: a difference of coordinates. -/
+theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N,3]}
+    (hr : ContDiff ℝ 2 r) :
+    ContDiff ℝ 2 fun x => (pairDisp N).eval (r x) := by
+  sorry
+
+/-- Same-spin distance `√(‖rⱼ - rᵢ‖² + ε)`; `ε > 0` keeps `sqrt` off `0`. -/
+theorem contDiff_eval_pairDist (N : ℕ)
+    {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (pairDist N).eval (r x) (θ x) := by
+  sorry
+
+/-- Opposite-spin displacement. -/
+theorem contDiff_eval_pairDispCross (N N' : ℕ)
+    {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]}
+    (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') :
+    ContDiff ℝ 2 fun x => (pairDispCross N N').eval (r x) (r' x) := by
+  sorry
+
+/-- Opposite-spin distance, `sqrt` again guarded by `ε > 0`. -/
+theorem contDiff_eval_pairDistCross (N N' : ℕ)
+    {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (pairDistCross N N').eval (r x) (r' x) (θ x) := by
+  sorry
+
+/-! #### The three streams -/
+
+/-- Initial one-electron stream: `enDisp`/`enDist` features contracted with `einsum`
+(the contractum is fixed index data) plus the charge embedding, then `tanh`. -/
+theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
+    {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (oneStreamInit N N_nuc).eval (r x) (R x) Z (θ x) := by
+  sorry
+
+/-- Initial same-spin two-electron stream: `pairDisp`/`pairDist` features, then
+`tanh`. -/
+theorem contDiff_eval_twoStreamInit (N : ℕ)
+    {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (twoStreamInit N).eval (r x) (θ x) := by
+  sorry
+
+/-- Initial opposite-spin two-electron stream. -/
+theorem contDiff_eval_twoStreamInitCross (N N' : ℕ)
+    {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (twoStreamInitCross N N').eval (r x) (r' x) (θ x) := by
+  sorry
+
+/-- One-electron stream update `h ← tanh(V h + Σⱼ w ⊙ g_ij + Σⱼ w' ⊙ g_ij^{σσ̄} + b)`:
+`einsum` contractions (fixed weights) of `C²` inputs, then `tanh`. -/
+theorem contDiff_eval_oneStreamLayer (N N' off : ℕ)
+    {h : X → Tensor ℝ [N,F]} {g : X → Tensor ℝ [N,N,F]} {gC : X → Tensor ℝ [N,N',F]}
+    {θ : X → Tensor ℝ [N_PARAM]}
+    (hh : ContDiff ℝ 2 h) (hg : ContDiff ℝ 2 g) (hgC : ContDiff ℝ 2 gC) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (oneStreamLayer N N' off).eval (h x) (g x) (gC x) (θ x) := by
+  sorry
+
+/-- Same-spin two-electron stream update `g ← tanh(G g + H (h_i + h_j) + c)`. -/
+theorem contDiff_eval_twoStreamLayer (N off : ℕ)
+    {g : X → Tensor ℝ [N,N,F]} {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hg : ContDiff ℝ 2 g) (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (twoStreamLayer N off).eval (g x) (h x) (θ x) := by
+  sorry
+
+/-- Opposite-spin two-electron stream update
+`g^{σσ̄} ← tanh(G' g^{σσ̄} + H' (h_i^σ + h_j^{σ̄}) + c')`. -/
+theorem contDiff_eval_twoStreamLayerCross (N N' off : ℕ)
+    {gC : X → Tensor ℝ [N,N',F]} {h : X → Tensor ℝ [N,F]} {h' : X → Tensor ℝ [N',F]}
+    {θ : X → Tensor ℝ [N_PARAM]}
+    (hgC : ContDiff ℝ 2 gC) (hh : ContDiff ℝ 2 h) (hh' : ContDiff ℝ 2 h') (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (twoStreamLayerCross N N' off).eval (gC x) (h x) (h' x) (θ x) := by
+  sorry
+
+/-! #### Outputs -/
+
+/-- Jastrow factor `Σᵢ w_J · hᵢ`: an `einsum` contraction with fixed weights. -/
+theorem contDiff_eval_jastrow (N : ℕ)
+    {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (jastrow N).eval (h x) (θ x) := by
+  sorry
+
+/-- Exponential envelope `Σα exp A[k,i,α] · ‖xⱼ - Rα‖`: an `einsum` of `exp`-ed
+parameters with the `C²` distances (its values are positive, as the caller needs for
+`exp (-·)`). -/
+theorem contDiff_eval_envelope (N N_nuc : ℕ)
+    {dist : X → Tensor ℝ [N,N_nuc]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hd : ContDiff ℝ 2 dist) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (envelope N N_nuc).eval (dist x) (θ x) := by
+  sorry
+
+/-- Orbital matrix `φᵢᵏ(xⱼ)`: an `einsum` of the stream features with the fixed orbital
+weights, multiplied by the `C²` envelope. -/
+theorem contDiff_eval_orbitalMatrix (N : ℕ)
+    {h : X → Tensor ℝ [N,F]} {envExp : X → Tensor ℝ [K,N,N]} {θ : X → Tensor ℝ [N_PARAM]}
+    (hh : ContDiff ℝ 2 h) (he : ContDiff ℝ 2 envExp) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (orbitalMatrix N).eval (h x) (envExp x) (θ x) := by
+  sorry
+
+/-- Weighted determinant sum `Σₖ exp w_k · detₖ`: `det` (`Xla.contDiff_det`) `vmap`-ed
+over the `K` orbital matrices, summed with positive weights. The `vmap` of `DirectImpl`
+is the only node whose semantics is `Index`-level rather than entrywise; it is the
+`det` leaf applied to each slice, so it is `C²` entrywise in the orbital tensor. -/
+theorem contDiff_eval_detBlock (N : ℕ)
+    {orb : X → Tensor ℝ [K,N,N]} {θ : X → Tensor ℝ [N_PARAM]}
+    (ho : ContDiff ℝ 2 orb) (hθ : ContDiff ℝ 2 θ) :
+    ContDiff ℝ 2 fun x => (detBlock N).eval (orb x) (θ x) := by
+  sorry
+
+end Smoothness
+
+/-- The evaluated program is `C²` in the electron positions: the composition of the
+node lemmas above along the dataflow (see the section docstring). -/
+theorem contDiff_fermiNetAnsatz (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R_nuc : Tensor ℝ [N_nuc,3]) (Z_nuc : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 (fun p : Config N_up N_down =>
+      (fermiNetAnsatz N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) := by
+  -- `simp only [fermiNetAnsatz, reduce_soir, reduce_xla, reduce_tensor]` turns the
+  -- goal into the dataflow of `Expr.eval` applications to the component libraries,
+  -- in exactly the shape the `contDiff_eval_*` lemmas above are stated in, so the
+  -- composition is a chain of `exact`/`ContDiff.comp` applications along it. It is
+  -- left as `sorry` because the normalized program is ~10⁴ nodes (every shared stream
+  -- is inlined at each use, `hU0` alone occurs three times per layer), which makes the
+  -- final definitional-equality check of that chain expensive; the composition itself
+  -- is mechanical. Proving it therefore wants either a split of the program into
+  -- shallower stages, or a `psiEval`-style reference semantics with a separate
+  -- `Expr.eval`-agreement lemma.
+  sorry
+
 /-- Smoothness: every primitive used is real-analytic on its domain (`sqrt` guarded
 away from 0 by `ε > 0`, `tanh` a composition of analytic functions), so `Ψ` is C². -/
 theorem smooth (N_nuc N_up N_down : ℕ) (_ : N_nuc ≠ 0) (_ : N_up + N_down ≠ 0)
     (θ : Fin fermiNet.N_param → ℝ) (R_nuc : Xla.Tensor ℝ [N_nuc, 3])
     (Z_nuc : Xla.Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 (Function.uncurry ((fermiNet.ansatz N_nuc N_up N_down).eval θ R_nuc Z_nuc)) := by
-  sorry
+  have h := contDiff_fermiNetAnsatz N_nuc N_up N_down θ R_nuc Z_nuc
+  -- `Function.uncurry` unfolds to `fun p => ⋯ p.1 p.2`, and `fermiNet.ansatz` is
+  -- `fermiNetAnsatz` (the structure fields of the literal `fermiNet` reduce).
+  show ContDiff ℝ 2 (fun p : Config N_up N_down =>
+    (fermiNet.ansatz N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2)
+  exact h
 
 /-- Exponential decay envelope: `|Ψ| ≤ C exp(-k‖x‖)` for some `C` and `k > 0` —
 the `exp`-reparameterized envelope exponents are positive for every `θ`, the
