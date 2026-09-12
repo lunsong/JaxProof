@@ -11,6 +11,58 @@ PsiFormer, PauliNet, FermiNet with Pfaffians). This file implements the FermiNet
 architecture as a single `Xla.SimpleExpr` program in the Soir/XLA DSL, packaged as
 an `Ansatz` satisfying the contract of `QMC/Ansatz.lean`.
 
+## Style: closed libraries composed with `Expr.apply`
+
+Every reusable component — including `tanh` and the parameter slicing — is a closed
+`SimpleExpr` whose inputs are formal arguments, and the components are composed with
+`Soir.Expr.apply` (`Examples/Coulomb.lean` is the minimal example of the style). The
+emitted IR is therefore a set of `@n` library bodies called by `call; @n, …` instead of
+one flat program.
+
+Why this matters for code generation cost: `Expr.code` (Soir/Core.lean) deduplicates
+sub-expressions by `Expr.hashExpr`, a *structural* hash that re-walks a node's whole
+subtree (calling `toString` on the op of every `bind` node), and it evaluates that
+hash many times per node — once per cache element in the `List.find?` lookups of
+`Expr.genCode`/`Expr.addLib`, and again in `Expr.addVars`. Cost is therefore
+(entries in the scope's cache) × (hash of a subtree), so the size of the scope a
+program is generated in matters quadratically. A flat program is one scope of every
+binding it contains; this file is a short chain of calls whose library bodies are each
+generated in a scope of their own small size.
+
+Measured (Lean 4.33.1, `lake env lean`, interpreter: DAG construction + `Expr.code`,
+so the numbers below exclude the ~2.5 s toolchain startup), against the builder-style
+formulation of this same program that this file replaces:
+
+| program | builder style | this file |
+|---|---|---|
+| `fermiNetAnsatz 2 1 1` (H₂)  | 17.0 s | 0.37 s |
+| `fermiNetAnsatz 1 2 1` (Li)  | 17.2 s | 0.40 s |
+| `fermiNetAnsatz 1 1 2` (Be)  | 17.4 s | 0.40 s |
+| `fermiNetAnsatz 3 4 4` (H₂O) | 16.9 s | 0.37 s |
+
+Both are flat in molecule size (the program structure, not the tensor shapes, drives
+the cost). The emitted IR for H₂O was one 360-binding flat program in the builder style
+versus a 31-binding top level calling 59 libraries here — the scope that the `find?`
+scans run over shrinks from 360 bindings to 31, and each library body is generated in
+its own (small) scope. For scale: one full structural hash of this program takes 3 ms,
+so the builder-style codegen did ~5 700 full-program hashes' worth of work against
+~120 here.
+
+A synthetic depth sweep (`K` inlined vs. `K` applied steps of the same op) shows the
+same constant-factor gap growing with depth (both styles quadratic in `K`):
+
+| `K` | builder | apply |
+|---|---|---|
+| 10 | 14 ms | 1 ms |
+| 20 | 54 ms | 3 ms |
+| 40 | 218 ms | 10 ms |
+| 80 | 868 ms | 35 ms |
+| 160 | – | 138 ms |
+| 320 | – | 544 ms |
+
+`python/emit_ferminet_ir.lean` emits this program for the Python harness, which checks
+its amplitude in the JAX evaluator (`python3 python/test_ferminet.py`).
+
 ## Architecture
 
 Per spin sector `σ ∈ {↑, ↓}` there are three streams of width `F = 32`:
@@ -106,14 +158,13 @@ Everything here is expressed with the existing primitives:
 * nuclear-charge embedding uses `gather` on a `θ`-table indexed by `Z`
   (clamped by `mod`) — `convert_type` is likewise unimplemented in
   `DirectImpl`, so int→float conversion is avoided.
-* parameter slicing for smaller molecules is `gather` over
-  `iota + const` indices; a dedicated slice primitive would be cleaner.
+* parameter slicing for smaller molecules is `gather` over `iota + const` indices;
+  a dedicated slice primitive would be cleaner.
 -/
 
 namespace FermiNet
 
-open Soir
-open Xla
+open Soir Xla
 
 /-! ### Architecture constants -/
 
@@ -156,275 +207,259 @@ def OFF_WDET : ℕ := OFF_WORB + F * K * N_MAX_EL
 /-- Total number of parameters. -/
 def N_PARAM : ℕ := OFF_WDET + K
 
-section
-
-variable {args : List TensorType}
-
 /-! ### Primitives composed from the existing op set -/
 
 /-- `tanh` from primitives: `1 - 2 / (exp (2x) + 1)`. Mathematically exact and
 numerically stable for both signs of overflow. -/
-def tanh {s : Shape} (x : Expr XlaOp args [⟨.float, s⟩]) :
-    Expr XlaOp args [⟨.float, s⟩] :=
-  let two : Expr XlaOp args [⟨.float, s⟩] := Xla.ofNat 2
-  let one : Expr XlaOp args [⟨.float, s⟩] := Xla.ofNat 1
-  let denom := Xla.add (Xla.exp (Xla.mul two x)) one
-  Xla.sub one (Xla.div two denom)
+def tanh (s : Shape) : SimpleExpr [⟨.float, s⟩] ⟨.float, s⟩ :=
+  Expr.ofFn fun x =>
+    let two : Expr XlaOp [⟨.float, s⟩] [⟨.float, s⟩] := Xla.ofNat 2
+    let one : Expr XlaOp [⟨.float, s⟩] [⟨.float, s⟩] := Xla.ofNat 1
+    let denom := Xla.add (Xla.exp (Xla.mul two x)) one
+    Xla.sub one (Xla.div two denom)
 
 /-! ### Parameter access -/
 
 /-- Slice `len` consecutive floats from the parameter vector starting at `off`. -/
-def paramSlice (off len : ℕ) (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [len]⟩] :=
-  let idx : Expr XlaOp args [⟨.int, [len]⟩] :=
-    Xla.add (Xla.iota len) (Xla.ofNat off)
-  Xla.gather (α := .float) (s := [N_PARAM]) (s' := [len]) θ idx
+def paramSlice (off len : ℕ) : SimpleExpr [⟨.float, [N_PARAM]⟩] ⟨.float, [len]⟩ :=
+  Expr.ofFn fun θ =>
+    let idx : Expr XlaOp [⟨.float, [N_PARAM]⟩] [⟨.int, [len]⟩] :=
+      Xla.add (Xla.iota len) (Xla.ofNat off)
+    Xla.gather (α := .float) (s := [N_PARAM]) (s' := [len]) θ idx
 
 /-- Reshape a slice of the parameter vector into a tensor of shape `s`. -/
-def paramBlock (off : ℕ) (s : Shape) (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, s⟩] :=
-  Xla.unflatten s (paramSlice off s.prod θ)
+def paramBlock (off : ℕ) (s : Shape) : SimpleExpr [⟨.float, [N_PARAM]⟩] ⟨.float, s⟩ :=
+  Expr.ofFn fun θ => Xla.unflatten s ((paramSlice off s.prod).apply θ)
 
 /-- A scalar parameter reparameterized through `exp`, so it is `> 0` for every `θ`. -/
-def posScalar (off : ℕ) (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, []⟩] :=
-  Xla.exp (Xla.sum 1 (paramSlice off 1 θ))
+def posScalar (off : ℕ) : SimpleExpr [⟨.float, [N_PARAM]⟩] ⟨.float, []⟩ :=
+  Expr.ofFn fun θ => Xla.exp (Xla.sum 1 ((paramSlice off 1).apply θ))
 
 /-! ### Geometry features -/
 
 /-- Electron–nucleus displacement `rᵢ - Rα`, shape `[N, N_nuc, 3]`. -/
-def enDisp (N N_nuc : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (R : Expr XlaOp args [⟨.float, [N_nuc, 3]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N_nuc, 3]⟩] :=
-  let rB := Xla.broadcast [⟨N, true⟩, ⟨N_nuc, false⟩, ⟨3, true⟩] r
-  let RB := Xla.broadcast [⟨N, false⟩, ⟨N_nuc, true⟩, ⟨3, true⟩] R
-  Xla.sub rB RB
+def enDisp (N N_nuc : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N_nuc, 3]⟩] ⟨.float, [N, N_nuc, 3]⟩ :=
+  Expr.ofFn fun r => fun R =>
+    let rB := Xla.broadcast [⟨N, true⟩, ⟨N_nuc, false⟩, ⟨3, true⟩] r
+    let RB := Xla.broadcast [⟨N, false⟩, ⟨N_nuc, true⟩, ⟨3, true⟩] R
+    Xla.sub rB RB
 
 /-- Electron–nucleus distance `√(‖rᵢ - Rα‖² + ε)` with `ε = exp θ > 0`, keeping the
 square root argument away from the non-analytic point 0. -/
-def enDist (N N_nuc : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (R : Expr XlaOp args [⟨.float, [N_nuc, 3]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N_nuc]⟩] :=
-  let d := enDisp N N_nuc r R
-  let d2 := Xla.mul d d
-  let d2T := Xla.transpose d2 perm[2, 0, 1]
-  let r2 := Xla.sum 1 d2T
-  let eps := posScalar OFF_EPS θ
-  let epsB := Xla.broadcast [⟨N, false⟩, ⟨N_nuc, false⟩] eps
-  Xla.sqrt (Xla.add r2 epsB)
+def enDist (N N_nuc : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N_nuc, 3]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, N_nuc]⟩ :=
+  Expr.ofFn fun r => fun R => fun θ =>
+    let d := (enDisp N N_nuc).apply (r.append R)
+    let d2 := Xla.mul d d
+    let r2 := Xla.sum 1 (Xla.transpose d2 perm[2, 0, 1])
+    let eps := (posScalar OFF_EPS).apply θ
+    Xla.sqrt (Xla.add r2 (Xla.broadcast [⟨N, false⟩, ⟨N_nuc, false⟩] eps))
 
 /-- Same-spin electron–electron displacement `rⱼ - rᵢ`, shape `[N, N, 3]`. -/
-def pairDisp (N : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N, 3]⟩] :=
-  let sender := Xla.broadcast [⟨N, false⟩, ⟨N, true⟩, ⟨3, true⟩] r
-  let receiver := Xla.broadcast [⟨N, true⟩, ⟨N, false⟩, ⟨3, true⟩] r
-  Xla.sub sender receiver
+def pairDisp (N : ℕ) : SimpleExpr [⟨.float, [N, 3]⟩] ⟨.float, [N, N, 3]⟩ :=
+  Expr.ofFn fun r =>
+    let sender := Xla.broadcast [⟨N, false⟩, ⟨N, true⟩, ⟨3, true⟩] r
+    let receiver := Xla.broadcast [⟨N, true⟩, ⟨N, false⟩, ⟨3, true⟩] r
+    Xla.sub sender receiver
 
 /-- Same-spin electron–electron distance `√(‖rⱼ - rᵢ‖² + ε)`. -/
-def pairDist (N : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N]⟩] :=
-  let d := pairDisp N r
-  let d2 := Xla.mul d d
-  let d2T := Xla.transpose d2 perm[2, 0, 1]
-  let r2 := Xla.sum 1 d2T
-  let eps := posScalar OFF_EPS θ
-  let epsB := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩] eps
-  Xla.sqrt (Xla.add r2 epsB)
+def pairDist (N : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N_PARAM]⟩] ⟨.float, [N, N]⟩ :=
+  Expr.ofFn fun r => fun θ =>
+    let d := (pairDisp N).apply r
+    let d2 := Xla.mul d d
+    let r2 := Xla.sum 1 (Xla.transpose d2 perm[2, 0, 1])
+    let eps := (posScalar OFF_EPS).apply θ
+    Xla.sqrt (Xla.add r2 (Xla.broadcast [⟨N, false⟩, ⟨N, false⟩] eps))
 
 /-- Opposite-spin displacement `r'ⱼ - rᵢ`, shape `[N, N', 3]`. -/
-def pairDispCross (N N' : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (r' : Expr XlaOp args [⟨.float, [N', 3]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N', 3]⟩] :=
-  let sender := Xla.broadcast [⟨N, false⟩, ⟨N', true⟩, ⟨3, true⟩] r'
-  let receiver := Xla.broadcast [⟨N, true⟩, ⟨N', false⟩, ⟨3, true⟩] r
-  Xla.sub receiver sender
+def pairDispCross (N N' : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N', 3]⟩] ⟨.float, [N, N', 3]⟩ :=
+  Expr.ofFn fun r => fun r' =>
+    let sender := Xla.broadcast [⟨N, false⟩, ⟨N', true⟩, ⟨3, true⟩] r'
+    let receiver := Xla.broadcast [⟨N, true⟩, ⟨N', false⟩, ⟨3, true⟩] r
+    Xla.sub receiver sender
 
 /-- Opposite-spin distance `√(‖r'ⱼ - rᵢ‖² + ε)`. -/
-def pairDistCross (N N' : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (r' : Expr XlaOp args [⟨.float, [N', 3]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N']⟩] :=
-  let d := pairDispCross N N' r r'
-  let d2 := Xla.mul d d
-  let d2T := Xla.transpose d2 perm[2, 0, 1]
-  let r2 := Xla.sum 1 d2T
-  let eps := posScalar OFF_EPS θ
-  let epsB := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩] eps
-  Xla.sqrt (Xla.add r2 epsB)
+def pairDistCross (N N' : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N', 3]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, N']⟩ :=
+  Expr.ofFn fun r => fun r' => fun θ =>
+    let d := (pairDispCross N N').apply (r.append r')
+    let d2 := Xla.mul d d
+    let r2 := Xla.sum 1 (Xla.transpose d2 perm[2, 0, 1])
+    let eps := (posScalar OFF_EPS).apply θ
+    Xla.sqrt (Xla.add r2 (Xla.broadcast [⟨N, false⟩, ⟨N', false⟩] eps))
 
 /-! ### The three streams -/
 
 /-- Initial one-electron stream: contracts displacement / distance / charge-embedding
 features over the nucleus index into `F` features per electron, then `tanh`. -/
-def oneStreamInit (N N_nuc : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (R : Expr XlaOp args [⟨.float, [N_nuc, 3]⟩])
-    (Z : Expr XlaOp args [⟨.int, [N_nuc]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, F]⟩] :=
-  let disp := enDisp N N_nuc r R
-  let dist := enDist N N_nuc r R θ
-  let ztab := paramBlock OFF_ZTAB [Z_TAB] θ
-  let Zc : Expr XlaOp args [⟨.int, [N_nuc]⟩] :=
-    Xla.mod Z (Xla.ofNat Z_TAB)
-  let zRaw := Xla.gather (α := .float) (s := [Z_TAB]) (s' := [N_nuc]) ztab Zc
-  let wd := paramBlock OFF_WD [N_nuc, 3, F] θ
-  let ws := paramBlock OFF_WS [N_nuc, F] θ
-  let wz := paramBlock OFF_WZ [N_nuc, F] θ
-  let dispT := Xla.transpose disp perm[1, 2, 0]
-  let distT := Xla.transpose dist perm[1, 0]
-  let zB := Xla.broadcast [⟨N, false⟩, ⟨N_nuc, true⟩] zRaw
-  let zT := Xla.transpose zB perm[1, 0]
-  let tD := Xla.einsum (s := [N_nuc, 3, N, F]) [[#0, #1, #2], [#0, #1, #3]] 2
-    (dispT.append wd)
-  let tS := Xla.einsum (s := [N_nuc, N, F]) [[#0, #1], [#0, #2]] 1 (distT.append ws)
-  let tZ := Xla.einsum (s := [N_nuc, N, F]) [[#0, #1], [#0, #2]] 1 (zT.append wz)
-  let b0 := Xla.broadcast [⟨N, false⟩, ⟨F, true⟩] (paramSlice OFF_B0 F θ)
-  tanh (Xla.add (Xla.add (Xla.add tD tS) tZ) b0)
+def oneStreamInit (N N_nuc : ℕ) :
+    SimpleExpr
+      [⟨.float, [N, 3]⟩, ⟨.float, [N_nuc, 3]⟩, ⟨.int, [N_nuc]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, F]⟩ :=
+  Expr.ofFn fun r => fun R => fun Z => fun θ =>
+    let disp := (enDisp N N_nuc).apply (r.append R)
+    let dist := (enDist N N_nuc).apply ((r.append R).append θ)
+    let ztab := (paramBlock OFF_ZTAB [Z_TAB]).apply θ
+    let Zc : Expr XlaOp _ [⟨.int, [N_nuc]⟩] := Xla.mod Z (Xla.ofNat Z_TAB)
+    let zRaw := Xla.gather (α := .float) (s := [Z_TAB]) (s' := [N_nuc]) ztab Zc
+    let wd := (paramBlock OFF_WD [N_nuc, 3, F]).apply θ
+    let ws := (paramBlock OFF_WS [N_nuc, F]).apply θ
+    let wz := (paramBlock OFF_WZ [N_nuc, F]).apply θ
+    let dispT := Xla.transpose disp perm[1, 2, 0]
+    let distT := Xla.transpose dist perm[1, 0]
+    let zB := Xla.broadcast [⟨N, false⟩, ⟨N_nuc, true⟩] zRaw
+    let zT := Xla.transpose zB perm[1, 0]
+    let tD := Xla.einsum (s := [N_nuc, 3, N, F]) [[#0, #1, #2], [#0, #1, #3]] 2
+      (dispT.append wd)
+    let tS := Xla.einsum (s := [N_nuc, N, F]) [[#0, #1], [#0, #2]] 1 (distT.append ws)
+    let tZ := Xla.einsum (s := [N_nuc, N, F]) [[#0, #1], [#0, #2]] 1 (zT.append wz)
+    let b0 := Xla.broadcast [⟨N, false⟩, ⟨F, true⟩] ((paramSlice OFF_B0 F).apply θ)
+    (tanh [N, F]).apply (Xla.add (Xla.add (Xla.add tD tS) tZ) b0)
 
 /-- Initial same-spin two-electron stream: per-pair displacement and distance
 features contracted to width `F`, then `tanh`. -/
-def twoStreamInit (N : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N, F]⟩] :=
-  let pd := pairDisp N r
-  let pd2 := pairDist N r θ
-  let we := paramBlock OFF_WE [3, F] θ
-  let wd := paramSlice OFF_WD2 F θ
-  let pdT := Xla.transpose pd perm[2, 0, 1]
-  let tD := Xla.einsum (s := [3, N, N, F]) [[#0, #1, #2], [#0, #3]] 1 (pdT.append we)
-  let wdB := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩, ⟨F, true⟩] wd
-  let pd2B := Xla.broadcast [⟨N, true⟩, ⟨N, true⟩, ⟨F, false⟩] pd2
-  let tS := Xla.mul pd2B wdB
-  let gb := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩, ⟨F, true⟩] (paramSlice OFF_GB F θ)
-  tanh (Xla.add (Xla.add tD tS) gb)
+def twoStreamInit (N : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N_PARAM]⟩] ⟨.float, [N, N, F]⟩ :=
+  Expr.ofFn fun r => fun θ =>
+    let pd := (pairDisp N).apply r
+    let pd2 := (pairDist N).apply (r.append θ)
+    let we := (paramBlock OFF_WE [3, F]).apply θ
+    let wd := (paramSlice OFF_WD2 F).apply θ
+    let pdT := Xla.transpose pd perm[2, 0, 1]
+    let tD := Xla.einsum (s := [3, N, N, F]) [[#0, #1, #2], [#0, #3]] 1 (pdT.append we)
+    let wdB := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩, ⟨F, true⟩] wd
+    let pd2B := Xla.broadcast [⟨N, true⟩, ⟨N, true⟩, ⟨F, false⟩] pd2
+    let tS := Xla.mul pd2B wdB
+    let gb := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩, ⟨F, true⟩] ((paramSlice OFF_GB F).apply θ)
+    (tanh [N, N, F]).apply (Xla.add (Xla.add tD tS) gb)
 
 /-- Initial opposite-spin two-electron stream. -/
-def twoStreamInitCross (N N' : ℕ) (r : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (r' : Expr XlaOp args [⟨.float, [N', 3]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N', F]⟩] :=
-  let pd := pairDispCross N N' r r'
-  let pd2 := pairDistCross N N' r r' θ
-  let we := paramBlock OFF_WE [3, F] θ
-  let wd := paramSlice OFF_WD2 F θ
-  let pdT := Xla.transpose pd perm[2, 0, 1]
-  let tD := Xla.einsum (s := [3, N, N', F]) [[#0, #1, #2], [#0, #3]] 1 (pdT.append we)
-  let wdB := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩, ⟨F, true⟩] wd
-  let pd2B := Xla.broadcast [⟨N, true⟩, ⟨N', true⟩, ⟨F, false⟩] pd2
-  let tS := Xla.mul pd2B wdB
-  let gb := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩, ⟨F, true⟩] (paramSlice OFF_GB F θ)
-  tanh (Xla.add (Xla.add tD tS) gb)
+def twoStreamInitCross (N N' : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [N', 3]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, N', F]⟩ :=
+  Expr.ofFn fun r => fun r' => fun θ =>
+    let pd := (pairDispCross N N').apply (r.append r')
+    let pd2 := (pairDistCross N N').apply ((r.append r').append θ)
+    let we := (paramBlock OFF_WE [3, F]).apply θ
+    let wd := (paramSlice OFF_WD2 F).apply θ
+    let pdT := Xla.transpose pd perm[2, 0, 1]
+    let tD := Xla.einsum (s := [3, N, N', F]) [[#0, #1, #2], [#0, #3]] 1 (pdT.append we)
+    let wdB := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩, ⟨F, true⟩] wd
+    let pd2B := Xla.broadcast [⟨N, true⟩, ⟨N', true⟩, ⟨F, false⟩] pd2
+    let tS := Xla.mul pd2B wdB
+    let gb := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩, ⟨F, true⟩] ((paramSlice OFF_GB F).apply θ)
+    (tanh [N, N', F]).apply (Xla.add (Xla.add tD tS) gb)
 
 /-! ### Layer updates -/
 
 /-- One-electron stream update: `h ← tanh(V h + Σⱼ w ⊙ g_ij + Σⱼ w' ⊙ g_ij^{σσ̄} + b)`. -/
-def oneStreamLayer (N N' : ℕ) (h : Expr XlaOp args [⟨.float, [N, F]⟩])
-    (g : Expr XlaOp args [⟨.float, [N, N, F]⟩])
-    (gC : Expr XlaOp args [⟨.float, [N, N', F]⟩]) (off : ℕ)
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, F]⟩] :=
-  let V := paramBlock off [F, F] θ
-  let w := paramSlice (off + 1024) F θ
-  let wC := paramSlice (off + 1056) F θ
-  let b := paramSlice (off + 1088) F θ
-  let tV := Xla.einsum (s := [F, N, F]) [[#1, #0], [#0, #2]] 1 (h.append V)
-  let tG := Xla.einsum (s := [N, N, F]) [[#0, #1, #2], [#2]] 1 (g.append w)
-  let gCT := Xla.transpose gC perm[1, 0, 2]
-  let tGC := Xla.einsum (s := [N', N, F]) [[#0, #1, #2], [#2]] 1 (gCT.append wC)
-  let bB := Xla.broadcast [⟨N, false⟩, ⟨F, true⟩] b
-  tanh (Xla.add (Xla.add (Xla.add tV tG) tGC) bB)
+def oneStreamLayer (N N' off : ℕ) :
+    SimpleExpr
+      [⟨.float, [N, F]⟩, ⟨.float, [N, N, F]⟩, ⟨.float, [N, N', F]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, F]⟩ :=
+  Expr.ofFn fun h => fun g => fun gC => fun θ =>
+    let V := (paramBlock off [F, F]).apply θ
+    let w := (paramSlice (off + 1024) F).apply θ
+    let wC := (paramSlice (off + 1056) F).apply θ
+    let b := (paramSlice (off + 1088) F).apply θ
+    let tV := Xla.einsum (s := [F, N, F]) [[#1, #0], [#0, #2]] 1 (h.append V)
+    let tG := Xla.einsum (s := [N, N, F]) [[#0, #1, #2], [#2]] 1 (g.append w)
+    let gCT := Xla.transpose gC perm[1, 0, 2]
+    let tGC := Xla.einsum (s := [N', N, F]) [[#0, #1, #2], [#2]] 1 (gCT.append wC)
+    let bB := Xla.broadcast [⟨N, false⟩, ⟨F, true⟩] b
+    (tanh [N, F]).apply (Xla.add (Xla.add (Xla.add tV tG) tGC) bB)
 
 /-- Same-spin two-electron stream update:
 `g ← tanh(G g + H (h_i + h_j) + c)`. -/
-def twoStreamLayer (N : ℕ) (g : Expr XlaOp args [⟨.float, [N, N, F]⟩])
-    (h : Expr XlaOp args [⟨.float, [N, F]⟩]) (off : ℕ)
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N, F]⟩] :=
-  let G := paramBlock (off + 1120) [F, F] θ
-  let H := paramBlock (off + 2144) [F, F] θ
-  let c := paramSlice (off + 3168) F θ
-  let gT := Xla.transpose g perm[2, 0, 1]
-  let tG := Xla.einsum (s := [F, N, N, F]) [[#0, #1, #2], [#0, #3]] 1 (gT.append G)
-  let hA := Xla.broadcast [⟨N, false⟩, ⟨N, true⟩, ⟨F, true⟩] h
-  let hB := Xla.broadcast [⟨N, true⟩, ⟨N, false⟩, ⟨F, true⟩] h
-  let hS := Xla.transpose (Xla.add hA hB) perm[2, 0, 1]
-  let tH := Xla.einsum (s := [F, N, N, F]) [[#0, #1, #2], [#0, #3]] 1 (hS.append H)
-  let cB := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩, ⟨F, true⟩] c
-  tanh (Xla.add (Xla.add tG tH) cB)
+def twoStreamLayer (N off : ℕ) :
+    SimpleExpr [⟨.float, [N, N, F]⟩, ⟨.float, [N, F]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, N, F]⟩ :=
+  Expr.ofFn fun g => fun h => fun θ =>
+    let G := (paramBlock (off + 1120) [F, F]).apply θ
+    let H := (paramBlock (off + 2144) [F, F]).apply θ
+    let c := (paramSlice (off + 3168) F).apply θ
+    let gT := Xla.transpose g perm[2, 0, 1]
+    let tG := Xla.einsum (s := [F, N, N, F]) [[#0, #1, #2], [#0, #3]] 1 (gT.append G)
+    let hA := Xla.broadcast [⟨N, false⟩, ⟨N, true⟩, ⟨F, true⟩] h
+    let hB := Xla.broadcast [⟨N, true⟩, ⟨N, false⟩, ⟨F, true⟩] h
+    let hS := Xla.transpose (Xla.add hA hB) perm[2, 0, 1]
+    let tH := Xla.einsum (s := [F, N, N, F]) [[#0, #1, #2], [#0, #3]] 1 (hS.append H)
+    let cB := Xla.broadcast [⟨N, false⟩, ⟨N, false⟩, ⟨F, true⟩] c
+    (tanh [N, N, F]).apply (Xla.add (Xla.add tG tH) cB)
 
 /-- Opposite-spin two-electron stream update:
 `g^{σσ̄} ← tanh(G' g^{σσ̄} + H' (h_i^σ + h_j^{σ̄}) + c')`. -/
-def twoStreamLayerCross (N N' : ℕ) (gC : Expr XlaOp args [⟨.float, [N, N', F]⟩])
-    (h : Expr XlaOp args [⟨.float, [N, F]⟩])
-    (h' : Expr XlaOp args [⟨.float, [N', F]⟩]) (off : ℕ)
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [N, N', F]⟩] :=
-  let G := paramBlock (off + 3200) [F, F] θ
-  let H := paramBlock (off + 4224) [F, F] θ
-  let c := paramSlice (off + 5248) F θ
-  let gT := Xla.transpose gC perm[2, 0, 1]
-  let tG := Xla.einsum (s := [F, N, N', F]) [[#0, #1, #2], [#0, #3]] 1 (gT.append G)
-  let hA := Xla.broadcast [⟨N, true⟩, ⟨N', false⟩, ⟨F, true⟩] h
-  let hB := Xla.broadcast [⟨N, false⟩, ⟨N', true⟩, ⟨F, true⟩] h'
-  let hS := Xla.transpose (Xla.add hA hB) perm[2, 0, 1]
-  let tH := Xla.einsum (s := [F, N, N', F]) [[#0, #1, #2], [#0, #3]] 1 (hS.append H)
-  let cB := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩, ⟨F, true⟩] c
-  tanh (Xla.add (Xla.add tG tH) cB)
+def twoStreamLayerCross (N N' off : ℕ) :
+    SimpleExpr [⟨.float, [N, N', F]⟩, ⟨.float, [N, F]⟩, ⟨.float, [N', F]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [N, N', F]⟩ :=
+  Expr.ofFn fun gC => fun h => fun h' => fun θ =>
+    let G := (paramBlock (off + 3200) [F, F]).apply θ
+    let H := (paramBlock (off + 4224) [F, F]).apply θ
+    let c := (paramSlice (off + 5248) F).apply θ
+    let gT := Xla.transpose gC perm[2, 0, 1]
+    let tG := Xla.einsum (s := [F, N, N', F]) [[#0, #1, #2], [#0, #3]] 1 (gT.append G)
+    let hA := Xla.broadcast [⟨N, true⟩, ⟨N', false⟩, ⟨F, true⟩] h
+    let hB := Xla.broadcast [⟨N, false⟩, ⟨N', true⟩, ⟨F, true⟩] h'
+    let hS := Xla.transpose (Xla.add hA hB) perm[2, 0, 1]
+    let tH := Xla.einsum (s := [F, N, N', F]) [[#0, #1, #2], [#0, #3]] 1 (hS.append H)
+    let cB := Xla.broadcast [⟨N, false⟩, ⟨N', false⟩, ⟨F, true⟩] c
+    (tanh [N, N', F]).apply (Xla.add (Xla.add tG tH) cB)
 
 /-! ### Outputs -/
 
 /-- Bounded Jastrow factor `J = Σᵢ w_J · hᵢ` (scalar). -/
-def jastrow (N : ℕ) (h : Expr XlaOp args [⟨.float, [N, F]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, []⟩] :=
-  let wJ := paramSlice OFF_WJ F θ
-  Xla.einsum (s := [N, F]) [[#0, #1], [#1]] 2 (h.append wJ)
+def jastrow (N : ℕ) :
+    SimpleExpr [⟨.float, [N, F]⟩, ⟨.float, [N_PARAM]⟩] ⟨.float, []⟩ :=
+  Expr.ofFn fun h => fun θ =>
+    let wJ := (paramSlice OFF_WJ F).apply θ
+    Xla.einsum (s := [N, F]) [[#0, #1], [#1]] 2 (h.append wJ)
 
 /-- Per-orbital exponential envelope, shape `[K, N, N]`: entry `(k, j, i)` is
 `exp(-Σα exp A[k,i,α] · ‖xⱼ - Rα‖)`, the FermiNet envelope with decay exponents
 parameterized by *orbital* `(k, i)` and evaluated on electron `j` (FermiNet,
 Eq. 19). Indexing the parameters by orbital — not by electron — is what makes the
 envelope a permutation-*equivariant* function of the electron positions. -/
-def envelope (N N_nuc : ℕ) (dist : Expr XlaOp args [⟨.float, [N, N_nuc]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [K, N, N]⟩] :=
-  let A := paramBlock OFF_A [K, N, N_nuc] θ
-  let Aexp := Xla.exp A
-  let dT := Xla.transpose dist perm[1, 0]
-  let e := Xla.einsum (s := [N_nuc, K, N, N]) [[#1, #2, #0], [#0, #3]] 1
-    (Aexp.append dT)
-  Xla.transpose e perm[0, 2, 1]
+def envelope (N N_nuc : ℕ) :
+    SimpleExpr [⟨.float, [N, N_nuc]⟩, ⟨.float, [N_PARAM]⟩] ⟨.float, [K, N, N]⟩ :=
+  Expr.ofFn fun dist => fun θ =>
+    let A := (paramBlock OFF_A [K, N, N_nuc]).apply θ
+    let Aexp := Xla.exp A
+    let dT := Xla.transpose dist perm[1, 0]
+    let e := Xla.einsum (s := [N_nuc, K, N, N]) [[#1, #2, #0], [#0, #3]] 1
+      (Aexp.append dT)
+    Xla.transpose e perm[0, 2, 1]
 
 /-- Orbital matrix of shape `[K, N, N]`: entry `(k, j, i)` is
 `φᵢᵏ(xⱼ) = (w_k,i · h_j) · exp(-eᵢᵏ(xⱼ))`, i.e. determinant `k`'s matrix with rows
 indexed by electrons `j` and columns by orbitals `i` (the transpose orientation
 is immaterial for the determinant), with the per-orbital envelope applied
 elementwise. -/
-def orbitalMatrix (N : ℕ) (h : Expr XlaOp args [⟨.float, [N, F]⟩])
-    (envExp : Expr XlaOp args [⟨.float, [K, N, N]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, [K, N, N]⟩] :=
-  let worb := paramBlock OFF_WORB [F, K, N] θ
-  let φ := Xla.einsum (s := [F, N, K, N]) [[#1, #0], [#0, #2, #3]] 1 (h.append worb)
-  let φT := Xla.transpose φ perm[1, 0, 2]
-  Xla.mul φT envExp
+def orbitalMatrix (N : ℕ) :
+    SimpleExpr [⟨.float, [N, F]⟩, ⟨.float, [K, N, N]⟩, ⟨.float, [N_PARAM]⟩]
+      ⟨.float, [K, N, N]⟩ :=
+  Expr.ofFn fun h => fun envExp => fun θ =>
+    let worb := (paramBlock OFF_WORB [F, K, N]).apply θ
+    let φ := Xla.einsum (s := [F, N, K, N]) [[#1, #0], [#0, #2, #3]] 1 (h.append worb)
+    let φT := Xla.transpose φ perm[1, 0, 2]
+    Xla.mul φT envExp
 
 /-- `det` as a library function, for `vmap`-ing over the determinant axis. -/
 def detExpr (n : ℕ) : Expr XlaOp [⟨.float, [n, n]⟩] [⟨.float, []⟩] :=
-  Soir.Expr.ofFn fun x => Xla.det x
+  Expr.ofFn fun x => Xla.det x
 
 /-- Weighted sum of the `K` determinants of a spin sector: `Σₖ exp w_k · detₖ`. -/
-def detBlock (N : ℕ) (orb : Expr XlaOp args [⟨.float, [K, N, N]⟩])
-    (θ : Expr XlaOp args [⟨.float, [N_PARAM]⟩]) :
-    Expr XlaOp args [⟨.float, []⟩] :=
-  let dets := Xla.vmap (batch := K) (ins := [⟨.float, [N, N]⟩]) (outs := [⟨.float, []⟩])
-    (detExpr N) orb .nil
-  let wdet := Xla.exp (paramSlice OFF_WDET K θ)
-  Xla.sum 1 (Xla.mul dets wdet)
-
-end
+def detBlock (N : ℕ) :
+    SimpleExpr [⟨.float, [K, N, N]⟩, ⟨.float, [N_PARAM]⟩] ⟨.float, []⟩ :=
+  Expr.ofFn fun orb => fun θ =>
+    let dets := Xla.vmap (batch := K) (ins := [⟨.float, [N, N]⟩]) (outs := [⟨.float, []⟩])
+      (detExpr N) orb .nil
+    let wdet := Xla.exp ((paramSlice OFF_WDET K).apply θ)
+    Xla.sum 1 (Xla.mul dets wdet)
 
 /-! ### The ansatz -/
 
@@ -438,37 +473,43 @@ def fermiNetAnsatz (N_nuc N_up N_down : ℕ) : Xla.SimpleExpr
       ⟨.float, [N_up, 3]⟩, -- positions of spin up electrons
       ⟨.float, [N_down, 3]⟩] -- positions of spin down electrons
     ⟨.float, []⟩ :=
-  Soir.Expr.ofFn fun θ => fun R => fun Z => fun rUp => fun rDown =>
-    let hU0 := oneStreamInit N_up N_nuc rUp R Z θ
-    let hD0 := oneStreamInit N_down N_nuc rDown R Z θ
-    let gU0 := twoStreamInit N_up rUp θ
-    let gD0 := twoStreamInit N_down rDown θ
-    let gUD0 := twoStreamInitCross N_up N_down rUp rDown θ
-    let gDU0 := twoStreamInitCross N_down N_up rDown rUp θ
+  Expr.ofFn fun θ => fun R => fun Z => fun rUp => fun rDown =>
+    let hU0 := (oneStreamInit N_up N_nuc).apply (((rUp.append R).append Z).append θ)
+    let hD0 := (oneStreamInit N_down N_nuc).apply (((rDown.append R).append Z).append θ)
+    let gU0 := (twoStreamInit N_up).apply (rUp.append θ)
+    let gD0 := (twoStreamInit N_down).apply (rDown.append θ)
+    let gUD0 := (twoStreamInitCross N_up N_down).apply ((rUp.append rDown).append θ)
+    let gDU0 := (twoStreamInitCross N_down N_up).apply ((rDown.append rUp).append θ)
     -- layer 0
-    let hU1 := oneStreamLayer N_up N_down hU0 gU0 gUD0 OFF_L0 θ
-    let hD1 := oneStreamLayer N_down N_up hD0 gD0 gDU0 OFF_L0 θ
-    let gU1 := twoStreamLayer N_up gU0 hU0 OFF_L0 θ
-    let gD1 := twoStreamLayer N_down gD0 hD0 OFF_L0 θ
-    let gUD1 := twoStreamLayerCross N_up N_down gUD0 hU0 hD0 OFF_L0 θ
-    let gDU1 := twoStreamLayerCross N_down N_up gDU0 hD0 hU0 OFF_L0 θ
+    let hU1 := (oneStreamLayer N_up N_down OFF_L0).apply
+      (((hU0.append gU0).append gUD0).append θ)
+    let hD1 := (oneStreamLayer N_down N_up OFF_L0).apply
+      (((hD0.append gD0).append gDU0).append θ)
+    let gU1 := (twoStreamLayer N_up OFF_L0).apply ((gU0.append hU0).append θ)
+    let gD1 := (twoStreamLayer N_down OFF_L0).apply ((gD0.append hD0).append θ)
+    let gUD1 := (twoStreamLayerCross N_up N_down OFF_L0).apply
+      (((gUD0.append hU0).append hD0).append θ)
+    let gDU1 := (twoStreamLayerCross N_down N_up OFF_L0).apply
+      (((gDU0.append hD0).append hU0).append θ)
     -- layer 1
-    let hU2 := oneStreamLayer N_up N_down hU1 gU1 gUD1 OFF_L1 θ
-    let hD2 := oneStreamLayer N_down N_up hD1 gD1 gDU1 OFF_L1 θ
+    let hU2 := (oneStreamLayer N_up N_down OFF_L1).apply
+      (((hU1.append gU1).append gUD1).append θ)
+    let hD2 := (oneStreamLayer N_down N_up OFF_L1).apply
+      (((hD1.append gD1).append gDU1).append θ)
     -- Jastrow factor (the streams are tanh-bounded, so `exp J` is bounded)
-    let JU := jastrow N_up hU2 θ
-    let JD := jastrow N_down hD2 θ
+    let JU := (jastrow N_up).apply (hU2.append θ)
+    let JD := (jastrow N_down).apply (hD2.append θ)
     let J := Xla.exp (Xla.add JU JD)
     -- exponential envelopes
-    let distU := enDist N_up N_nuc rUp R θ
-    let distD := enDist N_down N_nuc rDown R θ
-    let envU := Xla.exp (Xla.neg (envelope N_up N_nuc distU θ))
-    let envD := Xla.exp (Xla.neg (envelope N_down N_nuc distD θ))
+    let distU := (enDist N_up N_nuc).apply ((rUp.append R).append θ)
+    let distD := (enDist N_down N_nuc).apply ((rDown.append R).append θ)
+    let envU := Xla.exp (Xla.neg ((envelope N_up N_nuc).apply (distU.append θ)))
+    let envD := Xla.exp (Xla.neg ((envelope N_down N_nuc).apply (distD.append θ)))
     -- determinants
-    let orbU := orbitalMatrix N_up hU2 envU θ
-    let orbD := orbitalMatrix N_down hD2 envD θ
-    let detU := detBlock N_up orbU θ
-    let detD := detBlock N_down orbD θ
+    let orbU := (orbitalMatrix N_up).apply ((hU2.append envU).append θ)
+    let orbD := (orbitalMatrix N_down).apply ((hD2.append envD).append θ)
+    let detU := (detBlock N_up).apply (orbU.append θ)
+    let detD := (detBlock N_down).apply (orbD.append θ)
     Xla.mul (Xla.mul J detU) detD
 
 /-- The FermiNet `Ansatz`. -/
