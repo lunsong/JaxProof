@@ -63,11 +63,10 @@ open Xla in
 example {n_atom : ℕ} (x : Fin n_atom → Fin 3 → ℝ) :
     coulomb.eval x = ∑ i, ∑ j with i ≠ j, 1 / √(∑ k, (x i k - x j k) ^ 2) := by
   have h0 := diag_mask_def (n := n_atom)
-  simp [Xla.SimpleExpr.eval, Soir.Curry.map] at h0
+  have h1 := mutual_distance_def (n_atom := n_atom)
+  simp [Xla.SimpleExpr.eval, Soir.Curry.map] at h0 h1
   replace h0 := fun i ↦ funext (h0 i)
   replace h0 := funext h0
-  have h1 := mutual_distance_def (n_atom := n_atom)
-  simp [Xla.SimpleExpr.eval, Soir.Curry.map] at h1
   conv_lhs =>
     simp [coulomb, reduce_xla, reduce_soir, h0, h1, reduce_tensor]
     arg 2; intro i

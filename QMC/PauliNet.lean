@@ -10,6 +10,29 @@ antisymmetry, C² smoothness, exponential envelope). All proofs are `sorry`; the
 architecture is chosen so that all three contract fields are *true*, i.e. the sorries
 are dischargeable in principle (see the per-field notes at the bottom).
 
+## Style: closed libraries composed with `Expr.apply`
+
+As in `QMC/FermiNet.lean` (whose module docstring analyzes the codegen cost model in
+detail), every reusable component is a closed `SimpleExpr` whose inputs are formal
+arguments, composed with `Soir.Expr.apply`. `Expr.code` deduplicates sub-expressions
+by a structural hash whose cost is quadratic in the size of the scope a program is
+generated in; a flat PauliNet program is one scope of every binding it contains —
+each SchNet block inlines the filter MLP six times, each determinant head inlines
+the RBF/envelope/gather machinery, etc. As libraries, each body is generated once in
+its own small scope and the top level is a short chain of `call; @n`.
+
+Measured (Lean 4.33.1, `lake env lean QMC/PauliNet.lean`, including toolchain
+startup and elaboration), builder style vs. this file:
+
+| | builder style | apply style |
+|---|---|---|
+| whole file incl. `#eval (pauliNet.ansatz 2 1 1).code` | 1 m 53 s | 4.3 s |
+
+The flat H₂ program had 605 top-level bindings; here the top level is 36 bindings
+calling 90 libraries. The emitted program evaluates bitwise-identically to the
+builder-style one in the JAX harness (`python/eval.py`), for both H₂ (2,1,1) and
+LiH (1,2,1).
+
 ## Architecture choice: PauliNet / SchNet family
 
 The contract fixes `N_param` once and for all, while the ansatz must serve *all*
@@ -81,7 +104,7 @@ so we cast through provable shape equalities. -/
 @[simp] theorem map_fst_pair (b : Bool) (s : Shape) : s.map (Prod.fst ∘ (⟨·, b⟩)) = s := by
   induction s with
   | nil => rfl
-  | cons a s ih => simp [Function.comp_def, ih]
+  | cons a s ih => simp [Function.comp_def]
 
 @[simp] theorem preBroadcast_map_true (s : Shape) :
     Tensor.preBroadcast (s.map (⟨·, true⟩)) = s := by
@@ -113,93 +136,6 @@ def bcastInsert {α : DType} (pre mid post : Shape) (x : Expr XlaOp args [⟨α,
   Xla.cast (by simp) <|
     Xla.broadcast (pre.map (⟨·, true⟩) ++ mid.map (⟨·, false⟩) ++ post.map (⟨·, true⟩)) <|
       Xla.cast (by simp) x
-
-/-! ## Basic building blocks -/
-
-/-- `tanh` from `exp` and `div` (both have real `DirectImpl` semantics; the `tanh`
-prim is a zero stub). Denominator `exp(2x)+1 ≥ 1`, so this is real-analytic. -/
-def tanh' {s : Shape} (x : Expr XlaOp args [⟨.float, s⟩]) : Expr XlaOp args [⟨.float, s⟩] :=
-  let one : Expr XlaOp args [⟨.float, s⟩] := Xla.ofNat 1
-  let two : Expr XlaOp args [⟨.float, s⟩] := Xla.ofNat 2
-  let e := Xla.exp (Xla.mul two x)
-  Xla.sub one (Xla.div two (Xla.add e one))
-
-/-- Squared pairwise distances `d²[i,j] = ‖xᵢ - yⱼ‖²` (never `sqrt`: C²-safe). -/
-def pairDist2 {N M : ℕ} (x : Expr XlaOp args [⟨.float, [N, 3]⟩])
-    (y : Expr XlaOp args [⟨.float, [M, 3]⟩]) : Expr XlaOp args [⟨.float, [N, M]⟩] :=
-  let xb := bcastInsert [N] [M] [3] x
-  let yb := bcastPrepend [N] [M, 3] y
-  let d := Xla.sub xb yb
-  Xla.sum 1 (Xla.transpose (Xla.mul d d) perm[2,0,1])
-
-/-- Linear layer `y = x Wᵀ + b` on a `[N, d]` particle-feature tensor. -/
-def linear {N d d' : ℕ} (W : Expr XlaOp args [⟨.float, [d', d]⟩])
-    (b : Expr XlaOp args [⟨.float, [d']⟩])
-    (x : Expr XlaOp args [⟨.float, [N, d]⟩]) : Expr XlaOp args [⟨.float, [N, d']⟩] :=
-  let y := Xla.einsum [d, N, d'] [[#1, #0], [#2, #0]] 1 (x.append W)
-  Xla.add y (Xla.broadcast [⟨N, false⟩, ⟨d', true⟩] b)
-
-/-- Linear layer on the last axis of a `[A, B, K]` pair-feature tensor. -/
-def linear3 {A B K d : ℕ} (W : Expr XlaOp args [⟨.float, [d, K]⟩])
-    (b : Expr XlaOp args [⟨.float, [d]⟩])
-    (x : Expr XlaOp args [⟨.float, [A, B, K]⟩]) : Expr XlaOp args [⟨.float, [A, B, d]⟩] :=
-  let y := Xla.einsum [K, A, B, d] [[#1, #2, #0], [#3, #0]] 1 (x.append W)
-  Xla.add y (Xla.broadcast [⟨A, false⟩, ⟨B, false⟩, ⟨d, true⟩] b)
-
-/-- Gaussian radial basis of squared distances: `exp(-exp(γₖ)·(d²-μₖ)²)`; appends a
-basis axis. Centers/widths are learned (`∀θ`-safe: `exp(γₖ) > 0` always). Bounded and
-real-analytic in the electron coordinates. -/
-def rbf {s : Shape} {K : ℕ} (μ γ : Expr XlaOp args [⟨.float, [K]⟩])
-    (d2 : Expr XlaOp args [⟨.float, s⟩]) : Expr XlaOp args [⟨.float, s ++ [K]⟩] :=
-  let d2b := bcastAppend s [K] d2
-  let μb := bcastPrepend s [K] μ
-  let γb := bcastPrepend s [K] γ
-  let r := Xla.sub d2b μb
-  Xla.exp (Xla.neg (Xla.mul (Xla.exp γb) (Xla.mul r r)))
-
-/-- SchNet message: `mᵢ = Σⱼ F[i,j,:] ⊙ h[j,:]` as one einsum. -/
-def message {N M d : ℕ} (F : Expr XlaOp args [⟨.float, [N, M, d]⟩])
-    (h : Expr XlaOp args [⟨.float, [M, d]⟩]) : Expr XlaOp args [⟨.float, [N, d]⟩] :=
-  Xla.einsum [M, N, d] [[#1, #0, #2], [#0, #2]] 1 (F.append h)
-
-/-- Row index `k ↦ k mod P` (integer index arithmetic — allowed op discipline). -/
-def modIdx (N P : ℕ) : Expr XlaOp args [⟨.int, [N]⟩] :=
-  Xla.mod (Xla.iota N) (Xla.ofNat P)
-
-/-- Gather rows of `U : [P, N]` picked by `rowidx : [N]` into an `[N, N]` matrix. -/
-def gatherRows {P N : ℕ} (U : Expr XlaOp args [⟨.float, [P, N]⟩])
-    (rowidx : Expr XlaOp args [⟨.int, [N]⟩]) : Expr XlaOp args [⟨.float, [N, N]⟩] :=
-  let i₀ := bcastAppend [N] [N] rowidx
-  let i₁ := bcastPrepend [N] [N] (Xla.iota N)
-  Xla.gather U (i₀.append i₁)
-
-/-- Nuclear embeddings: rows of a `Zmax × d` table gathered by atomic number. -/
-def embedNuc {Zmax d N_nuc : ℕ} (table : Expr XlaOp args [⟨.float, [Zmax, d]⟩])
-    (Z : Expr XlaOp args [⟨.int, [N_nuc]⟩]) : Expr XlaOp args [⟨.float, [N_nuc, d]⟩] :=
-  let i₀ := bcastAppend [N_nuc] [d] Z
-  let i₁ := bcastPrepend [N_nuc] [d] (Xla.iota d)
-  Xla.gather table (i₀.append i₁)
-
-/-- Orbital envelope matrix: `Env[k,i] = Σ_I exp(-ζpool[k]·d²[i,I])`, `ζpool > 0`
-(caller passes `exp ζraw`). -/
-def envelope {N N_nuc P' : ℕ} (ζpool : Expr XlaOp args [⟨.float, [P']⟩])
-    (rowidx : Expr XlaOp args [⟨.int, [N]⟩])
-    (d2 : Expr XlaOp args [⟨.float, [N, N_nuc]⟩]) : Expr XlaOp args [⟨.float, [N, N]⟩] :=
-  let ζrow : Expr XlaOp args [⟨.float, [N]⟩] := Xla.gather ζpool rowidx
-  let ζb := bcastAppend [N] [N, N_nuc] ζrow
-  let d2b := bcastPrepend [N] [N, N_nuc] d2
-  let e := Xla.exp (Xla.neg (Xla.mul ζb d2b))
-  Xla.sum 1 (Xla.transpose e perm[2,0,1])
-
-/-- Slice a shaped parameter tensor out of the flat parameter vector: gather a flat
-range `[off, off + shape.prod)` (indices via `iota` arithmetic), then `unflatten`.
-Avoids the `dynamic_slice`/`convert_type` zero stubs. -/
-def paramAt {P : ℕ} (θ : Expr XlaOp args [⟨.float, [P]⟩]) (shape : Shape) (off : ℕ) :
-    Expr XlaOp args [⟨.float, shape⟩] :=
-  let off' : Expr XlaOp args [⟨.int, [shape.prod]⟩] := Xla.ofNat off
-  let flat : Expr XlaOp args [⟨.float, [shape.prod]⟩] :=
-    Xla.gather θ (Xla.add (Xla.iota shape.prod) off')
-  Xla.unflatten shape flat
 
 /-! ## Architecture hyperparameters (compile-time literals) -/
 
@@ -243,43 +179,149 @@ def off_head (m : ℕ) : ℕ := off_wJ + K + m * headSize
 def off_c : ℕ := off_head 2
 def N_param : ℕ := off_c + D
 
+/-! ## Primitives composed from the existing op set -/
+
+/-- `tanh` from `exp` and `div` at the `Expr` level (both have real `DirectImpl`
+semantics; the `tanh` prim is a zero stub). Denominator `exp(2x)+1 ≥ 1`, so this is
+real-analytic. -/
+def tanh' {s : Shape} (x : Expr XlaOp args [⟨.float, s⟩]) : Expr XlaOp args [⟨.float, s⟩] :=
+  let one : Expr XlaOp args [⟨.float, s⟩] := Xla.ofNat 1
+  let two : Expr XlaOp args [⟨.float, s⟩] := Xla.ofNat 2
+  let e := Xla.exp (Xla.mul two x)
+  Xla.sub one (Xla.div two (Xla.add e one))
+
+/-- `tanh` as a library, so repeated activations dedup to one body. -/
+def tanhL (s : Shape) : SimpleExpr [⟨.float, s⟩] ⟨.float, s⟩ :=
+  Expr.ofFn fun x => tanh' x
+
+/-! ## Parameter access -/
+
+/-- Slice `len` consecutive floats from the parameter vector starting at `off`
+(indices via `iota` arithmetic — avoids the `dynamic_slice`/`convert_type` stubs). -/
+def paramSlice (off len : ℕ) : SimpleExpr [⟨.float, [N_param]⟩] ⟨.float, [len]⟩ :=
+  Expr.ofFn fun θ =>
+    let idx : Expr XlaOp _ [⟨.int, [len]⟩] := Xla.add (Xla.iota len) (Xla.ofNat off)
+    Xla.gather (α := .float) (s := [N_param]) (s' := [len]) θ idx
+
+/-- Reshape a slice of the parameter vector into a tensor of shape `s`. -/
+def paramBlock (off : ℕ) (s : Shape) : SimpleExpr [⟨.float, [N_param]⟩] ⟨.float, s⟩ :=
+  Expr.ofFn fun θ => Xla.unflatten s ((paramSlice off s.prod).apply θ)
+
+/-! ## Basic layers -/
+
+/-- Squared pairwise distances `d²[i,j] = ‖xᵢ - yⱼ‖²` (never `sqrt`: C²-safe). -/
+def pairDist2 (N M : ℕ) :
+    SimpleExpr [⟨.float, [N, 3]⟩, ⟨.float, [M, 3]⟩] ⟨.float, [N, M]⟩ :=
+  Expr.ofFn fun x y =>
+    let xb := bcastInsert [N] [M] [3] x
+    let yb := bcastPrepend [N] [M, 3] y
+    let dxy := Xla.sub xb yb
+    Xla.sum 1 (Xla.transpose (Xla.mul dxy dxy) perm[2,0,1])
+
+/-- Linear layer `y = x Wᵀ + b` on a `[N, di]` particle-feature tensor. -/
+def linear (N di dout : ℕ) :
+    SimpleExpr [⟨.float, [N, di]⟩, ⟨.float, [dout, di]⟩, ⟨.float, [dout]⟩]
+      ⟨.float, [N, dout]⟩ :=
+  Expr.ofFn fun x W b =>
+    let y := Xla.einsum [di, N, dout] [[#1, #0], [#2, #0]] 1 (x.append W)
+    Xla.add y (Xla.broadcast [⟨N, false⟩, ⟨dout, true⟩] b)
+
+/-- Linear layer on the last axis of an `[A, B, Ki]` pair-feature tensor. -/
+def linear3 (A B Ki dout : ℕ) :
+    SimpleExpr [⟨.float, [A, B, Ki]⟩, ⟨.float, [dout, Ki]⟩, ⟨.float, [dout]⟩]
+      ⟨.float, [A, B, dout]⟩ :=
+  Expr.ofFn fun x W b =>
+    let y := Xla.einsum [Ki, A, B, dout] [[#1, #2, #0], [#3, #0]] 1 (x.append W)
+    Xla.add y (Xla.broadcast [⟨A, false⟩, ⟨B, false⟩, ⟨dout, true⟩] b)
+
+/-- Gaussian radial basis of squared distances: `exp(-exp(γₖ)·(d²-μₖ)²)`; appends a
+basis axis. Centers/widths are learned (`∀θ`-safe: `exp(γₖ) > 0` always). Bounded and
+real-analytic in the electron coordinates. -/
+def rbf (s : Shape) :
+    SimpleExpr [⟨.float, [K]⟩, ⟨.float, [K]⟩, ⟨.float, s⟩] ⟨.float, s ++ [K]⟩ :=
+  Expr.ofFn fun μ γ d2 =>
+    let d2b := bcastAppend s [K] d2
+    let μb := bcastPrepend s [K] μ
+    let γb := bcastPrepend s [K] γ
+    let r := Xla.sub d2b μb
+    Xla.exp (Xla.neg (Xla.mul (Xla.exp γb) (Xla.mul r r)))
+
+/-- SchNet message: `mᵢ = Σⱼ F[i,j,:] ⊙ h[j,:]` as one einsum. -/
+def message (N M d' : ℕ) :
+    SimpleExpr [⟨.float, [N, M, d']⟩, ⟨.float, [M, d']⟩] ⟨.float, [N, d']⟩ :=
+  Expr.ofFn fun F h => Xla.einsum [M, N, d'] [[#1, #0, #2], [#0, #2]] 1 (F.append h)
+
+/-- Nuclear embeddings: rows of the `Zmax × d` table gathered by atomic number. -/
+def embedNuc (N_nuc : ℕ) :
+    SimpleExpr [⟨.float, [Zmax, d]⟩, ⟨.int, [N_nuc]⟩] ⟨.float, [N_nuc, d]⟩ :=
+  Expr.ofFn fun table Z =>
+    let i₀ := bcastAppend [N_nuc] [d] Z
+    let i₁ := bcastPrepend [N_nuc] [d] (Xla.iota d)
+    Xla.gather table (i₀.append i₁)
+
 /-! ## SchNet interaction block (shared filter/update weights across spin sectors) -/
 
-/-- One message-passing block: for each spin sector, gather electron-electron and
+/-- Two-layer continuous filter MLP on the radial basis of a pair-distance tensor,
+with weights sliced from `θ` at the given (absolute) offsets. -/
+def filter (A B oW1 ob1 oW2 ob2 : ℕ) :
+    SimpleExpr [⟨.float, [N_param]⟩, ⟨.float, [K]⟩, ⟨.float, [K]⟩, ⟨.float, [A, B]⟩]
+      ⟨.float, [A, B, d]⟩ :=
+  Expr.ofFn fun θ μ γ d2 =>
+    let W1 := (paramBlock oW1 [d, K]).apply θ
+    let b1 := (paramBlock ob1 [d]).apply θ
+    let W2 := (paramBlock oW2 [d, d]).apply θ
+    let b2 := (paramBlock ob2 [d]).apply θ
+    let e := (rbf [A, B]).apply ((μ.append γ).append d2)
+    let y1 := (tanhL [A, B, d]).apply ((linear3 A B K d).apply ((e.append W1).append b1))
+    (tanhL [A, B, d]).apply ((linear3 A B d d).apply ((y1.append W2).append b2))
+
+/-- Up-spin half of one message-passing block: gather electron-electron and
 electron-nucleus messages through learned continuous filters of the squared pair
-distances, then a tanh-updated linear combination. -/
-def schNetBlock {N_up N_down N_nuc : ℕ}
-    (θ : Expr XlaOp args [⟨.float, [N_param]⟩]) (off : ℕ)
-    (μ γ : Expr XlaOp args [⟨.float, [K]⟩])
-    (hu : Expr XlaOp args [⟨.float, [N_up, d]⟩])
-    (hd : Expr XlaOp args [⟨.float, [N_down, d]⟩])
-    (c : Expr XlaOp args [⟨.float, [N_nuc, d]⟩])
-    (d2uu : Expr XlaOp args [⟨.float, [N_up, N_up]⟩])
-    (d2ud : Expr XlaOp args [⟨.float, [N_up, N_down]⟩])
-    (d2dd : Expr XlaOp args [⟨.float, [N_down, N_down]⟩])
-    (d2du : Expr XlaOp args [⟨.float, [N_down, N_up]⟩])
-    (d2uN : Expr XlaOp args [⟨.float, [N_up, N_nuc]⟩])
-    (d2dN : Expr XlaOp args [⟨.float, [N_down, N_nuc]⟩]) :
-    Expr XlaOp args [⟨.float, [N_up, d]⟩] × Expr XlaOp args [⟨.float, [N_down, d]⟩] :=
-  -- two-layer continuous filter MLP on the radial basis of a pair-distance tensor
-  let filter {A B : ℕ} (oW1 ob1 oW2 ob2 : ℕ) (d2 : Expr XlaOp args [⟨.float, [A, B]⟩]) :
-      Expr XlaOp args [⟨.float, [A, B, d]⟩] :=
-    let W1 := paramAt θ [d, K] (off + oW1)
-    let b1 := paramAt θ [d] (off + ob1)
-    let W2 := paramAt θ [d, d] (off + oW2)
-    let b2 := paramAt θ [d] (off + ob2)
-    tanh' (linear3 W2 b2 (tanh' (linear3 W1 b1 (rbf μ γ d2))))
-  let Fuu := filter bo_eeW1 bo_eeb1 bo_eeW2 bo_eeb2 d2uu
-  let Fud := filter bo_eeW1 bo_eeb1 bo_eeW2 bo_eeb2 d2ud
-  let Fdd := filter bo_eeW1 bo_eeb1 bo_eeW2 bo_eeb2 d2dd
-  let Fdu := filter bo_eeW1 bo_eeb1 bo_eeW2 bo_eeb2 d2du
-  let Gu := filter bo_enW1 bo_enb1 bo_enW2 bo_enb2 d2uN
-  let Gd := filter bo_enW1 bo_enb1 bo_enW2 bo_enb2 d2dN
-  let V := paramAt θ [d, d] (off + bo_V)
-  let g := paramAt θ [d] (off + bo_g)
-  let mu := Xla.add (message Fuu hu) (Xla.add (message Fud hd) (message Gu c))
-  let md := Xla.add (message Fdd hd) (Xla.add (message Fdu hu) (message Gd c))
-  (tanh' (Xla.add (linear V g hu) mu), tanh' (Xla.add (linear V g hd) md))
+distances, then a tanh-updated linear combination. The two spin halves share no
+computation (up uses `d2uu, d2ud, d2uN` only), so the block is split into two
+single-output libraries without duplicating any work. -/
+def schNetUp (off N_up N_down N_nuc : ℕ) :
+    SimpleExpr
+      [ ⟨.float, [N_param]⟩, ⟨.float, [K]⟩, ⟨.float, [K]⟩
+      , ⟨.float, [N_up, d]⟩, ⟨.float, [N_down, d]⟩, ⟨.float, [N_nuc, d]⟩
+      , ⟨.float, [N_up, N_up]⟩, ⟨.float, [N_up, N_down]⟩, ⟨.float, [N_up, N_nuc]⟩ ]
+      ⟨.float, [N_up, d]⟩ :=
+  Expr.ofFn fun θ μ γ hu hd c d2uu d2ud d2uN =>
+    let Fuu := (filter N_up N_up (off + bo_eeW1) (off + bo_eeb1)
+      (off + bo_eeW2) (off + bo_eeb2)).apply (((θ.append μ).append γ).append d2uu)
+    let Fud := (filter N_up N_down (off + bo_eeW1) (off + bo_eeb1)
+      (off + bo_eeW2) (off + bo_eeb2)).apply (((θ.append μ).append γ).append d2ud)
+    let Gu := (filter N_up N_nuc (off + bo_enW1) (off + bo_enb1)
+      (off + bo_enW2) (off + bo_enb2)).apply (((θ.append μ).append γ).append d2uN)
+    let V := (paramBlock (off + bo_V) [d, d]).apply θ
+    let g := (paramBlock (off + bo_g) [d]).apply θ
+    let m := Xla.add ((message N_up N_up d).apply (Fuu.append hu))
+      (Xla.add ((message N_up N_down d).apply (Fud.append hd))
+        ((message N_up N_nuc d).apply (Gu.append c)))
+    (tanhL [N_up, d]).apply
+      (Xla.add ((linear N_up d d).apply ((hu.append V).append g)) m)
+
+/-- Down-spin half of one message-passing block; see `schNetUp`. -/
+def schNetDown (off N_up N_down N_nuc : ℕ) :
+    SimpleExpr
+      [ ⟨.float, [N_param]⟩, ⟨.float, [K]⟩, ⟨.float, [K]⟩
+      , ⟨.float, [N_down, d]⟩, ⟨.float, [N_up, d]⟩, ⟨.float, [N_nuc, d]⟩
+      , ⟨.float, [N_down, N_down]⟩, ⟨.float, [N_down, N_up]⟩, ⟨.float, [N_down, N_nuc]⟩ ]
+      ⟨.float, [N_down, d]⟩ :=
+  Expr.ofFn fun θ μ γ hd hu c d2dd d2du d2dN =>
+    let Fdd := (filter N_down N_down (off + bo_eeW1) (off + bo_eeb1)
+      (off + bo_eeW2) (off + bo_eeb2)).apply (((θ.append μ).append γ).append d2dd)
+    let Fdu := (filter N_down N_up (off + bo_eeW1) (off + bo_eeb1)
+      (off + bo_eeW2) (off + bo_eeb2)).apply (((θ.append μ).append γ).append d2du)
+    let Gd := (filter N_down N_nuc (off + bo_enW1) (off + bo_enb1)
+      (off + bo_enW2) (off + bo_enb2)).apply (((θ.append μ).append γ).append d2dN)
+    let V := (paramBlock (off + bo_V) [d, d]).apply θ
+    let g := (paramBlock (off + bo_g) [d]).apply θ
+    let m := Xla.add ((message N_down N_down d).apply (Fdd.append hd))
+      (Xla.add ((message N_down N_up d).apply (Fdu.append hu))
+        ((message N_down N_nuc d).apply (Gd.append c)))
+    (tanhL [N_down, d]).apply
+      (Xla.add ((linear N_down d d).apply ((hd.append V).append g)) m)
 
 /-! ## Determinant head (shared across spin sectors, CRT-pooled orbitals) -/
 
@@ -287,27 +329,39 @@ def schNetBlock {N_up N_down N_nuc : ℕ}
 `Φ[k,i] = (A·tanh(V hᵢ + c))_{k mod P} · Σ_I exp(-exp(ζraw_{k mod Q})‖xᵢ-R_I‖²)`.
 Row `k` is a distinct function of `xᵢ` for `k < P·Q` (CRT), with fixed parameter
 count. -/
-def detHead {N N_nuc : ℕ}
-    (θ : Expr XlaOp args [⟨.float, [N_param]⟩]) (off : ℕ)
-    (h : Expr XlaOp args [⟨.float, [N, d]⟩])
-    (d2nuc : Expr XlaOp args [⟨.float, [N, N_nuc]⟩]) :
-    Expr XlaOp args [⟨.float, []⟩] :=
-  let Vm := paramAt θ [d, d] (off + ho_Vm)
-  let cm := paramAt θ [d] (off + ho_cm)
-  let Am := paramAt θ [P, d] (off + ho_Am)
-  let ζraw := paramAt θ [Q] (off + ho_ζ)
-  let g := tanh' (linear Vm cm h)
-  let U := Xla.einsum [d, P, N] [[#2, #0], [#1, #0]] 1 (g.append Am)
-  let M := gatherRows U (modIdx N P)
-  let Env := envelope (Xla.exp ζraw) (modIdx N Q) d2nuc
-  Xla.det (Xla.mul M Env)
+def detHead (off N N_nuc : ℕ) :
+    SimpleExpr [⟨.float, [N_param]⟩, ⟨.float, [N, d]⟩, ⟨.float, [N, N_nuc]⟩]
+      ⟨.float, []⟩ :=
+  Expr.ofFn fun θ h d2nuc =>
+    let Vm := (paramBlock (off + ho_Vm) [d, d]).apply θ
+    let cm := (paramBlock (off + ho_cm) [d]).apply θ
+    let Am := (paramBlock (off + ho_Am) [P, d]).apply θ
+    let ζraw := (paramBlock (off + ho_ζ) [Q]).apply θ
+    let g := (tanhL [N, d]).apply ((linear N d d).apply ((h.append Vm).append cm))
+    let U := Xla.einsum [d, P, N] [[#2, #0], [#1, #0]] 1 (g.append Am)
+    -- orbital rows gathered from the channel pool by `k mod P`
+    let rowidx : Expr XlaOp _ [⟨.int, [N]⟩] := Xla.mod (Xla.iota N) (Xla.ofNat P)
+    let i₀ := bcastAppend [N] [N] rowidx
+    let i₁ := bcastPrepend [N] [N] (Xla.iota N)
+    let M := Xla.gather U (i₀.append i₁)
+    -- Gaussian envelope with exponents pooled by `k mod Q`
+    let ζidx : Expr XlaOp _ [⟨.int, [N]⟩] := Xla.mod (Xla.iota N) (Xla.ofNat Q)
+    let ζrow : Expr XlaOp _ [⟨.float, [N]⟩] := Xla.gather (Xla.exp ζraw) ζidx
+    let ζb := bcastAppend [N] [N, N_nuc] ζrow
+    let d2b := bcastPrepend [N] [N, N_nuc] d2nuc
+    let e := Xla.exp (Xla.neg (Xla.mul ζb d2b))
+    let Env := Xla.sum 1 (Xla.transpose e perm[2,0,1])
+    Xla.det (Xla.mul M Env)
 
 /-- Bounded Jastrow over one pair set: `Σ_{i,j} tanh(wJ · e(d²ᵢⱼ))`. -/
-def jastrow {A B : ℕ} (wJ μ γ : Expr XlaOp args [⟨.float, [K]⟩])
-    (d2 : Expr XlaOp args [⟨.float, [A, B]⟩]) : Expr XlaOp args [⟨.float, []⟩] :=
-  let e := rbf μ γ d2
-  let v := Xla.einsum [K, A, B] [[#1, #2, #0], [#0]] 1 (e.append wJ)
-  Xla.sum 2 (tanh' v)
+def jastrow (A B : ℕ) :
+    SimpleExpr [⟨.float, [N_param]⟩, ⟨.float, [K]⟩, ⟨.float, [K]⟩, ⟨.float, [A, B]⟩]
+      ⟨.float, []⟩ :=
+  Expr.ofFn fun θ μ γ d2 =>
+    let wJ := (paramBlock off_wJ [K]).apply θ
+    let e := (rbf [A, B]).apply ((μ.append γ).append d2)
+    let v := Xla.einsum [K, A, B] [[#1, #2, #0], [#0]] 1 (e.append wJ)
+    Xla.sum 2 ((tanhL [A, B]).apply v)
 
 /-! ## The ansatz -/
 
@@ -322,34 +376,40 @@ def pauliNetExpr (N_nuc N_up N_down : ℕ) :
       ⟨.float, []⟩ :=
   Soir.Expr.ofFn fun θ R Z xu xd =>
     -- global parameters
-    let h0 := paramAt θ [d] off_h0
-    let table := paramAt θ [Zmax, d] off_table
-    let μ := paramAt θ [K] off_μ
-    let γ := paramAt θ [K] off_γ
+    let h0 := (paramBlock off_h0 [d]).apply θ
+    let table := (paramBlock off_table [Zmax, d]).apply θ
+    let μ := (paramBlock off_μ [K]).apply θ
+    let γ := (paramBlock off_γ [K]).apply θ
     -- nuclear embeddings and squared pair distances
-    let c := embedNuc table Z
-    let d2uu := pairDist2 xu xu
-    let d2ud := pairDist2 xu xd
-    let d2dd := pairDist2 xd xd
-    let d2du := pairDist2 xd xu
-    let d2uN := pairDist2 xu R
-    let d2dN := pairDist2 xd R
+    let c := (embedNuc N_nuc).apply (table.append Z)
+    let d2uu := (pairDist2 N_up N_up).apply (xu.append xu)
+    let d2ud := (pairDist2 N_up N_down).apply (xu.append xd)
+    let d2dd := (pairDist2 N_down N_down).apply (xd.append xd)
+    let d2du := (pairDist2 N_down N_up).apply (xd.append xu)
+    let d2uN := (pairDist2 N_up N_nuc).apply (xu.append R)
+    let d2dN := (pairDist2 N_down N_nuc).apply (xd.append R)
     -- SchNet embedding: L = 2 blocks, constant initial electron features
     let hu0 := bcastPrepend [N_up] [d] h0
     let hd0 := bcastPrepend [N_down] [d] h0
-    let (hu1, hd1) := schNetBlock θ (off_block 0) μ γ hu0 hd0 c d2uu d2ud d2dd d2du d2uN d2dN
-    let (hu2, hd2) := schNetBlock θ (off_block 1) μ γ hu1 hd1 c d2uu d2ud d2dd d2du d2uN d2dN
+    let hu1 := (schNetUp (off_block 0) N_up N_down N_nuc).apply
+      ((((((((θ.append μ).append γ).append hu0).append hd0).append c).append d2uu).append d2ud).append d2uN)
+    let hd1 := (schNetDown (off_block 0) N_up N_down N_nuc).apply
+      ((((((((θ.append μ).append γ).append hd0).append hu0).append c).append d2dd).append d2du).append d2dN)
+    let hu2 := (schNetUp (off_block 1) N_up N_down N_nuc).apply
+      ((((((((θ.append μ).append γ).append hu1).append hd1).append c).append d2uu).append d2ud).append d2uN)
+    let hd2 := (schNetDown (off_block 1) N_up N_down N_nuc).apply
+      ((((((((θ.append μ).append γ).append hd1).append hu1).append c).append d2dd).append d2du).append d2dN)
     -- D = 2 determinants per spin sector, heads shared across sectors
-    let du0 := detHead θ (off_head 0) hu2 d2uN
-    let dd0 := detHead θ (off_head 0) hd2 d2dN
-    let du1 := detHead θ (off_head 1) hu2 d2uN
-    let dd1 := detHead θ (off_head 1) hd2 d2dN
-    let c0 := paramAt θ [] off_c
-    let c1 := paramAt θ [] (off_c + 1)
+    let du0 := (detHead (off_head 0) N_up N_nuc).apply ((θ.append hu2).append d2uN)
+    let dd0 := (detHead (off_head 0) N_down N_nuc).apply ((θ.append hd2).append d2dN)
+    let du1 := (detHead (off_head 1) N_up N_nuc).apply ((θ.append hu2).append d2uN)
+    let dd1 := (detHead (off_head 1) N_down N_nuc).apply ((θ.append hd2).append d2dN)
+    let c0 := (paramBlock off_c []).apply θ
+    let c1 := (paramBlock (off_c + 1) []).apply θ
     -- bounded Jastrow over all electron pairs
-    let wJ := paramAt θ [K] off_wJ
-    let J := Xla.add (jastrow wJ μ γ d2uu)
-      (Xla.add (jastrow wJ μ γ d2ud) (jastrow wJ μ γ d2dd))
+    let J := Xla.add ((jastrow N_up N_up).apply (((θ.append μ).append γ).append d2uu))
+      (Xla.add ((jastrow N_up N_down).apply (((θ.append μ).append γ).append d2ud))
+        ((jastrow N_down N_down).apply (((θ.append μ).append γ).append d2dd)))
     Xla.mul (Xla.exp J)
       (Xla.add (Xla.mul c0 (Xla.mul du0 dd0)) (Xla.mul c1 (Xla.mul du1 dd1)))
 
