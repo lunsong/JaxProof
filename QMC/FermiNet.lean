@@ -766,7 +766,10 @@ theorem contDiff_eval_pairDispCross (N N' : ℕ)
     {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') :
     ContDiff ℝ 2 fun x => (pairDispCross N N').eval (r x) (r' x) := by
-  sorry
+  simp only [pairDispCross, reduce_soir, reduce_xla]
+  refine Xla.contDiff_tensorMap₂_sub ?_ ?_
+  · exact Xla.contDiff_broadcast hr
+  · exact Xla.contDiff_broadcast hr'
 
 /-- Opposite-spin distance, `sqrt` again guarded by `ε > 0`. -/
 theorem contDiff_eval_pairDistCross (N N' : ℕ)
