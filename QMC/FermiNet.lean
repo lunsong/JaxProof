@@ -655,7 +655,9 @@ theorem contDiff_eval_paramBlock (off : ℕ) (s : Shape)
 theorem contDiff_eval_posScalar (off : ℕ) {p : X → Tensor ℝ [N_PARAM]}
     (hp : ContDiff ℝ 2 p) :
     ContDiff ℝ 2 fun x => (posScalar off).eval (p x) := by
-  sorry
+  simp only [posScalar, reduce_soir, reduce_xla]
+  exact Xla.contDiff_tensorMap_exp
+    (Xla.contDiff_sumN 1 (contDiff_eval_paramSlice off 1 hp))
 
 /-- Electron–nucleus displacement: a difference of coordinates. -/
 theorem contDiff_eval_enDisp (N N_nuc : ℕ)
