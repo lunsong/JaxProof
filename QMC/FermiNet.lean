@@ -669,13 +669,64 @@ theorem contDiff_eval_enDisp (N N_nuc : ℕ)
   · exact Xla.contDiff_broadcast hr
   · exact Xla.contDiff_broadcast hR
 
+/-- The transposition `(0 1 2) ↦ (2 0 1)` used by the distance computations. -/
+private def perm201 : Equiv.Perm (Fin 3) :=
+  makePerm ![2, 0, 1] (by decide) (by decide)
+
+/-- A transposed tensor of squares, summed over the coordinate axis, is nonnegative:
+unfolding leaves the sum `∑ j : Fin 3, d ⋯ j * d ⋯ j` of squares. -/
+private theorem sumSq_nonneg (N N_nuc : ℕ) (d : Tensor ℝ [N, N_nuc, 3])
+    (i : Fin ((List.ofFn fun k => [N, N_nuc, 3].get (perm201 k)).drop 1).prod) :
+    0 ≤ (Tensor.sumN 1 (Tensor.transpose (s := [N, N_nuc, 3]) perm201
+          (Tensor.map₂ (fun a b : ℝ => a * b) d d))).flatten i := by
+  simp only [reduce_tensor, reduce_soir]
+  simp only [Tensor.sumN, Tensor.sumFirst]
+  change 0 ≤ ∑ j : Fin 3, d i.divNat i.modNat.divNat j * d i.divNat i.modNat.divNat j
+  exact Finset.sum_nonneg fun j _ => mul_self_nonneg _
+
+/-- `Tensor.map Real.exp` is entrywise `Real.exp`. -/
+private theorem flatten_map_exp {s : Shape} (u : Tensor ℝ s) (i : Fin s.prod) :
+    (Tensor.map Real.exp u).flatten i = Real.exp (u.flatten i) := by
+  rw [tensorMap_eq_curryMap s Real.exp]
+  exact flatten_curryMap (s := s) Real.exp u i
+
+/-- Every entry of `Tensor.map Real.exp` is positive. -/
+private theorem map_exp_pos {s : Shape} (u : Tensor ℝ s) (i : Fin s.prod) :
+    0 < (Tensor.map Real.exp u).flatten i := by
+  rw [flatten_map_exp]
+  exact Real.exp_pos _
+
+/-- Broadcasting a positive scalar keeps every entry positive. -/
+private theorem broadcast_pos (N N_nuc : ℕ) (e : ℝ) (he : 0 < e)
+    (i : Fin (List.map Prod.fst [(N, false), (N_nuc, false)]).prod) :
+    0 < (Tensor.broadcast [(N, false), (N_nuc, false)] e).flatten i := by
+  change 0 < e
+  exact he
+
 /-- Electron–nucleus distance `√(‖rᵢ - Rα‖² + ε)`: a polynomial under `sqrt`, whose
 argument is `≥ ε = exp θ > 0` — bounded away from the crease of `sqrt` at `0`. -/
 theorem contDiff_eval_enDist (N N_nuc : ℕ)
     {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (enDist N N_nuc).eval (r x) (R x) (θ x) := by
-  sorry
+  simp only [enDist, reduce_soir, reduce_xla]
+  apply Xla.contDiff_tensorMap_sqrt
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_sumN
+      apply Xla.contDiff_transpose
+      apply Xla.contDiff_tensorMap₂_mul
+      · exact contDiff_eval_enDisp N N_nuc hr hR
+      · exact contDiff_eval_enDisp N N_nuc hr hR
+    · apply Xla.contDiff_broadcast
+      exact contDiff_eval_posScalar OFF_EPS hθ
+  · intro x i
+    erw [flatten_map₂]
+    apply add_pos_of_nonneg_of_pos
+    · exact sumSq_nonneg N N_nuc (Expr.eval DirectImpl (enDisp N N_nuc) (r x) (R x) 0) i
+    · have heps : 0 < (posScalar OFF_EPS).eval (θ x) := by
+        simp only [posScalar, reduce_soir, reduce_xla]
+        exact map_exp_pos (s := []) _ ⟨0, by simp⟩
+      exact broadcast_pos N N_nuc ((posScalar OFF_EPS).eval (θ x)) heps i
 
 /-- Same-spin displacement: a difference of coordinates. -/
 theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N,3]}
