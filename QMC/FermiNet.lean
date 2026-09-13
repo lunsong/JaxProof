@@ -950,7 +950,21 @@ theorem contDiff_eval_twoStreamInit (N : ℕ)
     {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamInit N).eval (r x) (θ x) := by
-  sorry
+  simp only [twoStreamInit, reduce_soir, reduce_xla]
+  apply contDiff_eval_tanh
+  apply Xla.contDiff_tensorMap₂_add
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        exact contDiff_eval_pairDisp N hr
+      · exact contDiff_eval_paramBlock OFF_WE [3, F] hθ
+    · apply Xla.contDiff_tensorMap₂_mul
+      · apply Xla.contDiff_broadcast
+        exact contDiff_eval_pairDist N hr hθ
+      · apply Xla.contDiff_broadcast
+        exact contDiff_eval_paramSlice OFF_WD2 F hθ
+  · apply Xla.contDiff_broadcast
+    exact contDiff_eval_paramSlice OFF_GB F hθ
 
 /-- Initial opposite-spin two-electron stream. -/
 theorem contDiff_eval_twoStreamInitCross (N N' : ℕ)
