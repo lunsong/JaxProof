@@ -163,13 +163,40 @@ theorem contDiff_tensorMap₂_mul {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContD
     ContDiff ℝ 2 fun x => Tensor.map₂ (· * ·) (f₁ x) (f₂ x) :=
   contDiff_tensorMap₂ (by fun_prop) h₁ h₂
 
+/-- Reading a cons-shaped tensor at `i.mulAdd j` is reading its `i`-th component at `j`.
+`Tensor.flatten` is defined through `Fin.divNat`/`Fin.modNat`, which rewriting cannot see
+through because `List.prod` is semireducible; routing the identity through the
+`Tensor.unflatten` round trip keeps it syntactically clean. -/
+private theorem Tensor.flatten_mulAdd {R : Type} {s₀ : ℕ} {s : Shape}
+    (x : Tensor R (s₀ :: s)) (i : Fin s₀) (j : Fin s.prod) :
+    Tensor.flatten x (i.mulAdd j) = Tensor.flatten (x i) j := by
+  have h : x i = Tensor.unflatten s (fun j => Tensor.flatten x (i.mulAdd j)) := by
+    rw [← congrFun (Tensor.unflatten_flatten x) i]
+    rfl
+  rw [h]
+  exact (congrFun (Tensor.flatten_unflatten s (fun j => Tensor.flatten x (i.mulAdd j))) j).symm
+
 /-- `DirectImpl.div`: `C²` where the denominator does not vanish. (In the DSL,
 division only ever appears inside `tanh = 1 - 2/(exp(2x)+1)`, whose denominator is
 `≥ 1`.) -/
 theorem contDiff_tensorMap₂_div {f₁ f₂ : X → Tensor ℝ s} (h₁ : ContDiff ℝ 2 f₁)
     (h₂ : ContDiff ℝ 2 f₂) (hne : ∀ x (i : Fin s.prod), (f₂ x).flatten i ≠ 0) :
     ContDiff ℝ 2 fun x => Tensor.map₂ (· / ·) (f₁ x) (f₂ x) := by
-  sorry
+  rw [contDiff_iff_contDiffAt]
+  intro x₀
+  induction s with
+  | nil =>
+    change ContDiffAt ℝ 2 (fun x => f₁ x / f₂ x) x₀
+    exact h₁.contDiffAt.div h₂.contDiffAt (hne x₀ ⟨0, by simp⟩)
+  | cons s₀ s ih =>
+    change ContDiffAt ℝ 2 (fun x (i : Fin s₀) => Tensor.map₂ (· / ·) (f₁ x i) (f₂ x i)) x₀
+    apply contDiffAt_pi'
+    intro i
+    exact ih ((contDiff_apply ℝ _ i).comp h₁) ((contDiff_apply ℝ _ i).comp h₂)
+      (fun x j => by
+        have h := hne x (i.mulAdd j)
+        rw [Tensor.flatten_mulAdd (x := f₂ x) i j] at h
+        exact h)
 
 /-- `DirectImpl.sqrt`: `C²` where the argument is positive. The DSL guards every
 `sqrt` by `√(r² + ε)` with `ε = exp θ > 0` (see `enDist`/`pairDist`), so the argument
