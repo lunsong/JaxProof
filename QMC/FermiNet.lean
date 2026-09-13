@@ -742,7 +742,24 @@ theorem contDiff_eval_pairDist (N : ℕ)
     {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (pairDist N).eval (r x) (θ x) := by
-  sorry
+  simp only [pairDist, reduce_soir, reduce_xla]
+  apply Xla.contDiff_tensorMap_sqrt
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_sumN
+      apply Xla.contDiff_transpose
+      apply Xla.contDiff_tensorMap₂_mul
+      · exact contDiff_eval_pairDisp N hr
+      · exact contDiff_eval_pairDisp N hr
+    · apply Xla.contDiff_broadcast
+      exact contDiff_eval_posScalar OFF_EPS hθ
+  · intro x i
+    erw [flatten_map₂]
+    apply add_pos_of_nonneg_of_pos
+    · exact sumSq_nonneg N N (Expr.eval DirectImpl (pairDisp N) (r x) 0) i
+    · have heps : 0 < (posScalar OFF_EPS).eval (θ x) := by
+        simp only [posScalar, reduce_soir, reduce_xla]
+        exact map_exp_pos (s := []) _ ⟨0, by simp⟩
+      exact broadcast_pos N N ((posScalar OFF_EPS).eval (θ x)) heps i
 
 /-- Opposite-spin displacement. -/
 theorem contDiff_eval_pairDispCross (N N' : ℕ)
