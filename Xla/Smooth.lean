@@ -40,7 +40,7 @@ tensor without naming its index type.
 
 ## The proofs
 
-The leaf statements below are `sorry`; each is a small analysis fact whose proof is
+Each leaf statement below is a small analysis fact whose proof is
 independent of the program it is used in. Program-level smoothness
 (`QMC/FermiNet.lean`) is then a composition of these leaves along the dataflow.
 
@@ -258,52 +258,6 @@ private theorem contDiff_finset_sum {ι : Type} [Fintype ι]
     rw [hfun]
     exact ih (fun i => (contDiff_apply ℝ _ j).comp (hg i))
 
-/-- `DirectImpl.sum`: a finite sum of `C²` components. -/
-theorem contDiff_sumN {s : Shape} (n : ℕ) {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
-    ContDiff ℝ 2 fun x => (f x).sumN n := by
-  induction s generalizing n with
-  | nil =>
-    cases n with
-    | zero =>
-      change ContDiff ℝ 2 fun x => f x
-      exact hf
-    | succ n =>
-      change ContDiff ℝ 2 fun x => f x
-      exact hf
-  | cons s₀ s ih =>
-    cases n with
-    | zero =>
-      change ContDiff ℝ 2 fun x => f x
-      exact hf
-    | succ n =>
-      change ContDiff ℝ 2 fun x => ((f x).sumFirst).sumN n
-      refine ih n ?_
-      change ContDiff ℝ 2 fun x => ∑ i : Fin s₀, f x i
-      exact contDiff_finset_sum (fun i => (contDiff_apply ℝ _ i).comp hf)
-
-/-- `DirectImpl.einsum` of two input tensors: a finite sum of products of entries. -/
-theorem contDiff_einsum (s : Shape) (i₁ i₂ : List (Fin s.length)) (n : ℕ)
-    [NormedAddCommGroup (Tensor ℝ (i₁.map s.get))]
-    [NormedSpace ℝ (Tensor ℝ (i₁.map s.get))]
-    [NormedAddCommGroup (Tensor ℝ (i₂.map s.get))]
-    [NormedSpace ℝ (Tensor ℝ (i₂.map s.get))]
-    [NormedAddCommGroup (Tensor ℝ (s.drop n))] [NormedSpace ℝ (Tensor ℝ (s.drop n))]
-    {f₁ : X → Tensor ℝ (i₁.map s.get)} {f₂ : X → Tensor ℝ (i₂.map s.get)}
-    (h₁ : ContDiff ℝ 2 f₁) (h₂ : ContDiff ℝ 2 f₂) :
-    ContDiff ℝ 2 fun x => Tensor.einsum s [⟨i₁, f₁ x⟩, ⟨i₂, f₂ x⟩] n := by
-  sorry
-
-/-- `DirectImpl.det`: a polynomial (in fact a sum of products of the entries, via
-`Matrix.det`). -/
-theorem contDiff_det {n : ℕ} {f : X → Tensor ℝ [n, n]} (hf : ContDiff ℝ 2 f) :
-    ContDiff ℝ 2 fun x => Matrix.det (f x) := by
-  have h : (fun x => Matrix.det (f x)) = fun x => ∑ σ : Equiv.Perm (Fin n),
-      (Equiv.Perm.sign σ : ℝ) * ∏ i, f x (σ i) i := by
-    funext x
-    exact Matrix.det_apply' (M := (f x : Matrix (Fin n) (Fin n) ℝ))
-  rw [h]
-  fun_prop
-
 /-- `Curry.get` at a fixed (multi-)index is the corresponding product projection, so it
 preserves `C²`. -/
 private theorem contDiff_curryGet : ∀ {s : Shape} (i : Index Fin s) {f : X → Tensor ℝ s},
@@ -338,6 +292,158 @@ private theorem contDiff_curryOf : ∀ {s : Shape} {g : X → (Index Fin s → �
     apply contDiff_pi'
     intro a
     exact (contDiff_apply ℝ ℝ (Index.cons v a)).comp hg
+
+/-- `DirectImpl.sum`: a finite sum of `C²` components. -/
+theorem contDiff_sumN {s : Shape} (n : ℕ) {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (f x).sumN n := by
+  induction s generalizing n with
+  | nil =>
+    cases n with
+    | zero =>
+      change ContDiff ℝ 2 fun x => f x
+      exact hf
+    | succ n =>
+      change ContDiff ℝ 2 fun x => f x
+      exact hf
+  | cons s₀ s ih =>
+    cases n with
+    | zero =>
+      change ContDiff ℝ 2 fun x => f x
+      exact hf
+    | succ n =>
+      change ContDiff ℝ 2 fun x => ((f x).sumFirst).sumN n
+      refine ih n ?_
+      change ContDiff ℝ 2 fun x => ∑ i : Fin s₀, f x i
+      exact contDiff_finset_sum (fun i => (contDiff_apply ℝ _ i).comp hf)
+
+/-! ### Entrywise formula for `Tensor.einprod` -/
+
+/-- `Index.select` along a label list is the corresponding `cons` of projections. -/
+private theorem Index.select_cons {ι : Type} {m : ι → Type} {γ : List ι}
+    (a : Fin γ.length) (is : List (Fin γ.length)) (w : Index m γ) :
+    Index.select (a :: is) w = Index.cons (w a) (Index.select is w) := by
+  funext r
+  match r with
+  | ⟨0, _⟩ => rfl
+  | ⟨k + 1, _⟩ => rfl
+
+/-- An index in cons form is determined by its head and tail. -/
+private theorem Index.cons_eta {ι : Type} {m : ι → Type} {γ₀ : ι} {γ : List ι}
+    (v : Index m (γ₀ :: γ)) : Index.cons (v 0) (fun r => v r.succ) = v := by
+  funext r
+  match r with
+  | ⟨0, _⟩ => rfl
+  | ⟨k + 1, _⟩ => rfl
+
+/-- `Curry.get` at a cons index decomposes as the head projection and the tail `get`. -/
+private theorem Curry.get_cons {ι : Type} {m : ι → Type} {α : Type} {γ₀ : ι} {γ : List ι}
+    (f : Curry m (γ₀ :: γ) α) (a : m γ₀) (b : Index m γ) :
+    f.get (Index.cons a b) = (f a).get b := rfl
+
+private theorem filter_pred_cons_zero {n : ℕ} (i : List (Fin (n + 1))) :
+    filter_pred ((0 : Fin (n + 1)) :: i) = filter_pred i := rfl
+
+private theorem filter_pred_cons_succ {n : ℕ} (j : Fin n) (i : List (Fin (n + 1))) :
+    filter_pred (j.succ :: i) = j :: filter_pred i := rfl
+
+/-- `Tensor.einprod.filter` contracts the axes labeled `0` at the fixed value `i₀`;
+reading the result at the remaining labels is reading the original tensor at the
+corresponding multi-index. -/
+private theorem Tensor.einprod.filter_get {R : Type} [Mul R] [One R]
+    {s₀ : ℕ} {s' : List ℕ} (i₀ : Fin s₀) (v' : Index Fin s')
+    (i : List (Fin (s'.length + 1))) (x : Tensor R (i.map (s₀ :: s').get)) :
+    (Tensor.einprod.filter s₀ s' i₀ i x).get
+        (Index.select (γ := s') (filter_pred i) v') =
+      x.get (Index.select (γ := s₀ :: s') i (Index.cons i₀ v')) := by
+  revert x
+  induction i with
+  | nil =>
+    intro x
+    rfl
+  | cons a is ih =>
+    intro x
+    induction a using Fin.cases with
+    | zero =>
+      change (Tensor.einprod.filter s₀ s' i₀ is (x i₀)).get
+        (Index.select (γ := s') (filter_pred is) v') =
+        x.get (Index.select (γ := s₀ :: s') (0 :: is) (Index.cons i₀ v'))
+      rw [Index.select_cons, Curry.get_cons, Index.cons_zero]
+      exact ih (x i₀)
+    | succ j =>
+      change (Tensor.einprod.filter s₀ s' i₀ is (x (v' j))).get
+        (Index.select (γ := s') (filter_pred is) v') =
+        x.get (Index.select (γ := s₀ :: s') (j.succ :: is) (Index.cons i₀ v'))
+      rw [Index.select_cons, Curry.get_cons, Index.cons_succ]
+      exact ih (x (v' j))
+
+/-- The entries of `Tensor.einprod` are the products of the entries selected by the
+label lists; an induction on the shape. -/
+private theorem Tensor.einprod_get {R : Type} [Mul R] [One R] : ∀ (s : List ℕ)
+    (xs : List ((i : List (Fin s.length)) × Tensor R (i.map s.get)))
+    (v : Index Fin s),
+    (Tensor.einprod s xs).get v =
+      (xs.map fun p => p.2.get (Index.select (γ := s) p.1 v)).prod
+  | [], xs, v => by
+    change (xs.map fun ⟨i, x⟩ => match i with | [] => x).prod =
+      (xs.map fun p => p.2.get (Index.select (γ := []) p.1 v)).prod
+    congr 1
+    apply List.map_congr_left
+    rintro ⟨i, x⟩ -
+    cases i with
+    | nil => rfl
+    | cons h _ => exact Fin.elim0 h
+  | s₀ :: s', xs, v => by
+    obtain ⟨i₀, v', rfl⟩ : ∃ (i₀ : Fin s₀) (v' : Index Fin s'), v = Index.cons i₀ v' :=
+      ⟨v 0, fun r => v r.succ, (Index.cons_eta v).symm⟩
+    change (Tensor.einprod s'
+        (xs.map fun p => ⟨filter_pred p.1,
+          Tensor.einprod.filter s₀ s' i₀ p.1 p.2⟩)).get v' =
+      (xs.map fun p => p.2.get
+        (Index.select (γ := s₀ :: s') p.1 (Index.cons i₀ v'))).prod
+    rw [Tensor.einprod_get s'
+      (xs.map fun p => ⟨filter_pred p.1, Tensor.einprod.filter s₀ s' i₀ p.1 p.2⟩)
+      v', List.map_map]
+    congr 1
+    apply List.map_congr_left
+    intro p _
+    change (Tensor.einprod.filter s₀ s' i₀ p.1 p.2).get
+      (Index.select (γ := s') (filter_pred p.1) v') =
+      p.2.get (Index.select (γ := s₀ :: s') p.1 (Index.cons i₀ v'))
+    rw [Tensor.einprod.filter_get]
+
+/-- `DirectImpl.einsum` of two input tensors: a finite sum of products of entries. -/
+theorem contDiff_einsum (s : Shape) (i₁ i₂ : List (Fin s.length)) (n : ℕ)
+    {f₁ : X → Tensor ℝ (i₁.map s.get)} {f₂ : X → Tensor ℝ (i₂.map s.get)}
+    (h₁ : ContDiff ℝ 2 f₁) (h₂ : ContDiff ℝ 2 f₂) :
+    ContDiff ℝ 2 fun x => Tensor.einsum s [⟨i₁, f₁ x⟩, ⟨i₂, f₂ x⟩] n := by
+  apply contDiff_sumN
+  have h : (fun x => Tensor.einprod s [⟨i₁, f₁ x⟩, ⟨i₂, f₂ x⟩]) =
+      fun x => Curry.of fun v =>
+        (f₁ x).get (Index.select (γ := s) i₁ v) *
+          (f₂ x).get (Index.select (γ := s) i₂ v) := by
+    funext x
+    rw [← Curry.of_get (Tensor.einprod s [⟨i₁, f₁ x⟩, ⟨i₂, f₂ x⟩])]
+    congr 1
+    funext v
+    rw [Tensor.einprod_get]
+    simp
+  rw [h]
+  apply contDiff_curryOf
+  apply contDiff_pi'
+  intro v
+  exact (contDiff_curryGet (Index.select (γ := s) i₁ v) h₁).mul
+    (contDiff_curryGet (Index.select (γ := s) i₂ v) h₂)
+
+/-- `DirectImpl.det`: a polynomial (in fact a sum of products of the entries, via
+`Matrix.det`). -/
+theorem contDiff_det {n : ℕ} {f : X → Tensor ℝ [n, n]} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => Matrix.det (f x) := by
+  have h : (fun x => Matrix.det (f x)) = fun x => ∑ σ : Equiv.Perm (Fin n),
+      (Equiv.Perm.sign σ : ℝ) * ∏ i, f x (σ i) i := by
+    funext x
+    exact Matrix.det_apply' (M := (f x : Matrix (Fin n) (Fin n) ℝ))
+  rw [h]
+  fun_prop
 
 /-- `DirectImpl.transpose`: a permutation of the indices is a linear isometry. -/
 theorem contDiff_transpose {s : Shape} (σ : Equiv.Perm (Fin s.length))
