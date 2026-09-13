@@ -1022,11 +1022,16 @@ theorem contDiff_eval_detBlock (N : ℕ)
     (ho : ContDiff ℝ 2 orb) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (detBlock N).eval (orb x) (θ x) := by
   -- `vmap`'s `DirectImpl` semantics exposes the batched function through `Curry`/`Index`
-  -- plumbing that `contDiff_eval` does not yet reduce. A proof needs either a `vmap`
-  -- smoothness lemma (`Xla.contDiff_vmap`) or the `Curry`-level evaluation to normalize;
-  -- `contDiff_eval_detExpr` proves each slice and `contDiff_eval_curry_pi` +
-  -- `contDiff_eval_apply` handle the product/projection structure once it is exposed.
-  sorry
+  -- plumbing (`id (Index.cons ⋯) 0`) that `contDiff_eval` does not normalize on its own.
+  -- The plumbing is definitionally the `i`-th slice, so `change` exposes the batch as the
+  -- function `fun i => Matrix.det (orb x i)`; `contDiff_eval` then proves each slice from
+  -- `Xla.contDiff_det` and the `paramSlice` rule.
+  simp only [detBlock, reduce_soir, reduce_xla]
+  refine Xla.contDiff_sumN 1 ?_
+  refine Xla.contDiff_tensorMap₂_mul ?_ ?_
+  · change ContDiff ℝ 2 fun x (i : Fin K) => Matrix.det (orb x i)
+    contDiff_eval
+  · exact Xla.contDiff_tensorMap_exp (contDiff_eval_paramSlice OFF_WDET K hθ)
 
 end Smoothness
 
