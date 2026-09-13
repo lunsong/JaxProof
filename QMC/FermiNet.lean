@@ -664,7 +664,10 @@ theorem contDiff_eval_enDisp (N N_nuc : ℕ)
     {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) :
     ContDiff ℝ 2 fun x => (enDisp N N_nuc).eval (r x) (R x) := by
-  sorry
+  simp only [enDisp, reduce_soir, reduce_xla]
+  refine Xla.contDiff_tensorMap₂_sub ?_ ?_
+  · exact Xla.contDiff_broadcast hr
+  · exact Xla.contDiff_broadcast hR
 
 /-- Electron–nucleus distance `√(‖rᵢ - Rα‖² + ε)`: a polynomial under `sqrt`, whose
 argument is `≥ ε = exp θ > 0` — bounded away from the crease of `sqrt` at `0`. -/
