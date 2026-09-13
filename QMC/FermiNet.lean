@@ -43,11 +43,12 @@ formulation of this same program that this file replaces:
 
 Both are flat in molecule size (the program structure, not the tensor shapes, drives
 the cost). The emitted IR for H₂O was one 360-binding flat program in the builder style
-versus a 31-binding top level calling 59 libraries here — the scope that the `find?`
-scans run over shrinks from 360 bindings to 31, and each library body is generated in
-its own (small) scope. For scale: one full structural hash of this program takes 3 ms,
-so the builder-style codegen did ~5 700 full-program hashes' worth of work against
-~120 here.
+versus a 20-binding top level calling 73 libraries here (90 for a molecule with unequal
+spin sectors, e.g. Li/Be: when `N_up ≠ N_down` the two sectors no longer share library
+entries) — the scope that the `find?` scans run over shrinks from 360 bindings to 20, and
+each library body is generated in its own (small) scope. For scale: one full structural
+hash of this program takes 3 ms, so the builder-style codegen did ~5 700 full-program
+hashes' worth of work; here the largest scope has 20 bindings.
 
 A synthetic depth sweep (`K` inlined vs. `K` applied steps of the same op) shows the
 same constant-factor gap growing with depth (both styles quadratic in `K`):
@@ -466,11 +467,142 @@ def detBlock (N : ℕ) :
     let wdet := Xla.exp ((paramSlice OFF_WDET K).apply θ)
     Xla.sum 1 (Xla.mul dets wdet)
 
+/-! ### Raw-input stage libraries
+
+A `let`-bound intermediate stream of `fermiNetAnsatz` is a term of type `Expr`, not a
+node in a shared graph: each of its uses elaborates to its own copy. The evaluated
+program therefore contains every shared stream once per use, and the smoothness
+composition below would have to check a definitional equality over that whole tree at
+once. The libraries in this section give every stream a name; `fermiNetAnsatz` then
+calls only the final streams, and each smoothness lemma below consumes the lemmas of
+the stages it is built from. -/
+
+/-- The five raw inputs of the ansatz. -/
+abbrev rawArgs (N_nuc N_up N_down : ℕ) : List TensorType :=
+  [⟨.float, [N_PARAM]⟩, ⟨.float, [N_nuc, 3]⟩, ⟨.int, [N_nuc]⟩,
+   ⟨.float, [N_up, 3]⟩, ⟨.float, [N_down, 3]⟩]
+
+/-- Initial one-electron stream of the up sector, as a function of the raw inputs. -/
+def hU0Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp _rDown =>
+    (oneStreamInit N_up N_nuc).apply (((rUp.append R).append Z).append θ)
+
+/-- Initial one-electron stream of the down sector. -/
+def hD0Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, F]⟩ :=
+  Expr.ofFn fun θ R Z _rUp rDown =>
+    (oneStreamInit N_down N_nuc).apply (((rDown.append R).append Z).append θ)
+
+/-- Initial same-spin two-electron stream of the up sector. -/
+def gU0Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, N_up, F]⟩ :=
+  Expr.ofFn fun θ _R _Z rUp _rDown =>
+    (twoStreamInit N_up).apply (rUp.append θ)
+
+/-- Initial same-spin two-electron stream of the down sector. -/
+def gD0Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, N_down, F]⟩ :=
+  Expr.ofFn fun θ _R _Z _rUp rDown =>
+    (twoStreamInit N_down).apply (rDown.append θ)
+
+/-- Initial opposite-spin two-electron stream `up → down`. -/
+def gUD0Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, N_down, F]⟩ :=
+  Expr.ofFn fun θ _R _Z rUp rDown =>
+    (twoStreamInitCross N_up N_down).apply ((rUp.append rDown).append θ)
+
+/-- Initial opposite-spin two-electron stream `down → up`. -/
+def gDU0Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, N_up, F]⟩ :=
+  Expr.ofFn fun θ _R _Z rUp rDown =>
+    (twoStreamInitCross N_down N_up).apply ((rDown.append rUp).append θ)
+
+/-- One-electron stream of the up sector after layer 0. -/
+def hU1Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (oneStreamLayer N_up N_down OFF_L0).apply
+      (((((hU0Raw N_nuc N_up N_down).apply ins).append
+          ((gU0Raw N_nuc N_up N_down).apply ins)).append
+          ((gUD0Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- One-electron stream of the down sector after layer 0. -/
+def hD1Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (oneStreamLayer N_down N_up OFF_L0).apply
+      (((((hD0Raw N_nuc N_up N_down).apply ins).append
+          ((gD0Raw N_nuc N_up N_down).apply ins)).append
+          ((gDU0Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- Same-spin two-electron stream of the up sector after layer 0. -/
+def gU1Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, N_up, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (twoStreamLayer N_up OFF_L0).apply
+      ((((gU0Raw N_nuc N_up N_down).apply ins).append
+        ((hU0Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- Same-spin two-electron stream of the down sector after layer 0. -/
+def gD1Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, N_down, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (twoStreamLayer N_down OFF_L0).apply
+      ((((gD0Raw N_nuc N_up N_down).apply ins).append
+        ((hD0Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- Opposite-spin two-electron stream `up → down` after layer 0. -/
+def gUD1Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, N_down, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (twoStreamLayerCross N_up N_down OFF_L0).apply
+      (((((gUD0Raw N_nuc N_up N_down).apply ins).append
+          ((hU0Raw N_nuc N_up N_down).apply ins)).append
+          ((hD0Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- Opposite-spin two-electron stream `down → up` after layer 0. -/
+def gDU1Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, N_up, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (twoStreamLayerCross N_down N_up OFF_L0).apply
+      (((((gDU0Raw N_nuc N_up N_down).apply ins).append
+          ((hD0Raw N_nuc N_up N_down).apply ins)).append
+          ((hU0Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- Final one-electron stream of the up sector (layer 1). -/
+def hU2Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_up, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (oneStreamLayer N_up N_down OFF_L1).apply
+      (((((hU1Raw N_nuc N_up N_down).apply ins).append
+          ((gU1Raw N_nuc N_up N_down).apply ins)).append
+          ((gUD1Raw N_nuc N_up N_down).apply ins)).append θ)
+
+/-- Final one-electron stream of the down sector (layer 1). -/
+def hD2Raw (N_nuc N_up N_down : ℕ) :
+    SimpleExpr (rawArgs N_nuc N_up N_down) ⟨.float, [N_down, F]⟩ :=
+  Expr.ofFn fun θ R Z rUp rDown =>
+    let ins := (((θ.append R).append Z).append rUp).append rDown
+    (oneStreamLayer N_down N_up OFF_L1).apply
+      (((((hD1Raw N_nuc N_up N_down).apply ins).append
+          ((gD1Raw N_nuc N_up N_down).apply ins)).append
+          ((gDU1Raw N_nuc N_up N_down).apply ins)).append θ)
+
 /-! ### The ansatz -/
 
 /-- The FermiNet program for a molecule with `N_nuc` nuclei and `N_up` / `N_down`
 electrons. The five inputs are the parameters `θ`, nuclear positions `R`, nuclear
-charges `Z`, and the two spin sectors' electron positions. -/
+charges `Z`, and the two spin sectors' electron positions. The one-electron streams
+come from the raw-input stage libraries (see the section above); the remaining dataflow
+(`J`, the envelopes, the determinants) is the architecture of the module docstring. -/
 def fermiNetAnsatz (N_nuc N_up N_down : ℕ) : Xla.SimpleExpr
     [⟨.float, [N_PARAM]⟩, -- parameters
       ⟨.float, [N_nuc, 3]⟩, -- positions of nuclei
@@ -479,28 +611,9 @@ def fermiNetAnsatz (N_nuc N_up N_down : ℕ) : Xla.SimpleExpr
       ⟨.float, [N_down, 3]⟩] -- positions of spin down electrons
     ⟨.float, []⟩ :=
   Expr.ofFn fun θ => fun R => fun Z => fun rUp => fun rDown =>
-    let hU0 := (oneStreamInit N_up N_nuc).apply (((rUp.append R).append Z).append θ)
-    let hD0 := (oneStreamInit N_down N_nuc).apply (((rDown.append R).append Z).append θ)
-    let gU0 := (twoStreamInit N_up).apply (rUp.append θ)
-    let gD0 := (twoStreamInit N_down).apply (rDown.append θ)
-    let gUD0 := (twoStreamInitCross N_up N_down).apply ((rUp.append rDown).append θ)
-    let gDU0 := (twoStreamInitCross N_down N_up).apply ((rDown.append rUp).append θ)
-    -- layer 0
-    let hU1 := (oneStreamLayer N_up N_down OFF_L0).apply
-      (((hU0.append gU0).append gUD0).append θ)
-    let hD1 := (oneStreamLayer N_down N_up OFF_L0).apply
-      (((hD0.append gD0).append gDU0).append θ)
-    let gU1 := (twoStreamLayer N_up OFF_L0).apply ((gU0.append hU0).append θ)
-    let gD1 := (twoStreamLayer N_down OFF_L0).apply ((gD0.append hD0).append θ)
-    let gUD1 := (twoStreamLayerCross N_up N_down OFF_L0).apply
-      (((gUD0.append hU0).append hD0).append θ)
-    let gDU1 := (twoStreamLayerCross N_down N_up OFF_L0).apply
-      (((gDU0.append hD0).append hU0).append θ)
-    -- layer 1
-    let hU2 := (oneStreamLayer N_up N_down OFF_L1).apply
-      (((hU1.append gU1).append gUD1).append θ)
-    let hD2 := (oneStreamLayer N_down N_up OFF_L1).apply
-      (((hD1.append gD1).append gDU1).append θ)
+    let ins := ((((θ.append R).append Z).append rUp).append rDown)
+    let hU2 := (hU2Raw N_nuc N_up N_down).apply ins
+    let hD2 := (hD2Raw N_nuc N_up N_down).apply ins
     -- Jastrow factor (the streams are tanh-bounded, so `exp J` is bounded)
     let JU := (jastrow N_up).apply (hU2.append θ)
     let JD := (jastrow N_down).apply (hD2.append θ)
@@ -866,23 +979,220 @@ theorem contDiff_eval_detBlock (N : ℕ)
 
 end Smoothness
 
+/-! #### Stage lemmas for the raw-input libraries
+
+Each stream library of the section "Raw-input stage libraries" gets one lemma, stated
+for the raw inputs and proved by the node lemma of the component at its root applied to
+the stage lemmas of its inputs. Each proof is therefore a few lines and never unfolds
+more than one stage; the main theorem `contDiff_fermiNetAnsatz` below then only checks
+the two calls to `hU2Raw`/`hD2Raw` plus the output dataflow (`jastrow`, `enDist`,
+`envelope`, `orbitalMatrix`, `detBlock`). -/
+
+theorem contDiff_eval_hU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (hU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [hU0Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_oneStreamInit N_up N_nuc Z contDiff_fst contDiff_const contDiff_const
+
+theorem contDiff_eval_hD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (hD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [hD0Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_oneStreamInit N_down N_nuc Z contDiff_snd contDiff_const contDiff_const
+
+theorem contDiff_eval_gU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gU0Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamInit N_up contDiff_fst contDiff_const
+
+theorem contDiff_eval_gD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gD0Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamInit N_down contDiff_snd contDiff_const
+
+theorem contDiff_eval_gUD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gUD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gUD0Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamInitCross N_up N_down contDiff_fst contDiff_snd contDiff_const
+
+theorem contDiff_eval_gDU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gDU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gDU0Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamInitCross N_down N_up contDiff_snd contDiff_fst contDiff_const
+
+theorem contDiff_eval_hU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (hU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [hU1Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_oneStreamLayer N_up N_down OFF_L0
+    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gU0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gUD0Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_hD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (hD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [hD1Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_oneStreamLayer N_down N_up OFF_L0
+    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gD0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gDU0Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_gU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gU1Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamLayer N_up OFF_L0
+    (contDiff_eval_gU0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_gD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gD1Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamLayer N_down OFF_L0
+    (contDiff_eval_gD0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_gUD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gUD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gUD1Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamLayerCross N_up N_down OFF_L0
+    (contDiff_eval_gUD0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_gDU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (gDU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [gDU1Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_twoStreamLayerCross N_down N_up OFF_L0
+    (contDiff_eval_gDU0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_hU2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (hU2Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [hU2Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_oneStreamLayer N_up N_down OFF_L1
+    (contDiff_eval_hU1Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gU1Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gUD1Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
+theorem contDiff_eval_hD2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
+    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    ContDiff ℝ 2 fun p : Config N_up N_down =>
+      (hD2Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
+  simp only [hD2Raw, reduce_soir, reduce_xla]
+  exact contDiff_eval_oneStreamLayer N_down N_up OFF_L1
+    (contDiff_eval_hD1Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gD1Raw N_nuc N_up N_down θ R Z)
+    (contDiff_eval_gDU1Raw N_nuc N_up N_down θ R Z)
+    contDiff_const
+
 /-- The evaluated program is `C²` in the electron positions: the composition of the
-node lemmas above along the dataflow (see the section docstring). -/
+node lemmas and stage lemmas above along the dataflow (see the section docstring). -/
 theorem contDiff_fermiNetAnsatz (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R_nuc : Tensor ℝ [N_nuc,3]) (Z_nuc : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 (fun p : Config N_up N_down =>
       (fermiNetAnsatz N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) := by
-  -- `simp only [fermiNetAnsatz, reduce_soir, reduce_xla, reduce_tensor]` turns the
-  -- goal into the dataflow of `Expr.eval` applications to the component libraries,
-  -- in exactly the shape the `contDiff_eval_*` lemmas above are stated in, so the
-  -- composition is a chain of `exact`/`ContDiff.comp` applications along it. It is
-  -- left as `sorry` because the normalized program is ~10⁴ nodes (every shared stream
-  -- is inlined at each use, `hU0` alone occurs three times per layer), which makes the
-  -- final definitional-equality check of that chain expensive; the composition itself
-  -- is mechanical. Proving it therefore wants either a split of the program into
-  -- shallower stages, or a `psiEval`-style reference semantics with a separate
-  -- `Expr.eval`-agreement lemma.
-  sorry
+  -- The restructured ansatz is a short call chain over the raw-input stage libraries,
+  -- so unfolding it is cheap and leaves the two `hU2Raw`/`hD2Raw` calls opaque; the
+  -- stage lemmas above discharge their smoothness. What remains is the output
+  -- dataflow `Ψ = exp(J↑ + J↓) · (det↑ · det↓)`, composed from the same primitive
+  -- shape lemmas that each node lemma is proved from. The four `have`s below state
+  -- the leaf dataflow in `SimpleExpr.eval` form (the shape of the node lemmas); the
+  -- final `exact`s match it against the unfolded program, where `simp` has reduced
+  -- `SimpleExpr.eval` to `Expr.eval ⋯ 0`.
+  simp only [fermiNetAnsatz, reduce_soir, reduce_xla]
+  have hJU : ContDiff ℝ 2 (fun p : Config N_up N_down =>
+      (jastrow N_up).eval ((hU2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) θ) := by
+    apply contDiff_eval_jastrow
+    · exact contDiff_eval_hU2Raw N_nuc N_up N_down θ R_nuc Z_nuc
+    · exact contDiff_const
+  have hJD : ContDiff ℝ 2 (fun p : Config N_up N_down =>
+      (jastrow N_down).eval ((hD2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) θ) := by
+    apply contDiff_eval_jastrow
+    · exact contDiff_eval_hD2Raw N_nuc N_up N_down θ R_nuc Z_nuc
+    · exact contDiff_const
+  have hdetU : ContDiff ℝ 2 (fun p : Config N_up N_down =>
+      (detBlock N_up).eval
+        ((orbitalMatrix N_up).eval
+          ((hU2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2)
+          (Tensor.map Real.exp (Tensor.map Neg.neg
+            ((envelope N_up N_nuc).eval
+              ((enDist N_up N_nuc).eval p.1 R_nuc θ) θ)))
+          θ)
+        θ) := by
+    apply contDiff_eval_detBlock
+    · apply contDiff_eval_orbitalMatrix
+      · exact contDiff_eval_hU2Raw N_nuc N_up N_down θ R_nuc Z_nuc
+      · apply Xla.contDiff_tensorMap_exp
+        apply Xla.contDiff_tensorMap_neg
+        apply contDiff_eval_envelope
+        · apply contDiff_eval_enDist
+          · exact contDiff_fst
+          · exact contDiff_const
+          · exact contDiff_const
+        · exact contDiff_const
+      · exact contDiff_const
+    · exact contDiff_const
+  have hdetD : ContDiff ℝ 2 (fun p : Config N_up N_down =>
+      (detBlock N_down).eval
+        ((orbitalMatrix N_down).eval
+          ((hD2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2)
+          (Tensor.map Real.exp (Tensor.map Neg.neg
+            ((envelope N_down N_nuc).eval
+              ((enDist N_down N_nuc).eval p.2 R_nuc θ) θ)))
+          θ)
+        θ) := by
+    apply contDiff_eval_detBlock
+    · apply contDiff_eval_orbitalMatrix
+      · exact contDiff_eval_hD2Raw N_nuc N_up N_down θ R_nuc Z_nuc
+      · apply Xla.contDiff_tensorMap_exp
+        apply Xla.contDiff_tensorMap_neg
+        apply contDiff_eval_envelope
+        · apply contDiff_eval_enDist
+          · exact contDiff_snd
+          · exact contDiff_const
+          · exact contDiff_const
+        · exact contDiff_const
+      · exact contDiff_const
+    · exact contDiff_const
+  refine Xla.contDiff_tensorMap₂_mul (s := []) ?_ ?_
+  · apply Xla.contDiff_tensorMap₂_mul (s := [])
+    · apply Xla.contDiff_tensorMap_exp (s := [])
+      apply Xla.contDiff_tensorMap₂_add (s := [])
+      · exact hJU
+      · exact hJD
+    · exact hdetU
+  · exact hdetD
 
 /-- Smoothness: every primitive used is real-analytic on its domain (`sqrt` guarded
 away from 0 by `ε > 0`, `tanh` a composition of analytic functions), so `Ψ` is C². -/
