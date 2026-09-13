@@ -1017,7 +1017,24 @@ theorem contDiff_eval_twoStreamLayer (N off : ℕ)
     {g : X → Tensor ℝ [N,N,F]} {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
     (hg : ContDiff ℝ 2 g) (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamLayer N off).eval (g x) (h x) (θ x) := by
-  sorry
+  simp only [twoStreamLayer, reduce_soir, reduce_xla]
+  apply contDiff_eval_tanh
+  apply Xla.contDiff_tensorMap₂_add
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        exact hg
+      · exact contDiff_eval_paramBlock (off + 1120) [F, F] hθ
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        apply Xla.contDiff_tensorMap₂_add
+        · apply Xla.contDiff_broadcast
+          exact hh
+        · apply Xla.contDiff_broadcast
+          exact hh
+      · exact contDiff_eval_paramBlock (off + 2144) [F, F] hθ
+  · apply Xla.contDiff_broadcast
+    exact contDiff_eval_paramSlice (off + 3168) F hθ
 
 /-- Opposite-spin two-electron stream update
 `g^{σσ̄} ← tanh(G' g^{σσ̄} + H' (h_i^σ + h_j^{σ̄}) + c')`. -/
