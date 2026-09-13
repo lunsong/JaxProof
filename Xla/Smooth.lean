@@ -325,10 +325,21 @@ theorem contDiff_broadcast {s : List (ℕ × Bool)}
 
 /-- `DirectImpl.unflatten`: reinterpreting a flat index as a multi-index is a linear
 isometry. -/
-theorem contDiff_unflatten (s : Shape) [NormedAddCommGroup (Tensor ℝ s)]
-    [NormedSpace ℝ (Tensor ℝ s)] {f : X → Tensor ℝ [s.prod]} (hf : ContDiff ℝ 2 f) :
+theorem contDiff_unflatten (s : Shape) {f : X → Tensor ℝ [s.prod]} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (Tensor.unflatten s (f x) : Tensor ℝ s) := by
-  sorry
+  induction s with
+  | nil =>
+    change ContDiff ℝ 2 fun x => Tensor.unflatten [] (f x)
+    simp only [Tensor.unflatten]
+    exact (contDiff_apply ℝ ℝ 0).comp hf
+  | cons n s ih =>
+    change ContDiff ℝ 2 fun x (i : Fin n) => Tensor.unflatten s (fun j => f x (i.mulAdd j))
+    apply contDiff_pi'
+    intro i
+    apply ih
+    apply contDiff_pi'
+    intro j
+    exact (contDiff_apply ℝ ℝ (i.mulAdd j)).comp hf
 
 /-- `DirectImpl.gather` from a one-dimensional table along a *fixed* integer index
 tensor: a reindexing of the data, hence `C²` in the data. The index is constant in the
