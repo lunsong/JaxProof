@@ -3,3 +3,4 @@ import Xla.Impl
 import Xla.Op
 import Xla.Tensor
 import Xla.Smooth
+import Xla.SmoothTactic

@@ -1,5 +1,5 @@
 import QMC.Ansatz
-import Xla.Smooth
+import Xla.SmoothTactic
 
 /-!
 # FermiNet — a neural-network QMC ansatz for molecules
@@ -94,7 +94,7 @@ indexing, cf. FermiNet Eq. 19; `√(r² + ε)` keeps the norm term real-analytic
 and the `K` determinants per spin are computed by `vmap`-ing the `det` primitive
 over the leading axis. Determinant weights are `w_k = exp θ_k > 0`.
 
-## Why the validity contract holds (sketch; proofs are `sorry`)
+## Why the validity contract holds (sketch; `antisymmetric` and `exp_decay` are `sorry`)
 
 * **`antisymmetric`**: the one- and two-electron streams and the per-orbital
   envelope are permutation *equivariant* (each update is a symmetric aggregation
@@ -111,8 +111,9 @@ over the leading axis. Determinant weights are `w_k = exp θ_k > 0`.
   *every* `θ` (the `∀θ` contract). The proof is a composition along the dataflow:
   `smooth` reduces to `contDiff_fermiNetAnsatz`, which composes the per-node lemmas
   `contDiff_eval_*` in the section "Smoothness: the decomposition", whose leaves are
-  the per-primitive facts in `Xla/Smooth.lean`. See that section for the shape of
-  the statements and the status of the proofs.
+  the per-primitive facts in `Xla/Smooth.lean`. The composition is performed by the
+  `contDiff_eval` tactic (`Xla/SmoothTactic.lean`), a head-directed `continuity`-style
+  rule engine; see that file and the section below.
 * **`exp_decay`**: `‖x‖ → ∞` forces `Σ_j env_j ≳ a‖x‖` (`A_{k,i,α} > 0` and
   `√(r²+ε) ≥ ‖x_j - R_α‖`), so the envelope contributes `exp(-a‖x‖)`. The
   determinant entries are bounded (`tanh`-bounded streams) times the envelope,
@@ -455,7 +456,7 @@ def orbitalMatrix (N : ℕ) :
     Xla.mul φT envExp
 
 /-- `det` as a library function, for `vmap`-ing over the determinant axis. -/
-def detExpr (n : ℕ) : Expr XlaOp [⟨.float, [n, n]⟩] [⟨.float, []⟩] :=
+def detExpr (n : ℕ) : SimpleExpr [⟨.float, [n, n]⟩] ⟨.float, []⟩ :=
   Expr.ofFn fun x => Xla.det x
 
 /-- Weighted sum of the `K` determinants of a spin sector: `Σₖ exp w_k · detₖ`. -/
@@ -683,10 +684,16 @@ The leaves — one per primitive of `DirectImpl` — are in `Xla/Smooth.lean`:
 `contDiff_transpose`/`contDiff_broadcast`/`contDiff_unflatten` for the index
 manipulations, and `contDiff_gather` for gathering along a fixed index tensor.
 
-The proofs of the node lemmas are `sorry`: each is the composition of its children's
-lemmas with the `Xla/Smooth.lean` leaves, mechanically obtained by
-`simp only [reduce_soir, reduce_xla, reduce_tensor]`-unfolding the node (which leaves
-the sub-components as named libraries, never inlined) and then chaining. -/
+The node lemmas are tagged `@[contDiff_eval_rule]` and their proofs call the
+`contDiff_eval` tactic (`Xla/SmoothTactic.lean`): after unfolding the node with
+`simp only [node, reduce_soir, reduce_xla]` (which leaves the sub-components as named
+libraries, never inlined), the tactic dispatches on the head of each sub-expression
+and applies the matching rule, recursing to the leaves. Side conditions that are not
+`ContDiff` goals (the positivity of `sqrt` arguments, the non-vanishing denominator of
+`tanh`) are returned as remaining goals and discharged right after the tactic call.
+The few nodes whose evaluation leaves `Index`/`Curry`/`gather` scaffolding
+(`contDiff_eval_paramSlice`, `contDiff_eval_oneStreamInit`, `contDiff_eval_detBlock`)
+keep a hand-written proof or `sorry` for that part. -/
 
 /-- The configuration space the wavefunction is a function of: the two spin sectors'
 electron positions. -/
@@ -730,25 +737,18 @@ private theorem flatten_pure {s : Shape} (c : ℝ) (i : Fin s.prod) :
 
 /-- `tanh`: `1 - 2/(exp(2x) + 1)`, a composition of `exp` and a division whose
 denominator is `≥ 1`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_tanh (s : Shape) {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (tanh s).eval (f x) := by
   simp only [tanh, reduce_soir, reduce_xla]
-  apply Xla.contDiff_tensorMap₂_sub
-  · exact contDiff_const
-  · apply Xla.contDiff_tensorMap₂_div
-    · exact contDiff_const
-    · apply Xla.contDiff_tensorMap₂_add
-      · apply Xla.contDiff_tensorMap_exp
-        apply Xla.contDiff_tensorMap₂_mul
-        · exact contDiff_const
-        · exact hf
-      · exact contDiff_const
-    · intro x i
-      rw [flatten_map₂, tensorMap_eq_curryMap, flatten_curryMap, flatten_map₂, flatten_pure,
-        flatten_pure]
-      exact ne_of_gt (by positivity)
+  contDiff_eval
+  · intro x i
+    rw [flatten_map₂, tensorMap_eq_curryMap, flatten_curryMap, flatten_map₂, flatten_pure,
+      flatten_pure]
+    exact ne_of_gt (by positivity)
 
 /-- Parameter slicing is linear (`gather` along the fixed index tensor `iota + off`). -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_paramSlice (off len : ℕ) {p : X → Tensor ℝ [N_PARAM]}
     (hp : ContDiff ℝ 2 p) :
     ContDiff ℝ 2 fun x => (paramSlice off len).eval (p x) := by
@@ -758,29 +758,29 @@ theorem contDiff_eval_paramSlice (off len : ℕ) {p : X → Tensor ℝ [N_PARAM]
   exact (contDiff_apply ℝ _ ?_).comp hp
 
 /-- Reshaping a slice is an index reinterpretation. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_paramBlock (off : ℕ) (s : Shape)
     {p : X → Tensor ℝ [N_PARAM]} (hp : ContDiff ℝ 2 p) :
     ContDiff ℝ 2 fun x => (paramBlock off s).eval (p x) := by
   simp only [paramBlock, reduce_soir, reduce_xla]
-  exact Xla.contDiff_unflatten s (contDiff_eval_paramSlice off s.prod hp)
+  contDiff_eval
 
 /-- `exp` of a parameter, so positive for every `θ`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_posScalar (off : ℕ) {p : X → Tensor ℝ [N_PARAM]}
     (hp : ContDiff ℝ 2 p) :
     ContDiff ℝ 2 fun x => (posScalar off).eval (p x) := by
   simp only [posScalar, reduce_soir, reduce_xla]
-  exact Xla.contDiff_tensorMap_exp
-    (Xla.contDiff_sumN 1 (contDiff_eval_paramSlice off 1 hp))
+  contDiff_eval
 
 /-- Electron–nucleus displacement: a difference of coordinates. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_enDisp (N N_nuc : ℕ)
     {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) :
     ContDiff ℝ 2 fun x => (enDisp N N_nuc).eval (r x) (R x) := by
   simp only [enDisp, reduce_soir, reduce_xla]
-  refine Xla.contDiff_tensorMap₂_sub ?_ ?_
-  · exact Xla.contDiff_broadcast hr
-  · exact Xla.contDiff_broadcast hR
+  contDiff_eval
 
 /-- The transposition `(0 1 2) ↦ (2 0 1)` used by the distance computations. -/
 private def perm201 : Equiv.Perm (Fin 3) :=
@@ -818,20 +818,13 @@ private theorem broadcast_pos (N N_nuc : ℕ) (e : ℝ) (he : 0 < e)
 
 /-- Electron–nucleus distance `√(‖rᵢ - Rα‖² + ε)`: a polynomial under `sqrt`, whose
 argument is `≥ ε = exp θ > 0` — bounded away from the crease of `sqrt` at `0`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_enDist (N N_nuc : ℕ)
     {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (enDist N N_nuc).eval (r x) (R x) (θ x) := by
   simp only [enDist, reduce_soir, reduce_xla]
-  apply Xla.contDiff_tensorMap_sqrt
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_sumN
-      apply Xla.contDiff_transpose
-      apply Xla.contDiff_tensorMap₂_mul
-      · exact contDiff_eval_enDisp N N_nuc hr hR
-      · exact contDiff_eval_enDisp N N_nuc hr hR
-    · apply Xla.contDiff_broadcast
-      exact contDiff_eval_posScalar OFF_EPS hθ
+  contDiff_eval
   · intro x i
     erw [flatten_map₂]
     apply add_pos_of_nonneg_of_pos
@@ -842,29 +835,21 @@ theorem contDiff_eval_enDist (N N_nuc : ℕ)
       exact broadcast_pos N N_nuc ((posScalar OFF_EPS).eval (θ x)) heps i
 
 /-- Same-spin displacement: a difference of coordinates. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N,3]}
     (hr : ContDiff ℝ 2 r) :
     ContDiff ℝ 2 fun x => (pairDisp N).eval (r x) := by
   simp only [pairDisp, reduce_soir, reduce_xla]
-  refine Xla.contDiff_tensorMap₂_sub ?_ ?_
-  · exact Xla.contDiff_broadcast hr
-  · exact Xla.contDiff_broadcast hr
+  contDiff_eval
 
 /-- Same-spin distance `√(‖rⱼ - rᵢ‖² + ε)`; `ε > 0` keeps `sqrt` off `0`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_pairDist (N : ℕ)
     {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (pairDist N).eval (r x) (θ x) := by
   simp only [pairDist, reduce_soir, reduce_xla]
-  apply Xla.contDiff_tensorMap_sqrt
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_sumN
-      apply Xla.contDiff_transpose
-      apply Xla.contDiff_tensorMap₂_mul
-      · exact contDiff_eval_pairDisp N hr
-      · exact contDiff_eval_pairDisp N hr
-    · apply Xla.contDiff_broadcast
-      exact contDiff_eval_posScalar OFF_EPS hθ
+  contDiff_eval
   · intro x i
     erw [flatten_map₂]
     apply add_pos_of_nonneg_of_pos
@@ -875,30 +860,22 @@ theorem contDiff_eval_pairDist (N : ℕ)
       exact broadcast_pos N N ((posScalar OFF_EPS).eval (θ x)) heps i
 
 /-- Opposite-spin displacement. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_pairDispCross (N N' : ℕ)
     {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') :
     ContDiff ℝ 2 fun x => (pairDispCross N N').eval (r x) (r' x) := by
   simp only [pairDispCross, reduce_soir, reduce_xla]
-  refine Xla.contDiff_tensorMap₂_sub ?_ ?_
-  · exact Xla.contDiff_broadcast hr
-  · exact Xla.contDiff_broadcast hr'
+  contDiff_eval
 
 /-- Opposite-spin distance, `sqrt` again guarded by `ε > 0`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_pairDistCross (N N' : ℕ)
     {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (pairDistCross N N').eval (r x) (r' x) (θ x) := by
   simp only [pairDistCross, reduce_soir, reduce_xla]
-  apply Xla.contDiff_tensorMap_sqrt
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_sumN
-      apply Xla.contDiff_transpose
-      apply Xla.contDiff_tensorMap₂_mul
-      · exact contDiff_eval_pairDispCross N N' hr hr'
-      · exact contDiff_eval_pairDispCross N N' hr hr'
-    · apply Xla.contDiff_broadcast
-      exact contDiff_eval_posScalar OFF_EPS hθ
+  contDiff_eval
   · intro x i
     erw [flatten_map₂]
     apply add_pos_of_nonneg_of_pos
@@ -912,6 +889,7 @@ theorem contDiff_eval_pairDistCross (N N' : ℕ)
 
 /-- Initial one-electron stream: `enDisp`/`enDist` features contracted with `einsum`
 (the contractum is fixed index data) plus the charge embedding, then `tanh`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
     {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
@@ -946,156 +924,108 @@ theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
 
 /-- Initial same-spin two-electron stream: `pairDisp`/`pairDist` features, then
 `tanh`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamInit (N : ℕ)
     {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamInit N).eval (r x) (θ x) := by
   simp only [twoStreamInit, reduce_soir, reduce_xla]
-  apply contDiff_eval_tanh
-  apply Xla.contDiff_tensorMap₂_add
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        exact contDiff_eval_pairDisp N hr
-      · exact contDiff_eval_paramBlock OFF_WE [3, F] hθ
-    · apply Xla.contDiff_tensorMap₂_mul
-      · apply Xla.contDiff_broadcast
-        exact contDiff_eval_pairDist N hr hθ
-      · apply Xla.contDiff_broadcast
-        exact contDiff_eval_paramSlice OFF_WD2 F hθ
-  · apply Xla.contDiff_broadcast
-    exact contDiff_eval_paramSlice OFF_GB F hθ
+  contDiff_eval
 
 /-- Initial opposite-spin two-electron stream. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamInitCross (N N' : ℕ)
     {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamInitCross N N').eval (r x) (r' x) (θ x) := by
   simp only [twoStreamInitCross, reduce_soir, reduce_xla]
-  apply contDiff_eval_tanh
-  apply Xla.contDiff_tensorMap₂_add
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        exact contDiff_eval_pairDispCross N N' hr hr'
-      · exact contDiff_eval_paramBlock OFF_WE [3, F] hθ
-    · apply Xla.contDiff_tensorMap₂_mul
-      · apply Xla.contDiff_broadcast
-        exact contDiff_eval_pairDistCross N N' hr hr' hθ
-      · apply Xla.contDiff_broadcast
-        exact contDiff_eval_paramSlice OFF_WD2 F hθ
-  · apply Xla.contDiff_broadcast
-    exact contDiff_eval_paramSlice OFF_GB F hθ
+  contDiff_eval
 
 /-- One-electron stream update `h ← tanh(V h + Σⱼ w ⊙ g_ij + Σⱼ w' ⊙ g_ij^{σσ̄} + b)`:
 `einsum` contractions (fixed weights) of `C²` inputs, then `tanh`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_oneStreamLayer (N N' off : ℕ)
     {h : X → Tensor ℝ [N,F]} {g : X → Tensor ℝ [N,N,F]} {gC : X → Tensor ℝ [N,N',F]}
     {θ : X → Tensor ℝ [N_PARAM]}
     (hh : ContDiff ℝ 2 h) (hg : ContDiff ℝ 2 g) (hgC : ContDiff ℝ 2 gC) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (oneStreamLayer N N' off).eval (h x) (g x) (gC x) (θ x) := by
   simp only [oneStreamLayer, reduce_soir, reduce_xla]
-  apply contDiff_eval_tanh
-  apply Xla.contDiff_tensorMap₂_add
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_tensorMap₂_add
-      · apply Xla.contDiff_einsum
-        · exact hh
-        · exact contDiff_eval_paramBlock off [F, F] hθ
-      · apply Xla.contDiff_einsum
-        · exact hg
-        · exact contDiff_eval_paramSlice (off + 1024) F hθ
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        exact hgC
-      · exact contDiff_eval_paramSlice (off + 1056) F hθ
-  · apply Xla.contDiff_broadcast
-    exact contDiff_eval_paramSlice (off + 1088) F hθ
+  contDiff_eval
 
 /-- Same-spin two-electron stream update `g ← tanh(G g + H (h_i + h_j) + c)`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamLayer (N off : ℕ)
     {g : X → Tensor ℝ [N,N,F]} {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
     (hg : ContDiff ℝ 2 g) (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamLayer N off).eval (g x) (h x) (θ x) := by
   simp only [twoStreamLayer, reduce_soir, reduce_xla]
-  apply contDiff_eval_tanh
-  apply Xla.contDiff_tensorMap₂_add
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        exact hg
-      · exact contDiff_eval_paramBlock (off + 1120) [F, F] hθ
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        apply Xla.contDiff_tensorMap₂_add
-        · apply Xla.contDiff_broadcast
-          exact hh
-        · apply Xla.contDiff_broadcast
-          exact hh
-      · exact contDiff_eval_paramBlock (off + 2144) [F, F] hθ
-  · apply Xla.contDiff_broadcast
-    exact contDiff_eval_paramSlice (off + 3168) F hθ
+  contDiff_eval
 
 /-- Opposite-spin two-electron stream update
 `g^{σσ̄} ← tanh(G' g^{σσ̄} + H' (h_i^σ + h_j^{σ̄}) + c')`. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamLayerCross (N N' off : ℕ)
     {gC : X → Tensor ℝ [N,N',F]} {h : X → Tensor ℝ [N,F]} {h' : X → Tensor ℝ [N',F]}
     {θ : X → Tensor ℝ [N_PARAM]}
     (hgC : ContDiff ℝ 2 gC) (hh : ContDiff ℝ 2 h) (hh' : ContDiff ℝ 2 h') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamLayerCross N N' off).eval (gC x) (h x) (h' x) (θ x) := by
   simp only [twoStreamLayerCross, reduce_soir, reduce_xla]
-  apply contDiff_eval_tanh
-  apply Xla.contDiff_tensorMap₂_add
-  · apply Xla.contDiff_tensorMap₂_add
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        exact hgC
-      · exact contDiff_eval_paramBlock (off + 3200) [F, F] hθ
-    · apply Xla.contDiff_einsum
-      · apply Xla.contDiff_transpose
-        apply Xla.contDiff_tensorMap₂_add
-        · apply Xla.contDiff_broadcast
-          exact hh
-        · apply Xla.contDiff_broadcast
-          exact hh'
-      · exact contDiff_eval_paramBlock (off + 4224) [F, F] hθ
-  · apply Xla.contDiff_broadcast
-    exact contDiff_eval_paramSlice (off + 5248) F hθ
+  contDiff_eval
 
 /-! #### Outputs -/
 
 /-- Jastrow factor `Σᵢ w_J · hᵢ`: an `einsum` contraction with fixed weights. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_jastrow (N : ℕ)
     {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
     (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (jastrow N).eval (h x) (θ x) := by
-  sorry
+  simp only [jastrow, reduce_soir, reduce_xla]
+  contDiff_eval
 
 /-- Exponential envelope `Σα exp A[k,i,α] · ‖xⱼ - Rα‖`: an `einsum` of `exp`-ed
 parameters with the `C²` distances (its values are positive, as the caller needs for
 `exp (-·)`). -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_envelope (N N_nuc : ℕ)
     {dist : X → Tensor ℝ [N,N_nuc]} {θ : X → Tensor ℝ [N_PARAM]}
     (hd : ContDiff ℝ 2 dist) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (envelope N N_nuc).eval (dist x) (θ x) := by
-  sorry
+  simp only [envelope, reduce_soir, reduce_xla]
+  contDiff_eval
 
 /-- Orbital matrix `φᵢᵏ(xⱼ)`: an `einsum` of the stream features with the fixed orbital
 weights, multiplied by the `C²` envelope. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_orbitalMatrix (N : ℕ)
     {h : X → Tensor ℝ [N,F]} {envExp : X → Tensor ℝ [K,N,N]} {θ : X → Tensor ℝ [N_PARAM]}
     (hh : ContDiff ℝ 2 h) (he : ContDiff ℝ 2 envExp) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (orbitalMatrix N).eval (h x) (envExp x) (θ x) := by
-  sorry
+  simp only [orbitalMatrix, reduce_soir, reduce_xla]
+  contDiff_eval
+
+/-- `detExpr N` applied to a matrix-valued `C²` function: `Xla.contDiff_det` behind
+the `Expr` wrapper used by the `vmap` in `detBlock`. -/
+@[contDiff_eval_rule]
+theorem contDiff_eval_detExpr (N : ℕ) {f : X → Tensor ℝ [N,N]} (hf : ContDiff ℝ 2 f) :
+    ContDiff ℝ 2 fun x => (detExpr N).eval (f x) := by
+  simp only [detExpr, reduce_soir, reduce_xla]
+  exact Xla.contDiff_det hf
 
 /-- Weighted determinant sum `Σₖ exp w_k · detₖ`: `det` (`Xla.contDiff_det`) `vmap`-ed
 over the `K` orbital matrices, summed with positive weights. The `vmap` of `DirectImpl`
 is the only node whose semantics is `Index`-level rather than entrywise; it is the
 `det` leaf applied to each slice, so it is `C²` entrywise in the orbital tensor. -/
+@[contDiff_eval_rule]
 theorem contDiff_eval_detBlock (N : ℕ)
     {orb : X → Tensor ℝ [K,N,N]} {θ : X → Tensor ℝ [N_PARAM]}
     (ho : ContDiff ℝ 2 orb) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (detBlock N).eval (orb x) (θ x) := by
+  -- `vmap`'s `DirectImpl` semantics exposes the batched function through `Curry`/`Index`
+  -- plumbing that `contDiff_eval` does not yet reduce. A proof needs either a `vmap`
+  -- smoothness lemma (`Xla.contDiff_vmap`) or the `Curry`-level evaluation to normalize;
+  -- `contDiff_eval_detExpr` proves each slice and `contDiff_eval_curry_pi` +
+  -- `contDiff_eval_apply` handle the product/projection structure once it is exposed.
   sorry
 
 end Smoothness
@@ -1103,139 +1033,125 @@ end Smoothness
 /-! #### Stage lemmas for the raw-input libraries
 
 Each stream library of the section "Raw-input stage libraries" gets one lemma, stated
-for the raw inputs and proved by the node lemma of the component at its root applied to
-the stage lemmas of its inputs. Each proof is therefore a few lines and never unfolds
-more than one stage; the main theorem `contDiff_fermiNetAnsatz` below then only checks
-the two calls to `hU2Raw`/`hD2Raw` plus the output dataflow (`jastrow`, `enDist`,
-`envelope`, `orbitalMatrix`, `detBlock`). -/
+for the raw inputs. Its proof is `contDiff_eval` after unfolding the library: the
+tactic applies the node lemma of the component at its root and recurses into the stage
+lemmas of its inputs (through the `Config` projections `contDiff_fst`/`contDiff_snd`).
+Each proof is therefore two lines and never unfolds more than one stage; the main
+theorem `contDiff_fermiNetAnsatz` below then only checks the two calls to
+`hU2Raw`/`hD2Raw` plus the output dataflow (`jastrow`, `enDist`, `envelope`,
+`orbitalMatrix`, `detBlock`) — also with `contDiff_eval`. -/
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_hU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hU0Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_oneStreamInit N_up N_nuc Z contDiff_fst contDiff_const contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_hD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hD0Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_oneStreamInit N_down N_nuc Z contDiff_snd contDiff_const contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gU0Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamInit N_up contDiff_fst contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gD0Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamInit N_down contDiff_snd contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gUD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gUD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gUD0Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamInitCross N_up N_down contDiff_fst contDiff_snd contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gDU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gDU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gDU0Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamInitCross N_down N_up contDiff_snd contDiff_fst contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_hU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hU1Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_oneStreamLayer N_up N_down OFF_L0
-    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gU0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gUD0Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_hD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hD1Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_oneStreamLayer N_down N_up OFF_L0
-    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gD0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gDU0Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gU1Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamLayer N_up OFF_L0
-    (contDiff_eval_gU0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gD1Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamLayer N_down OFF_L0
-    (contDiff_eval_gD0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gUD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gUD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gUD1Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamLayerCross N_up N_down OFF_L0
-    (contDiff_eval_gUD0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_gDU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gDU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gDU1Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_twoStreamLayerCross N_down N_up OFF_L0
-    (contDiff_eval_gDU0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_hD0Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_hU0Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_hU2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hU2Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hU2Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_oneStreamLayer N_up N_down OFF_L1
-    (contDiff_eval_hU1Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gU1Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gUD1Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
+@[contDiff_eval_rule]
 theorem contDiff_eval_hD2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
     (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hD2Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hD2Raw, reduce_soir, reduce_xla]
-  exact contDiff_eval_oneStreamLayer N_down N_up OFF_L1
-    (contDiff_eval_hD1Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gD1Raw N_nuc N_up N_down θ R Z)
-    (contDiff_eval_gDU1Raw N_nuc N_up N_down θ R Z)
-    contDiff_const
+  contDiff_eval
 
 /-- The evaluated program is `C²` in the electron positions: the composition of the
 node lemmas and stage lemmas above along the dataflow (see the section docstring). -/
@@ -1243,77 +1159,8 @@ theorem contDiff_fermiNetAnsatz (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PA
     (R_nuc : Tensor ℝ [N_nuc,3]) (Z_nuc : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 (fun p : Config N_up N_down =>
       (fermiNetAnsatz N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) := by
-  -- The restructured ansatz is a short call chain over the raw-input stage libraries,
-  -- so unfolding it is cheap and leaves the two `hU2Raw`/`hD2Raw` calls opaque; the
-  -- stage lemmas above discharge their smoothness. What remains is the output
-  -- dataflow `Ψ = exp(J↑ + J↓) · (det↑ · det↓)`, composed from the same primitive
-  -- shape lemmas that each node lemma is proved from. The four `have`s below state
-  -- the leaf dataflow in `SimpleExpr.eval` form (the shape of the node lemmas); the
-  -- final `exact`s match it against the unfolded program, where `simp` has reduced
-  -- `SimpleExpr.eval` to `Expr.eval ⋯ 0`.
   simp only [fermiNetAnsatz, reduce_soir, reduce_xla]
-  have hJU : ContDiff ℝ 2 (fun p : Config N_up N_down =>
-      (jastrow N_up).eval ((hU2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) θ) := by
-    apply contDiff_eval_jastrow
-    · exact contDiff_eval_hU2Raw N_nuc N_up N_down θ R_nuc Z_nuc
-    · exact contDiff_const
-  have hJD : ContDiff ℝ 2 (fun p : Config N_up N_down =>
-      (jastrow N_down).eval ((hD2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) θ) := by
-    apply contDiff_eval_jastrow
-    · exact contDiff_eval_hD2Raw N_nuc N_up N_down θ R_nuc Z_nuc
-    · exact contDiff_const
-  have hdetU : ContDiff ℝ 2 (fun p : Config N_up N_down =>
-      (detBlock N_up).eval
-        ((orbitalMatrix N_up).eval
-          ((hU2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2)
-          (Tensor.map Real.exp (Tensor.map Neg.neg
-            ((envelope N_up N_nuc).eval
-              ((enDist N_up N_nuc).eval p.1 R_nuc θ) θ)))
-          θ)
-        θ) := by
-    apply contDiff_eval_detBlock
-    · apply contDiff_eval_orbitalMatrix
-      · exact contDiff_eval_hU2Raw N_nuc N_up N_down θ R_nuc Z_nuc
-      · apply Xla.contDiff_tensorMap_exp
-        apply Xla.contDiff_tensorMap_neg
-        apply contDiff_eval_envelope
-        · apply contDiff_eval_enDist
-          · exact contDiff_fst
-          · exact contDiff_const
-          · exact contDiff_const
-        · exact contDiff_const
-      · exact contDiff_const
-    · exact contDiff_const
-  have hdetD : ContDiff ℝ 2 (fun p : Config N_up N_down =>
-      (detBlock N_down).eval
-        ((orbitalMatrix N_down).eval
-          ((hD2Raw N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2)
-          (Tensor.map Real.exp (Tensor.map Neg.neg
-            ((envelope N_down N_nuc).eval
-              ((enDist N_down N_nuc).eval p.2 R_nuc θ) θ)))
-          θ)
-        θ) := by
-    apply contDiff_eval_detBlock
-    · apply contDiff_eval_orbitalMatrix
-      · exact contDiff_eval_hD2Raw N_nuc N_up N_down θ R_nuc Z_nuc
-      · apply Xla.contDiff_tensorMap_exp
-        apply Xla.contDiff_tensorMap_neg
-        apply contDiff_eval_envelope
-        · apply contDiff_eval_enDist
-          · exact contDiff_snd
-          · exact contDiff_const
-          · exact contDiff_const
-        · exact contDiff_const
-      · exact contDiff_const
-    · exact contDiff_const
-  refine Xla.contDiff_tensorMap₂_mul (s := []) ?_ ?_
-  · apply Xla.contDiff_tensorMap₂_mul (s := [])
-    · apply Xla.contDiff_tensorMap_exp (s := [])
-      apply Xla.contDiff_tensorMap₂_add (s := [])
-      · exact hJU
-      · exact hJD
-    · exact hdetU
-  · exact hdetD
+  contDiff_eval
 
 /-- Smoothness: every primitive used is real-analytic on its domain (`sqrt` guarded
 away from 0 by `ε > 0`, `tanh` a composition of analytic functions), so `Ψ` is C². -/

@@ -42,7 +42,9 @@ tensor without naming its index type.
 
 Each leaf statement below is a small analysis fact whose proof is
 independent of the program it is used in. Program-level smoothness
-(`QMC/FermiNet.lean`) is then a composition of these leaves along the dataflow.
+(`QMC/FermiNet.lean`) is then a composition of these leaves along the dataflow. That
+composition is automated by the `contDiff_eval` tactic (`Xla/SmoothTactic.lean`); the
+leaf lemmas are tagged `@[contDiff_eval_rule]` so the tactic can apply them.
 
 Where the work is:
 
@@ -509,5 +511,21 @@ theorem contDiff_gather {n : ℕ} [NeZero n] {s' : Shape} (idx : Tensor ℤ s')
   apply contDiff_pi'
   intro r
   exact (contDiff_apply ℝ ℝ (Fin.intCast (idx.flatten r))).comp hf
+
+attribute [contDiff_eval_rule]
+  contDiff_tensorMap_exp
+  contDiff_tensorMap_neg
+  contDiff_tensorMap₂_add
+  contDiff_tensorMap₂_sub
+  contDiff_tensorMap₂_mul
+  contDiff_tensorMap₂_div
+  contDiff_tensorMap_sqrt
+  contDiff_sumN
+  contDiff_einsum
+  contDiff_det
+  contDiff_transpose
+  contDiff_broadcast
+  contDiff_unflatten
+  contDiff_gather
 
 end Xla
