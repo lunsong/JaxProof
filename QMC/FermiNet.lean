@@ -971,7 +971,21 @@ theorem contDiff_eval_twoStreamInitCross (N N' : ℕ)
     {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamInitCross N N').eval (r x) (r' x) (θ x) := by
-  sorry
+  simp only [twoStreamInitCross, reduce_soir, reduce_xla]
+  apply contDiff_eval_tanh
+  apply Xla.contDiff_tensorMap₂_add
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        exact contDiff_eval_pairDispCross N N' hr hr'
+      · exact contDiff_eval_paramBlock OFF_WE [3, F] hθ
+    · apply Xla.contDiff_tensorMap₂_mul
+      · apply Xla.contDiff_broadcast
+        exact contDiff_eval_pairDistCross N N' hr hr' hθ
+      · apply Xla.contDiff_broadcast
+        exact contDiff_eval_paramSlice OFF_WD2 F hθ
+  · apply Xla.contDiff_broadcast
+    exact contDiff_eval_paramSlice OFF_GB F hθ
 
 /-- One-electron stream update `h ← tanh(V h + Σⱼ w ⊙ g_ij + Σⱼ w' ⊙ g_ij^{σσ̄} + b)`:
 `einsum` contractions (fixed weights) of `C²` inputs, then `tanh`. -/
