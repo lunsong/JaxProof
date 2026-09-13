@@ -204,7 +204,22 @@ is bounded away from the non-analytic point `0`. -/
 theorem contDiff_tensorMap_sqrt {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f)
     (hpos : ∀ x (i : Fin s.prod), 0 < (f x).flatten i) :
     ContDiff ℝ 2 fun x => (f x).map Real.sqrt := by
-  sorry
+  rw [contDiff_iff_contDiffAt]
+  intro x₀
+  induction s with
+  | nil =>
+    change ContDiffAt ℝ 2 (fun x => Real.sqrt (f x)) x₀
+    exact (Real.contDiffAt_sqrt (ne_of_gt (hpos x₀ ⟨0, by simp⟩))).comp x₀ hf.contDiffAt
+  | cons s₀ s ih =>
+    change ContDiffAt ℝ 2 (fun x (i : Fin s₀) => (f x i).map Real.sqrt) x₀
+    apply contDiffAt_pi'
+    intro i
+    rw [← Tensor.map_eq_curryMap s Real.sqrt]
+    exact ih ((contDiff_apply ℝ _ i).comp hf)
+      (fun x j => by
+        have h := hpos x (i.mulAdd j)
+        rw [Tensor.flatten_mulAdd (x := f x) i j] at h
+        exact h)
 
 end Elementwise
 
