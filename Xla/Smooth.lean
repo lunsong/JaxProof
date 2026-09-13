@@ -350,11 +350,13 @@ Entrywise, `(gather x idx).flatten r = x (Fin.intCast (idx.flatten r))` holds
 definitionally (`simp [DirectImpl.gather, reduce_tensor, reduce_soir, reduce_xla]`),
 so the statement below is `gather` up to the `unflatten ∘ flatten` round trip
 (`Tensor.unflatten_flatten`). -/
-theorem contDiff_gather {n : ℕ} [NeZero n] {s' : Shape} [NormedAddCommGroup (Tensor ℝ s')]
-    [NormedSpace ℝ (Tensor ℝ s')] (idx : Tensor ℤ s') {f : X → Tensor ℝ [n]}
-    (hf : ContDiff ℝ 2 f) :
+theorem contDiff_gather {n : ℕ} [NeZero n] {s' : Shape} (idx : Tensor ℤ s')
+    {f : X → Tensor ℝ [n]} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x =>
       Tensor.unflatten s' fun r => f x (Fin.intCast (idx.flatten r)) := by
-  sorry
+  apply contDiff_unflatten s'
+  apply contDiff_pi'
+  intro r
+  exact (contDiff_apply ℝ ℝ (Fin.intCast (idx.flatten r))).comp hf
 
 end Xla
