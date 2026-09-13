@@ -916,7 +916,33 @@ theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
     {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (oneStreamInit N N_nuc).eval (r x) (R x) Z (θ x) := by
-  sorry
+  have hZ : NeZero Z_TAB := ⟨by decide⟩
+  simp only [oneStreamInit, reduce_soir, reduce_xla]
+  apply contDiff_eval_tanh
+  apply Xla.contDiff_tensorMap₂_add
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_tensorMap₂_add
+      · apply Xla.contDiff_einsum
+        · apply Xla.contDiff_transpose
+          exact contDiff_eval_enDisp N N_nuc hr hR
+        · exact contDiff_eval_paramBlock OFF_WD [N_nuc, 3, F] hθ
+      · apply Xla.contDiff_einsum
+        · apply Xla.contDiff_transpose
+          exact contDiff_eval_enDist N N_nuc hr hR hθ
+        · exact contDiff_eval_paramBlock OFF_WS [N_nuc, F] hθ
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        apply Xla.contDiff_broadcast
+        change ContDiff ℝ 2 fun x => fun v : Fin N_nuc =>
+          Expr.eval DirectImpl (paramBlock OFF_ZTAB [Z_TAB]) (θ x) 0
+            (Fin.intCast (Tensor.map₂ (fun x1 x2 : ℤ => x1 % x2) Z (fun _ => (Z_TAB : ℤ)) v))
+        apply contDiff_pi'
+        intro v
+        exact (contDiff_apply ℝ ℝ (Fin.intCast (Tensor.map₂ (fun x1 x2 : ℤ => x1 % x2) Z (fun _ => (Z_TAB : ℤ)) v))).comp
+          (contDiff_eval_paramBlock OFF_ZTAB [Z_TAB] hθ)
+      · exact contDiff_eval_paramBlock OFF_WZ [N_nuc, F] hθ
+  · apply Xla.contDiff_broadcast
+    exact contDiff_eval_paramSlice OFF_B0 F hθ
 
 /-- Initial same-spin two-electron stream: `pairDisp`/`pairDist` features, then
 `tanh`. -/
