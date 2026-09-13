@@ -585,25 +585,71 @@ variable {X : Type} [NormedAddCommGroup X] [NormedSpace ℝ X]
 
 /-! #### Primitive leaves of the program -/
 
+private theorem flatten_map₂ {s : Shape} (f : ℝ → ℝ → ℝ) (u v : Tensor ℝ s) (i : Fin s.prod) :
+    (Tensor.map₂ f u v).flatten i = f (u.flatten i) (v.flatten i) := by
+  induction s with
+  | nil => rfl
+  | cons n s ih =>
+    simp only [Tensor.map₂, Tensor.flatten]
+    exact ih (u i.divNat) (v i.divNat) i.modNat
+
+private theorem tensorMap_eq_curryMap (s : Shape) (g : ℝ → ℝ) :
+    (Tensor.map g : Tensor ℝ s → Tensor ℝ s) = Curry.map g := by
+  induction s with
+  | nil => rfl
+  | cons n s ih => rfl
+
+private theorem flatten_curryMap {s : Shape} (f : ℝ → ℝ) (u : Tensor ℝ s) (i : Fin s.prod) :
+    Tensor.flatten (Curry.map f u) i = f (u.flatten i) := by
+  induction s with
+  | nil => rfl
+  | cons n s ih =>
+    simp only [Curry.map, Tensor.flatten]
+    exact ih (u i.divNat) i.modNat
+
+private theorem flatten_pure {s : Shape} (c : ℝ) (i : Fin s.prod) :
+    Tensor.flatten (Curry.pure (m := Fin) c : Curry Fin s ℝ) i = c := by
+  induction s with
+  | nil => rfl
+  | cons n s ih =>
+    simp only [Curry.pure, Tensor.flatten]
+    exact ih i.modNat
+
 /-- `tanh`: `1 - 2/(exp(2x) + 1)`, a composition of `exp` and a division whose
 denominator is `≥ 1`. -/
-theorem contDiff_eval_tanh (s : Shape) [NormedAddCommGroup (Tensor ℝ s)]
-    [NormedSpace ℝ (Tensor ℝ s)] {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
+theorem contDiff_eval_tanh (s : Shape) {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (tanh s).eval (f x) := by
-  sorry
+  simp only [tanh, reduce_soir, reduce_xla]
+  apply Xla.contDiff_tensorMap₂_sub
+  · exact contDiff_const
+  · apply Xla.contDiff_tensorMap₂_div
+    · exact contDiff_const
+    · apply Xla.contDiff_tensorMap₂_add
+      · apply Xla.contDiff_tensorMap_exp
+        apply Xla.contDiff_tensorMap₂_mul
+        · exact contDiff_const
+        · exact hf
+      · exact contDiff_const
+    · intro x i
+      rw [flatten_map₂, tensorMap_eq_curryMap, flatten_curryMap, flatten_map₂, flatten_pure,
+        flatten_pure]
+      exact ne_of_gt (by positivity)
 
 /-- Parameter slicing is linear (`gather` along the fixed index tensor `iota + off`). -/
 theorem contDiff_eval_paramSlice (off len : ℕ) {p : X → Tensor ℝ [N_PARAM]}
     (hp : ContDiff ℝ 2 p) :
     ContDiff ℝ 2 fun x => (paramSlice off len).eval (p x) := by
-  sorry
+  simp only [paramSlice, reduce_soir, reduce_xla, dif_neg (by decide : ¬ N_PARAM = 0)]
+  apply contDiff_pi'
+  intro v
+  exact (contDiff_apply ℝ _ ?_).comp hp
 
 /-- Reshaping a slice is an index reinterpretation. -/
 theorem contDiff_eval_paramBlock (off : ℕ) (s : Shape)
-    [NormedAddCommGroup (Tensor ℝ s)] [NormedSpace ℝ (Tensor ℝ s)]
     {p : X → Tensor ℝ [N_PARAM]} (hp : ContDiff ℝ 2 p) :
     ContDiff ℝ 2 fun x => (paramBlock off s).eval (p x) := by
-  sorry
+  simp only [paramBlock, reduce_soir, reduce_xla]
+  exact Xla.contDiff_unflatten s (contDiff_eval_paramSlice off s.prod hp)
 
 /-- `exp` of a parameter, so positive for every `θ`. -/
 theorem contDiff_eval_posScalar (off : ℕ) {p : X → Tensor ℝ [N_PARAM]}
