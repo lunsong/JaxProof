@@ -1043,7 +1043,24 @@ theorem contDiff_eval_twoStreamLayerCross (N N' off : ℕ)
     {θ : X → Tensor ℝ [N_PARAM]}
     (hgC : ContDiff ℝ 2 gC) (hh : ContDiff ℝ 2 h) (hh' : ContDiff ℝ 2 h') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamLayerCross N N' off).eval (gC x) (h x) (h' x) (θ x) := by
-  sorry
+  simp only [twoStreamLayerCross, reduce_soir, reduce_xla]
+  apply contDiff_eval_tanh
+  apply Xla.contDiff_tensorMap₂_add
+  · apply Xla.contDiff_tensorMap₂_add
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        exact hgC
+      · exact contDiff_eval_paramBlock (off + 3200) [F, F] hθ
+    · apply Xla.contDiff_einsum
+      · apply Xla.contDiff_transpose
+        apply Xla.contDiff_tensorMap₂_add
+        · apply Xla.contDiff_broadcast
+          exact hh
+        · apply Xla.contDiff_broadcast
+          exact hh'
+      · exact contDiff_eval_paramBlock (off + 4224) [F, F] hθ
+  · apply Xla.contDiff_broadcast
+    exact contDiff_eval_paramSlice (off + 5248) F hθ
 
 /-! #### Outputs -/
 
