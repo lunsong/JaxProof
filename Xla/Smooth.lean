@@ -304,14 +304,49 @@ theorem contDiff_det {n : ℕ} {f : X → Tensor ℝ [n, n]} (hf : ContDiff ℝ 
   rw [h]
   fun_prop
 
+/-- `Curry.get` at a fixed (multi-)index is the corresponding product projection, so it
+preserves `C²`. -/
+private theorem contDiff_curryGet : ∀ {s : Shape} (i : Index Fin s) {f : X → Tensor ℝ s},
+    ContDiff ℝ 2 f → ContDiff ℝ 2 fun x => (f x).get i := by
+  intro s
+  induction s with
+  | nil =>
+    intro i f hf
+    change ContDiff ℝ 2 f
+    exact hf
+  | cons s₀ s ih =>
+    intro i f hf
+    change ContDiff ℝ 2 fun x => ((f x) (i ⟨0, by simp⟩)).get (fun r => i r.succ)
+    exact ih (fun r => i r.succ) ((contDiff_apply ℝ _ (i ⟨0, by simp⟩)).comp hf)
+
+/-- `Curry.of` rebuilds a tensor from its index function, entrywise. -/
+private theorem contDiff_curryOf : ∀ {s : Shape} {g : X → (Index Fin s → ℝ)},
+    ContDiff ℝ 2 g → ContDiff ℝ 2 fun x => (Curry.of (g x) : Tensor ℝ s) := by
+  intro s
+  induction s with
+  | nil =>
+    intro g hg
+    change ContDiff ℝ 2 fun x => g x Index.null
+    exact (contDiff_apply ℝ ℝ Index.null).comp hg
+  | cons s₀ s ih =>
+    intro g hg
+    change ContDiff ℝ 2 fun x (v : Fin s₀) =>
+      (Curry.of (fun a => g x (Index.cons v a)) : Tensor ℝ s)
+    apply contDiff_pi'
+    intro v
+    apply ih
+    apply contDiff_pi'
+    intro a
+    exact (contDiff_apply ℝ ℝ (Index.cons v a)).comp hg
+
 /-- `DirectImpl.transpose`: a permutation of the indices is a linear isometry. -/
 theorem contDiff_transpose {s : Shape} (σ : Equiv.Perm (Fin s.length))
-    [NormedAddCommGroup (Tensor ℝ s)] [NormedSpace ℝ (Tensor ℝ s)]
-    [NormedAddCommGroup (Tensor ℝ (List.ofFn fun i => s.get (σ i)))]
-    [NormedSpace ℝ (Tensor ℝ (List.ofFn fun i => s.get (σ i)))]
     {f : X → Tensor ℝ s} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (f x).transpose σ := by
-  sorry
+  apply contDiff_curryOf
+  apply contDiff_pi'
+  intro i
+  exact contDiff_curryGet _ hf
 
 /-- `DirectImpl.broadcast`: duplicating entries along new axes is a linear isometry. -/
 theorem contDiff_broadcast {s : List (ℕ × Bool)}
