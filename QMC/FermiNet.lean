@@ -732,7 +732,10 @@ theorem contDiff_eval_enDist (N N_nuc : ℕ)
 theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N,3]}
     (hr : ContDiff ℝ 2 r) :
     ContDiff ℝ 2 fun x => (pairDisp N).eval (r x) := by
-  sorry
+  simp only [pairDisp, reduce_soir, reduce_xla]
+  refine Xla.contDiff_tensorMap₂_sub ?_ ?_
+  · exact Xla.contDiff_broadcast hr
+  · exact Xla.contDiff_broadcast hr
 
 /-- Same-spin distance `√(‖rⱼ - rᵢ‖² + ε)`; `ε > 0` keeps `sqrt` off `0`. -/
 theorem contDiff_eval_pairDist (N : ℕ)
