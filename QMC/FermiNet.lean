@@ -776,7 +776,7 @@ theorem contDiff_eval_posScalar (off : ℕ) {p : X → Tensor ℝ [N_PARAM]}
 /-- Electron–nucleus displacement: a difference of coordinates. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_enDisp (N N_nuc : ℕ)
-    {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]}
+    {r : X → Tensor ℝ [N, 3]} {R : X → Tensor ℝ [N_nuc, 3]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) :
     ContDiff ℝ 2 fun x => (enDisp N N_nuc).eval (r x) (R x) := by
   simp only [enDisp, reduce_soir, reduce_xla]
@@ -820,7 +820,7 @@ private theorem broadcast_pos (N N_nuc : ℕ) (e : ℝ) (he : 0 < e)
 argument is `≥ ε = exp θ > 0` — bounded away from the crease of `sqrt` at `0`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_enDist (N N_nuc : ℕ)
-    {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    {r : X → Tensor ℝ [N, 3]} {R : X → Tensor ℝ [N_nuc, 3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (enDist N N_nuc).eval (r x) (R x) (θ x) := by
   simp only [enDist, reduce_soir, reduce_xla]
@@ -836,7 +836,7 @@ theorem contDiff_eval_enDist (N N_nuc : ℕ)
 
 /-- Same-spin displacement: a difference of coordinates. -/
 @[contDiff_eval_rule]
-theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N,3]}
+theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N, 3]}
     (hr : ContDiff ℝ 2 r) :
     ContDiff ℝ 2 fun x => (pairDisp N).eval (r x) := by
   simp only [pairDisp, reduce_soir, reduce_xla]
@@ -845,7 +845,7 @@ theorem contDiff_eval_pairDisp (N : ℕ) {r : X → Tensor ℝ [N,3]}
 /-- Same-spin distance `√(‖rⱼ - rᵢ‖² + ε)`; `ε > 0` keeps `sqrt` off `0`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_pairDist (N : ℕ)
-    {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    {r : X → Tensor ℝ [N, 3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (pairDist N).eval (r x) (θ x) := by
   simp only [pairDist, reduce_soir, reduce_xla]
@@ -862,7 +862,7 @@ theorem contDiff_eval_pairDist (N : ℕ)
 /-- Opposite-spin displacement. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_pairDispCross (N N' : ℕ)
-    {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]}
+    {r : X → Tensor ℝ [N, 3]} {r' : X → Tensor ℝ [N', 3]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') :
     ContDiff ℝ 2 fun x => (pairDispCross N N').eval (r x) (r' x) := by
   simp only [pairDispCross, reduce_soir, reduce_xla]
@@ -871,7 +871,7 @@ theorem contDiff_eval_pairDispCross (N N' : ℕ)
 /-- Opposite-spin distance, `sqrt` again guarded by `ε > 0`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_pairDistCross (N N' : ℕ)
-    {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
+    {r : X → Tensor ℝ [N, 3]} {r' : X → Tensor ℝ [N', 3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (pairDistCross N N').eval (r x) (r' x) (θ x) := by
   simp only [pairDistCross, reduce_soir, reduce_xla]
@@ -891,7 +891,7 @@ theorem contDiff_eval_pairDistCross (N N' : ℕ)
 (the contractum is fixed index data) plus the charge embedding, then `tanh`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
-    {r : X → Tensor ℝ [N,3]} {R : X → Tensor ℝ [N_nuc,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    {r : X → Tensor ℝ [N, 3]} {R : X → Tensor ℝ [N_nuc, 3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hR : ContDiff ℝ 2 R) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (oneStreamInit N N_nuc).eval (r x) (R x) Z (θ x) := by
   have hZ : NeZero Z_TAB := ⟨by decide⟩
@@ -916,7 +916,8 @@ theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
             (Fin.intCast (Tensor.map₂ (fun x1 x2 : ℤ => x1 % x2) Z (fun _ => (Z_TAB : ℤ)) v))
         apply contDiff_pi'
         intro v
-        exact (contDiff_apply ℝ ℝ (Fin.intCast (Tensor.map₂ (fun x1 x2 : ℤ => x1 % x2) Z (fun _ => (Z_TAB : ℤ)) v))).comp
+        exact (contDiff_apply ℝ ℝ
+          (Fin.intCast (Tensor.map₂ (fun x1 x2 : ℤ => x1 % x2) Z (fun _ => (Z_TAB : ℤ)) v))).comp
           (contDiff_eval_paramBlock OFF_ZTAB [Z_TAB] hθ)
       · exact contDiff_eval_paramBlock OFF_WZ [N_nuc, F] hθ
   · apply Xla.contDiff_broadcast
@@ -926,7 +927,7 @@ theorem contDiff_eval_oneStreamInit (N N_nuc : ℕ) (Z : Tensor ℤ [N_nuc])
 `tanh`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamInit (N : ℕ)
-    {r : X → Tensor ℝ [N,3]} {θ : X → Tensor ℝ [N_PARAM]}
+    {r : X → Tensor ℝ [N, 3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamInit N).eval (r x) (θ x) := by
   simp only [twoStreamInit, reduce_soir, reduce_xla]
@@ -935,7 +936,7 @@ theorem contDiff_eval_twoStreamInit (N : ℕ)
 /-- Initial opposite-spin two-electron stream. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamInitCross (N N' : ℕ)
-    {r : X → Tensor ℝ [N,3]} {r' : X → Tensor ℝ [N',3]} {θ : X → Tensor ℝ [N_PARAM]}
+    {r : X → Tensor ℝ [N, 3]} {r' : X → Tensor ℝ [N', 3]} {θ : X → Tensor ℝ [N_PARAM]}
     (hr : ContDiff ℝ 2 r) (hr' : ContDiff ℝ 2 r') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamInitCross N N').eval (r x) (r' x) (θ x) := by
   simp only [twoStreamInitCross, reduce_soir, reduce_xla]
@@ -945,7 +946,7 @@ theorem contDiff_eval_twoStreamInitCross (N N' : ℕ)
 `einsum` contractions (fixed weights) of `C²` inputs, then `tanh`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_oneStreamLayer (N N' off : ℕ)
-    {h : X → Tensor ℝ [N,F]} {g : X → Tensor ℝ [N,N,F]} {gC : X → Tensor ℝ [N,N',F]}
+    {h : X → Tensor ℝ [N, F]} {g : X → Tensor ℝ [N, N, F]} {gC : X → Tensor ℝ [N, N', F]}
     {θ : X → Tensor ℝ [N_PARAM]}
     (hh : ContDiff ℝ 2 h) (hg : ContDiff ℝ 2 g) (hgC : ContDiff ℝ 2 gC) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (oneStreamLayer N N' off).eval (h x) (g x) (gC x) (θ x) := by
@@ -955,7 +956,7 @@ theorem contDiff_eval_oneStreamLayer (N N' off : ℕ)
 /-- Same-spin two-electron stream update `g ← tanh(G g + H (h_i + h_j) + c)`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamLayer (N off : ℕ)
-    {g : X → Tensor ℝ [N,N,F]} {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
+    {g : X → Tensor ℝ [N, N, F]} {h : X → Tensor ℝ [N, F]} {θ : X → Tensor ℝ [N_PARAM]}
     (hg : ContDiff ℝ 2 g) (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamLayer N off).eval (g x) (h x) (θ x) := by
   simp only [twoStreamLayer, reduce_soir, reduce_xla]
@@ -965,7 +966,7 @@ theorem contDiff_eval_twoStreamLayer (N off : ℕ)
 `g^{σσ̄} ← tanh(G' g^{σσ̄} + H' (h_i^σ + h_j^{σ̄}) + c')`. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_twoStreamLayerCross (N N' off : ℕ)
-    {gC : X → Tensor ℝ [N,N',F]} {h : X → Tensor ℝ [N,F]} {h' : X → Tensor ℝ [N',F]}
+    {gC : X → Tensor ℝ [N, N', F]} {h : X → Tensor ℝ [N, F]} {h' : X → Tensor ℝ [N', F]}
     {θ : X → Tensor ℝ [N_PARAM]}
     (hgC : ContDiff ℝ 2 gC) (hh : ContDiff ℝ 2 h) (hh' : ContDiff ℝ 2 h') (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (twoStreamLayerCross N N' off).eval (gC x) (h x) (h' x) (θ x) := by
@@ -977,7 +978,7 @@ theorem contDiff_eval_twoStreamLayerCross (N N' off : ℕ)
 /-- Jastrow factor `Σᵢ w_J · hᵢ`: an `einsum` contraction with fixed weights. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_jastrow (N : ℕ)
-    {h : X → Tensor ℝ [N,F]} {θ : X → Tensor ℝ [N_PARAM]}
+    {h : X → Tensor ℝ [N, F]} {θ : X → Tensor ℝ [N_PARAM]}
     (hh : ContDiff ℝ 2 h) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (jastrow N).eval (h x) (θ x) := by
   simp only [jastrow, reduce_soir, reduce_xla]
@@ -988,7 +989,7 @@ parameters with the `C²` distances (its values are positive, as the caller need
 `exp (-·)`). -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_envelope (N N_nuc : ℕ)
-    {dist : X → Tensor ℝ [N,N_nuc]} {θ : X → Tensor ℝ [N_PARAM]}
+    {dist : X → Tensor ℝ [N, N_nuc]} {θ : X → Tensor ℝ [N_PARAM]}
     (hd : ContDiff ℝ 2 dist) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (envelope N N_nuc).eval (dist x) (θ x) := by
   simp only [envelope, reduce_soir, reduce_xla]
@@ -998,7 +999,7 @@ theorem contDiff_eval_envelope (N N_nuc : ℕ)
 weights, multiplied by the `C²` envelope. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_orbitalMatrix (N : ℕ)
-    {h : X → Tensor ℝ [N,F]} {envExp : X → Tensor ℝ [K,N,N]} {θ : X → Tensor ℝ [N_PARAM]}
+    {h : X → Tensor ℝ [N, F]} {envExp : X → Tensor ℝ [K, N, N]} {θ : X → Tensor ℝ [N_PARAM]}
     (hh : ContDiff ℝ 2 h) (he : ContDiff ℝ 2 envExp) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (orbitalMatrix N).eval (h x) (envExp x) (θ x) := by
   simp only [orbitalMatrix, reduce_soir, reduce_xla]
@@ -1007,7 +1008,7 @@ theorem contDiff_eval_orbitalMatrix (N : ℕ)
 /-- `detExpr N` applied to a matrix-valued `C²` function: `Xla.contDiff_det` behind
 the `Expr` wrapper used by the `vmap` in `detBlock`. -/
 @[contDiff_eval_rule]
-theorem contDiff_eval_detExpr (N : ℕ) {f : X → Tensor ℝ [N,N]} (hf : ContDiff ℝ 2 f) :
+theorem contDiff_eval_detExpr (N : ℕ) {f : X → Tensor ℝ [N, N]} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => (detExpr N).eval (f x) := by
   simp only [detExpr, reduce_soir, reduce_xla]
   exact Xla.contDiff_det hf
@@ -1018,7 +1019,7 @@ is the only node whose semantics is `Index`-level rather than entrywise; it is t
 `det` leaf applied to each slice, so it is `C²` entrywise in the orbital tensor. -/
 @[contDiff_eval_rule]
 theorem contDiff_eval_detBlock (N : ℕ)
-    {orb : X → Tensor ℝ [K,N,N]} {θ : X → Tensor ℝ [N_PARAM]}
+    {orb : X → Tensor ℝ [K, N, N]} {θ : X → Tensor ℝ [N_PARAM]}
     (ho : ContDiff ℝ 2 orb) (hθ : ContDiff ℝ 2 θ) :
     ContDiff ℝ 2 fun x => (detBlock N).eval (orb x) (θ x) := by
   -- `vmap`'s `DirectImpl` semantics exposes the batched function through `Curry`/`Index`
@@ -1048,7 +1049,7 @@ theorem `contDiff_fermiNetAnsatz` below then only checks the two calls to
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_hU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hU0Raw, reduce_soir, reduce_xla]
@@ -1056,7 +1057,7 @@ theorem contDiff_eval_hU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_hD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hD0Raw, reduce_soir, reduce_xla]
@@ -1064,7 +1065,7 @@ theorem contDiff_eval_hD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gU0Raw, reduce_soir, reduce_xla]
@@ -1072,7 +1073,7 @@ theorem contDiff_eval_gU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gD0Raw, reduce_soir, reduce_xla]
@@ -1080,7 +1081,7 @@ theorem contDiff_eval_gD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gUD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gUD0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gUD0Raw, reduce_soir, reduce_xla]
@@ -1088,7 +1089,7 @@ theorem contDiff_eval_gUD0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARA
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gDU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gDU0Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gDU0Raw, reduce_soir, reduce_xla]
@@ -1096,7 +1097,7 @@ theorem contDiff_eval_gDU0Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARA
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_hU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hU1Raw, reduce_soir, reduce_xla]
@@ -1104,7 +1105,7 @@ theorem contDiff_eval_hU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_hD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hD1Raw, reduce_soir, reduce_xla]
@@ -1112,7 +1113,7 @@ theorem contDiff_eval_hD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gU1Raw, reduce_soir, reduce_xla]
@@ -1120,7 +1121,7 @@ theorem contDiff_eval_gU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gD1Raw, reduce_soir, reduce_xla]
@@ -1128,7 +1129,7 @@ theorem contDiff_eval_gD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gUD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gUD1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gUD1Raw, reduce_soir, reduce_xla]
@@ -1136,7 +1137,7 @@ theorem contDiff_eval_gUD1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARA
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_gDU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (gDU1Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [gDU1Raw, reduce_soir, reduce_xla]
@@ -1144,7 +1145,7 @@ theorem contDiff_eval_gDU1Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARA
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_hU2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hU2Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hU2Raw, reduce_soir, reduce_xla]
@@ -1152,7 +1153,7 @@ theorem contDiff_eval_hU2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 
 @[contDiff_eval_rule]
 theorem contDiff_eval_hD2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R : Tensor ℝ [N_nuc,3]) (Z : Tensor ℤ [N_nuc]) :
+    (R : Tensor ℝ [N_nuc, 3]) (Z : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 fun p : Config N_up N_down =>
       (hD2Raw N_nuc N_up N_down).eval θ R Z p.1 p.2 := by
   simp only [hD2Raw, reduce_soir, reduce_xla]
@@ -1161,7 +1162,7 @@ theorem contDiff_eval_hD2Raw (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM
 /-- The evaluated program is `C²` in the electron positions: the composition of the
 node lemmas and stage lemmas above along the dataflow (see the section docstring). -/
 theorem contDiff_fermiNetAnsatz (N_nuc N_up N_down : ℕ) (θ : Tensor ℝ [N_PARAM])
-    (R_nuc : Tensor ℝ [N_nuc,3]) (Z_nuc : Tensor ℤ [N_nuc]) :
+    (R_nuc : Tensor ℝ [N_nuc, 3]) (Z_nuc : Tensor ℤ [N_nuc]) :
     ContDiff ℝ 2 (fun p : Config N_up N_down =>
       (fermiNetAnsatz N_nuc N_up N_down).eval θ R_nuc Z_nuc p.1 p.2) := by
   simp only [fermiNetAnsatz, reduce_soir, reduce_xla]
