@@ -315,13 +315,23 @@ theorem contDiff_transpose {s : Shape} (σ : Equiv.Perm (Fin s.length))
 
 /-- `DirectImpl.broadcast`: duplicating entries along new axes is a linear isometry. -/
 theorem contDiff_broadcast {s : List (ℕ × Bool)}
-    [NormedAddCommGroup (Tensor ℝ (Tensor.preBroadcast s))]
-    [NormedSpace ℝ (Tensor ℝ (Tensor.preBroadcast s))]
-    [NormedAddCommGroup (Tensor ℝ (s.map Prod.fst))]
-    [NormedSpace ℝ (Tensor ℝ (s.map Prod.fst))]
     {f : X → Tensor ℝ (Tensor.preBroadcast s)} (hf : ContDiff ℝ 2 f) :
     ContDiff ℝ 2 fun x => Tensor.broadcast s (f x) := by
-  sorry
+  induction s with
+  | nil => exact hf
+  | cons hd tl ih =>
+    obtain ⟨a, b⟩ := hd
+    cases b with
+    | true =>
+      change ContDiff ℝ 2 fun x (i : Fin a) => Tensor.broadcast tl (f x i)
+      apply contDiff_pi'
+      intro i
+      exact ih ((contDiff_apply ℝ _ i).comp hf)
+    | false =>
+      change ContDiff ℝ 2 fun x (_ : Fin a) => Tensor.broadcast tl (f x)
+      apply contDiff_pi'
+      intro _
+      exact ih hf
 
 /-- `DirectImpl.unflatten`: reinterpreting a flat index as a multi-index is a linear
 isometry. -/
