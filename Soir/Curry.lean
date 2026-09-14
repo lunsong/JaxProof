@@ -171,6 +171,15 @@ theorem Curry.get_map {γ : List ι} (f : α → β) (g : Curry m γ α) (i : In
   | nil => rfl
   | cons γ₀ γs ih => exact ih (g (i ⟨0, by simp⟩)) fun r ↦ i r.succ
 
+/-- `Curry.get` distributes over `Curry.map₂`. -/
+@[reduce_soir]
+theorem Curry.get_map₂ {γ : List ι} (f : α → β → μ) (x : Curry m γ α) (y : Curry m γ β)
+    (i : Index m γ) :
+    (Curry.map₂ f x y).get i = f (x.get i) (y.get i) := by
+  induction γ with
+  | nil => rfl
+  | cons γ₀ γs ih => exact ih (x (i 0)) (y (i 0)) (fun r ↦ i r.succ)
+
 @[reduce_soir]
 theorem Index.cons_zero {γ₀ : ι} {γ : List ι} (x₀ : m γ₀) (x : Index m γ) :
     Index.cons x₀ x 0 = x₀ :=
@@ -272,6 +281,21 @@ theorem Curry.arg_two {γ₀ γ₁ γ₂ : ι} {γ : List ι} :
 @[reduce_soir]
 theorem Curry.arg_succ {γ₀ : ι} {γ : List ι} (i : Fin γ.length) :
     Curry.arg (m := m) (γ := γ₀ :: γ) i.succ = fun _ ↦ Curry.arg i := rfl
+
+/-- `Curry.get` of `Curry.arg` is the corresponding projection of the index. -/
+@[reduce_soir]
+theorem Curry.get_arg {γ : List ι} (i : Fin γ.length) (x : Index m γ) :
+    (Curry.arg (m := m) i).get x = x i := by
+  induction γ with
+  | nil => exact i.elim0
+  | cons γ₀ γs ih =>
+    revert i
+    refine Fin.cases ?_ ?_
+    · rw [Curry.arg_zero]
+      exact Curry.get_pure _ _
+    · intro i
+      rw [Curry.arg_succ]
+      exact ih i (fun r ↦ x r.succ)
 
 /-!
 ### A simproc for eliminating `Index` constructors at literal positions

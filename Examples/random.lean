@@ -125,54 +125,10 @@ def noiseMul (f : Random.SimpleExpr [.key] .data) : Random.SimpleExpr [.key] .da
     let x₁ := f.apply k;
     Random.mul x₀ x₁
 
-def key_mono_aux (k : ℕ) {α : RandType} (x : α.impl) : Prop :=
-  match α with
-  | .key => k ≤ x
-  | .data => True
-
-def key_mono_aux'
-  {args outs : List RandType}
-  (expr : Soir.Expr RandOp args outs) : Prop :=
-  match args with
-  | [.key] => ∀ (k : ℕ) (i : Fin outs.length), key_mono_aux k (expr.eval RandType.impl k i)
-  | _ => True
-
-#print Lean.Meta.TransparencyMode
-
-theorem key_mono
-  {args outs : List RandType}
-  (expr : Soir.Expr RandOp args outs) : key_mono_aux' expr :=
-  match expr with
-  | .bind _ _ _ (args := [])
-  | .bind _ _ _ (args := _ :: _ :: _)
-  | .bind _ _ _ (args := [.data])
-  | .nil (args := [])
-  | .nil (args := _ :: _ :: _)
-  | .nil (args := [.key])
-  | .arg _ (args := [])
-  | .arg _ (args := _ :: _ :: _)
-  | .arg _ (args := [.data])
-  | .apply _ _ (args := [])
-  | .apply _ _ (args := _ :: _ :: _)
-  | .apply _ _ (args := [.data])
-  | .append _ _ (args := [])
-  | .select _ _ (args := [])
-  | .select _ _ (args := _ :: _ :: _)
-  | .select _ _ (args := [.data])
-  | .append _ _ (args := [])
-  | .append _ _ (args := _ :: _ :: _)
-  | .append _ _ (args := [.data])
-  | .nil (args := [.data]) => by simp [key_mono_aux']
-  | .append x y (outs := outs) (outs' := outs') (args := [.key]) => by
-    simp [key_mono_aux', key_mono_aux]
-    intro k i
-    split
-    · 
-
-
-
-        
-
+/-- The noise at key `k` is independent of the rest of the program, so the
+expectation of the product vanishes. -/
 theorem mean_noiseMul (k : ℕ) (f : Random.SimpleExpr [.key] .data) :
-    ((noiseMul f).eval k).mean = 0 := sorry
+    ((noiseMul f).eval k).mean = 0 := by
+  simp only [noiseMul, reduce_random, reduce_soir]
+  exact RandVar.mean_mul_normal_tail k _ (SimpleExpr.measurable_eval_tail (k + 1) f)
 
