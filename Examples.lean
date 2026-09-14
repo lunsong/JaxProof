@@ -10,3 +10,4 @@ import Examples.attention
 import Examples.cooToDense
 import Examples.spmm
 import Examples.denseToCoo
+import Examples.random

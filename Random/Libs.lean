@@ -32,8 +32,16 @@ def neg (x : Expr RandOp args [.data]) : Expr RandOp args [.data] :=
   bindPrim .neg x
 
 @[reduce_random]
+def ofNat (n : ℕ) : Expr RandOp args [.data] :=
+  bindPrim (.ofNat n) .nil
+
+@[reduce_random]
 def normal (k : Expr RandOp args [.key]) : Expr RandOp args [.data] :=
   bindPrim .normal k
+
+@[reduce_random]
+def uniform (k : Expr RandOp args [.key]) : Expr RandOp args [.data] :=
+  bindPrim .uniform k
 
 @[reduce_random]
 def key : Expr RandOp args [.key] :=
