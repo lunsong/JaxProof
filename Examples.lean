@@ -7,3 +7,6 @@ import Examples.Coulomb
 import Examples.offDiag
 import Examples.transpose
 import Examples.attention
+import Examples.cooToDense
+import Examples.spmm
+import Examples.denseToCoo
