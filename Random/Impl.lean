@@ -207,7 +207,6 @@ noncomputable instance RandVarImpl : SimpleImpl RandPrimOp RandType.impl where
   | .mul => fun f g => f * g
   | .div => fun f g => f / g
   | .neg => fun f => -f
-  | .key => 0
   | .shuffle => (· + 1)
   | .normal => fun k => fun x => x (.normal k)
   | .uniform => fun k => fun x => x (.uniform k)

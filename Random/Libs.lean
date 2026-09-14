@@ -44,10 +44,6 @@ def uniform (k : Expr RandOp args [.key]) : Expr RandOp args [.data] :=
   bindPrim .uniform k
 
 @[reduce_random]
-def key : Expr RandOp args [.key] :=
-  bindPrim .key .nil
-
-@[reduce_random]
 def shuffle (k : Expr RandOp args [.key]) : Expr RandOp args [.key] :=
   bindPrim .shuffle k
 

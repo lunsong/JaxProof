@@ -13,7 +13,6 @@ inductive RandPrimOp : List RandType → RandType → Type where
   | mul : RandPrimOp [.data, .data] .data
   | div : RandPrimOp [.data, .data] .data
   | neg : RandPrimOp [.data] .data
-  | key : RandPrimOp [] .key
   | shuffle : RandPrimOp [.key] .key
   | normal : RandPrimOp [.key] .data
   | uniform : RandPrimOp [.key] .data
@@ -27,7 +26,6 @@ def RandPrimOp.toString {args : List RandType} {out : RandType} : RandPrimOp arg
   | neg => "neg"
   | normal => "normal"
   | uniform => "uniform"
-  | key => "key"
   | shuffle => "shuffle"
 
 instance (args : List RandType) (out : RandType) : ToString (RandPrimOp args out) :=
