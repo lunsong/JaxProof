@@ -2,44 +2,31 @@ import Soir.Core
 
 namespace Random
 
-/-- Data universe of the Random dialect: ordinary float scalars, probability
-measures over the reals, and pseudo-random number generator keys. -/
-inductive DataType : Type where
-  | real : DataType
-  | random : DataType
-
-def DataType.max : DataType → DataType → DataType
-  | .random, _ => .random
-  | _, .random => .random
-  | .real, .real => .real
-
 inductive RandType : Type where
-  | data : DataType → RandType
+  | data : RandType
   | key : RandType
 
-instance : ToString RandType where
-  toString
-  | .data .real => "real"
-  | .data .random => "random"
-  | .key => "key"
-
 inductive RandPrimOp : List RandType → RandType → Type where
-  | add {α β : DataType} : RandPrimOp [.data α, .data α] (.data (DataType.max α β))
-  | sub {α β : DataType} : RandPrimOp [.data α, .data α] (.data (DataType.max α β))
-  | mul {α β : DataType} : RandPrimOp [.data α, .data α] (.data (DataType.max α β))
-  | div {α β : DataType} : RandPrimOp [.data α, .data α] (.data (DataType.max α β))
-  | neg {α : DataType} : RandPrimOp [.data α] (.data α)
+  | ofNat : ℕ → RandPrimOp [] .data
+  | add : RandPrimOp [.data, .data] .data
+  | sub : RandPrimOp [.data, .data] .data
+  | mul : RandPrimOp [.data, .data] .data
+  | div : RandPrimOp [.data, .data] .data
+  | neg : RandPrimOp [.data] .data
   | key : RandPrimOp [] .key
   | shuffle : RandPrimOp [.key] .key
-  | normal : RandPrimOp [.key] (.data .random)
+  | normal : RandPrimOp [.key] .data
+  | uniform : RandPrimOp [.key] .data
 
 def RandPrimOp.toString {args : List RandType} {out : RandType} : RandPrimOp args out → String
+  | ofNat n => s!"ofNat {n}"
   | add => "add"
   | sub => "sub"
   | mul => "mul"
   | div => "div"
   | neg => "neg"
   | normal => "normal"
+  | uniform => "uniform"
   | key => "key"
   | shuffle => "shuffle"
 

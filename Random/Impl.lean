@@ -8,34 +8,27 @@ namespace Random
 open Soir
 open MeasureTheory
 
+inductive RandVarName where
+  | normal : ℕ → RandVarName
+  | uniform : ℕ → RandVarName
+deriving DecidableEq
+
 /-- Semantics of a `measure` value: the joint law of the independent
 standard normal coordinates the value depends on.
 
 `dependentOn` lists the keys (random variables) the value depends on, and
 `measure` is the joint law of those coordinates: the `i`-th coordinate of the
 measure corresponds to `dependentOn[i]`. -/
-structure MeasureImpl where
-  dependentOn : Finset ℕ
+structure RandVar where
+  dependentOn : Finset RandVarName
   measure : Measure (Fin dependentOn.card → ℝ)
 
-/-- The standard normal random variable associated with key `k`. -/
-noncomputable def MeasureImpl.normal (k : ℕ) : MeasureImpl where
-  dependentOn := {k}
-  measure :=
-    Measure.map (fun x : ℝ => fun _ : Fin [k].length => x)
-      (ProbabilityTheory.gaussianReal 0 1)
-
-/-- Product of two measures: the joint law of the independent coordinates of
-both. The dependency lists are concatenated. If the two measures depend on a
-common key the corresponding coordinates are treated as independent copies
-(the current semantics assumes disjoint dependencies). -/
-noncomputable def MeasureImpl.prod (m₁ m₂ : MeasureImpl) : MeasureImpl where
-  dependentOn := m₁.dependentOn ∪ m₂.dependentOn
+def RandVar.promote (S : Finset RandVarName) (x : RandVar) : RandVar where
+  dependentOn := x.dependentOn ∪ S
   measure := sorry
 
 abbrev RandType.impl : RandType → Type
-  | .data .real => ℝ
-  | .data .random => MeasureImpl
+  | .data => RandVar
   | .key => ℕ
 
 @[reduce_random]
