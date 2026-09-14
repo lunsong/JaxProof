@@ -109,6 +109,29 @@ def _eval_scatter(x, y, indices):
     return jnp.where(winner < n, update, x)
 
 
+def _eval_scatter_add(x, y, indices):
+    """
+    Scatter-add with Lean semantics (`DirectImpl.scatter_add`): every update
+    whose coordinates match a slot is summed into the base. Indices wrap modulo
+    each axis (like `Fin.intCast`), are flattened with row-major strides, and
+    accumulated with `at[].add`, which is order-independent and jit/grad-friendly.
+    """
+    n = y.shape[0]
+    if n == 0:
+        return x
+    x = jnp.asarray(x)
+    if 0 in x.shape:
+        return x
+    lin = jnp.zeros(n, dtype=jnp.int32)
+    stride = 1
+    for axis in range(x.ndim - 1, -1, -1):
+        i = jnp.asarray(indices[axis], dtype=jnp.int32) % x.shape[axis]
+        lin = lin + i * stride
+        stride *= x.shape[axis]
+    acc = jnp.zeros((stride,), dtype=x.dtype).at[lin].add(y)
+    return x + acc.reshape(x.shape)
+
+
 def _eval_gather(x, indices):
     return x[tuple(jnp.asarray(i) for i in indices)]
 
@@ -514,6 +537,11 @@ def _eval_where(op_str, vals, lib_refs, libs, parent_args):
 @register_op("scatter")
 def _eval_scatter_op(op_str, vals, lib_refs, libs, parent_args):
     return _eval_scatter(vals[0], vals[1], vals[2:])
+
+
+@register_op("scatter_add")
+def _eval_scatter_add_op(op_str, vals, lib_refs, libs, parent_args):
+    return _eval_scatter_add(vals[0], vals[1], vals[2:])
 
 
 @register_op("gather")

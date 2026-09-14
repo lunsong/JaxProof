@@ -88,6 +88,8 @@ inductive XlaPrimOp : List TensorType → TensorType → Type where
     XlaPrimOp (⟨α, s⟩ :: List.replicate s.length ⟨.int, s'⟩) ⟨α, s'⟩
   | scatter {α : DType} {s : Shape} {n : ℕ} :
     XlaPrimOp (⟨α, s⟩ :: ⟨α, [n]⟩ :: List.replicate s.length ⟨.int, [n]⟩) ⟨α, s⟩
+  | scatter_add {α : DType} {s : Shape} {n : ℕ} :
+    XlaPrimOp (⟨α, s⟩ :: ⟨α, [n]⟩ :: List.replicate s.length ⟨.int, [n]⟩) ⟨α, s⟩
   | iota {n : ℕ} : XlaPrimOp [] ⟨.int, [n]⟩
   | mul {σ : TensorType} : XlaPrimOp [σ, σ] σ
   | mod {σ : TensorType} : XlaPrimOp [σ, σ] σ
@@ -176,6 +178,7 @@ def XlaPrimOp.toString {args : List TensorType} {out : TensorType} : XlaPrimOp a
   | neg => "neg"
   | ofNat (σ := ⟨α, s⟩) n => s!"const {α} {s} {n}"
   | scatter => "scatter"
+  | scatter_add => "scatter_add"
   | sin => "sin"
   | sorted => "sorted"
   | sqrt => "sqrt"

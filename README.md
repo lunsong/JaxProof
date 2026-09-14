@@ -69,7 +69,7 @@ result = evaluate(ir, x)
 # result: [0, 1, 0, 2, 0, 0, 3, 0, 4, 0, 0, 5]
 ```
 
-Supported operations include: `const`, `zeros`, `iota`, `add`, `sub`, `mul`, `div`, `neg`, `sqrt`, `sin`, `cos`, `exp`, `log`, `tanh`, `ceil`, `floor`, `sum`, `cumsum`, `transpose`, `broadcast`, `dot_general`, `where`, `scatter`, `gather`, `concat`, `sorted`, `repeat` (fori_loop), and `call` (function application).
+Supported operations include: `const`, `zeros`, `iota`, `add`, `sub`, `mul`, `div`, `neg`, `sqrt`, `sin`, `cos`, `exp`, `log`, `tanh`, `ceil`, `floor`, `sum`, `cumsum`, `transpose`, `broadcast`, `dot_general`, `where`, `scatter`, `scatter_add`, `gather`, `concat`, `sorted`, `repeat` (fori_loop), and `call` (function application).
 
 Run the test suite:
 ```bash

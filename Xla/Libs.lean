@@ -82,6 +82,14 @@ def scatter {α : DType} {s : Shape} {n : ℕ}
     bindPrim (.scatter (α := α) (s := s) (n := n)) <| (x.append y).append <| Expr.join.get i
 
 @[reduce_xla]
+def scatter_add {α : DType} {s : Shape} {n : ℕ}
+  (x : Expr XlaOp args [⟨α, s⟩]) (y : Expr XlaOp args [⟨α, [n]⟩]) :
+   Curry (fun ι ↦ Expr XlaOp args [ι])
+   (List.replicate s.length ⟨.int, [n]⟩) (Expr XlaOp args [⟨α, s⟩]) :=
+  Curry.of fun i =>
+    bindPrim (.scatter_add (α := α) (s := s) (n := n)) <| (x.append y).append <| Expr.join.get i
+
+@[reduce_xla]
 def sub {σ : TensorType} (x y : Expr XlaOp args [σ]) : Expr XlaOp args [σ] :=
   bindPrim .sub (x.append y)
 

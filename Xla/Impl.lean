@@ -45,6 +45,21 @@ def DirectImpl.scatter {α : DType} {s : Shape} {n : ℕ}
       Curry.pure x
 
 @[reduce_xla]
+def DirectImpl.scatter_add {α : DType} {s : Shape} {n : ℕ}
+  (x : DirectImpl ⟨α, s⟩) (y : DirectImpl ⟨α, [n]⟩) :
+    Curry DirectImpl (List.replicate s.length ⟨.int, [n]⟩) (DirectImpl ⟨α, s⟩) :=
+  match α with
+  | .int
+  | .float =>
+    if hs : ∀ i : Fin s.length, s[i] ≠ 0 then
+      have (i : Fin s.length) : NeZero s[i] := ⟨hs i⟩
+      Curry.of <| fun i =>
+      let i : Fin n → Index Fin s := fun k r => Fin.intCast <| i.replicate r k
+      Curry.of fun r => x.get r + ∑ k, if i k = r then y k else 0
+   else
+      Curry.pure x
+
+@[reduce_xla]
 def DirectImpl.zero {args : List TensorType} {out : TensorType} :
     Curry DirectImpl args (DirectImpl out) :=
   Curry.pure <|
@@ -98,6 +113,7 @@ noncomputable instance : SimpleImpl XlaPrimOp DirectImpl where
         x.curry'.map fun (x : Fin _ → _) i =>
           ((List.ofFn x).mergeSort).get <| i.cast <| by simp
   | .scatter => DirectImpl.scatter
+  | .scatter_add => DirectImpl.scatter_add
   | .iota => fun i => i
   | .zeros (σ := σ) => match σ with | ⟨.int, _⟩ | ⟨.float, _⟩ => Curry.pure 0
   | .choice (α := α) => fun c x y=>
