@@ -5,6 +5,7 @@ namespace Random
 inductive RandType : Type where
   | data : RandType
   | key : RandType
+deriving DecidableEq
 
 inductive RandPrimOp : List RandType → RandType → Type where
   | ofNat : ℕ → RandPrimOp [] .data
@@ -16,6 +17,7 @@ inductive RandPrimOp : List RandType → RandType → Type where
   | shuffle : RandPrimOp [.key] .key
   | normal : RandPrimOp [.key] .data
   | uniform : RandPrimOp [.key] .data
+deriving DecidableEq
 
 def RandPrimOp.toString {args : List RandType} {out : RandType} : RandPrimOp args out → String
   | ofNat n => s!"ofNat {n}"
